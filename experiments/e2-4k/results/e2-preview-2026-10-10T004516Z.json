@@ -1,0 +1,661 @@
+{
+  "checks" : [
+    {
+      "compositorRequests" : 302,
+      "copyMs" : {
+        "max" : 184.09790000000001,
+        "mean" : 6.1387999999999998,
+        "n" : 302,
+        "p50" : 3.2212999999999998,
+        "p95" : 9.9006000000000007
+      },
+      "delivered" : 300,
+      "deliveredUnique" : 297,
+      "duplicateRequestFrames" : [
+        0
+      ],
+      "endTimeDelivered" : 1,
+      "endUsedHeld" : 1,
+      "footprintMiB" : [
+        157.76669999999999,
+        449.22039999999998
+      ],
+      "id" : "V1-1",
+      "inexactRequests" : [
+
+      ],
+      "issues" : [
+
+      ],
+      "loadAvgAfter" : [
+        178.98390000000001,
+        54.577599999999997,
+        23.634799999999998
+      ],
+      "loadAvgBefore" : [
+        148.72120000000001,
+        44.671900000000001,
+        19.829599999999999
+      ],
+      "maxInFlight" : 1,
+      "name" : "재생 0→끝(4K, volume 0, 창 부착): 비디오 출력 전달 프레임마다 타임라인·소스·소스 프레임·상자·자막 = 독립 기대값, 끝 시각 프레임 = 299 유지, 합성기 오류 0. 누락 개수는 기록(기준 없음)",
+      "notRequested" : 0,
+      "notRequestedFrames" : [
+
+      ],
+      "overlayMs" : {
+        "max" : 9.8733000000000004,
+        "mean" : 1.7881,
+        "n" : 302,
+        "p50" : 1.8832,
+        "p95" : 3.4750000000000001
+      },
+      "pollGapMaxMs" : 124.82729999999999,
+      "pollGapsOver20ms" : 3,
+      "pollLatenessMs" : {
+        "max" : 30.101600000000001,
+        "mean" : -1.0027999999999999,
+        "n" : 300,
+        "p50" : 1.778,
+        "p95" : 3.4723000000000002
+      },
+      "reachedEnd" : true,
+      "requestedButNotDelivered" : 3,
+      "requestedButNotDeliveredFrames" : [
+        70,
+        71,
+        72
+      ],
+      "requestedUnique" : 300,
+      "result" : "PASS",
+      "sourceFrameNilRequests" : [
+
+      ],
+      "wallSeconds" : 10.6713
+    },
+    {
+      "clicks" : [
+        {
+          "responseFrame" : 76,
+          "status" : "pass",
+          "t" : 2.5167000000000002
+        },
+        {
+          "responseFrame" : 196,
+          "status" : "pass",
+          "t" : 6.5167000000000002
+        },
+        {
+          "responseFrame" : 256,
+          "status" : "pass",
+          "t" : 8.5167000000000002
+        }
+      ],
+      "clipBandNonZero" : [
+
+      ],
+      "id" : "V2-1",
+      "isolationFramesChecked" : 285,
+      "name" : "재생 중 전달 프레임의 스펙트럼: 선택 오디오 톤·무음·클릭 반응, 클립 오디오 밴드 0(전달된 프레임만 판정)",
+      "quietFramesChecked" : 108,
+      "quietNonZero" : [
+
+      ],
+      "result" : "PASS",
+      "toneFramesChecked" : 159,
+      "toneMismatch" : [
+
+      ],
+      "toneMismatchBarHeights" : {
+
+      }
+    },
+    {
+      "compositorRequests" : 302,
+      "copyMs" : {
+        "max" : 292.59719999999999,
+        "mean" : 5.0701999999999998,
+        "n" : 302,
+        "p50" : 3.0964,
+        "p95" : 8.0414999999999992
+      },
+      "delivered" : 298,
+      "deliveredUnique" : 296,
+      "duplicateRequestFrames" : [
+        0
+      ],
+      "endTimeDelivered" : 1,
+      "endUsedHeld" : 1,
+      "footprintMiB" : [
+        449.2516,
+        429.56420000000003
+      ],
+      "id" : "V1-2",
+      "inexactRequests" : [
+
+      ],
+      "issues" : [
+        "2: sourceFrame 31 != 32",
+        "2: boxX 826 != 848"
+      ],
+      "loadAvgAfter" : [
+        214.59960000000001,
+        66.3506,
+        28.176300000000001
+      ],
+      "loadAvgBefore" : [
+        178.98390000000001,
+        54.577599999999997,
+        23.634799999999998
+      ],
+      "maxInFlight" : 1,
+      "name" : "재생 0→끝(4K, volume 0, 창 부착): 비디오 출력 전달 프레임마다 타임라인·소스·소스 프레임·상자·자막 = 독립 기대값, 끝 시각 프레임 = 299 유지, 합성기 오류 0. 누락 개수는 기록(기준 없음)",
+      "notRequested" : 0,
+      "notRequestedFrames" : [
+
+      ],
+      "overlayMs" : {
+        "max" : 10.5387,
+        "mean" : 1.786,
+        "n" : 302,
+        "p50" : 1.7481,
+        "p95" : 3.6528
+      },
+      "pollGapMaxMs" : 145.68450000000001,
+      "pollGapsOver20ms" : 9,
+      "pollLatenessMs" : {
+        "max" : 108.1122,
+        "mean" : 5.2724000000000002,
+        "n" : 298,
+        "p50" : 2.6533000000000002,
+        "p95" : 15.5097
+      },
+      "reachedEnd" : true,
+      "requestedButNotDelivered" : 4,
+      "requestedButNotDeliveredFrames" : [
+        35,
+        36,
+        37,
+        39
+      ],
+      "requestedUnique" : 300,
+      "result" : "FAIL",
+      "sourceFrameNilRequests" : [
+
+      ],
+      "wallSeconds" : 10.172800000000001
+    },
+    {
+      "clicks" : [
+        {
+          "responseFrame" : 76,
+          "status" : "pass",
+          "t" : 2.5167000000000002
+        },
+        {
+          "responseFrame" : 196,
+          "status" : "pass",
+          "t" : 6.5167000000000002
+        },
+        {
+          "responseFrame" : 256,
+          "status" : "pass",
+          "t" : 8.5167000000000002
+        }
+      ],
+      "clipBandNonZero" : [
+
+      ],
+      "id" : "V2-2",
+      "isolationFramesChecked" : 284,
+      "name" : "재생 중 전달 프레임의 스펙트럼: 선택 오디오 톤·무음·클릭 반응, 클립 오디오 밴드 0(전달된 프레임만 판정)",
+      "quietFramesChecked" : 108,
+      "quietNonZero" : [
+
+      ],
+      "result" : "PASS",
+      "toneFramesChecked" : 159,
+      "toneMismatch" : [
+
+      ],
+      "toneMismatchBarHeights" : {
+
+      }
+    },
+    {
+      "id" : "S1",
+      "moves" : [
+        {
+          "finished" : true,
+          "layer" : "0 A30",
+          "layerIssues" : [
+
+          ],
+          "layerReadyAfterOutputMs" : 4.7942,
+          "move" : "start",
+          "output" : "0 A30",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 45.791600000000003,
+          "playerSeconds" : 0,
+          "playerTimeIndex" : 0,
+          "seekMs" : 29.1662,
+          "target" : 0
+        },
+        {
+          "finished" : true,
+          "layer" : "89 A119",
+          "layerIssues" : [
+
+          ],
+          "layerReadyAfterOutputMs" : 0.95379999999999998,
+          "move" : "A last 89",
+          "output" : "89 A119",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 47.702399999999997,
+          "playerSeconds" : 2.9666999999999999,
+          "playerTimeIndex" : 89,
+          "seekMs" : 25.471499999999999,
+          "target" : 89
+        },
+        {
+          "finished" : true,
+          "layer" : "90 C20",
+          "layerIssues" : [
+
+          ],
+          "layerReadyAfterOutputMs" : 8.3411000000000008,
+          "move" : "C first 90",
+          "output" : "90 C20",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 52.609699999999997,
+          "playerSeconds" : 3,
+          "playerTimeIndex" : 90,
+          "seekMs" : 36.032699999999998,
+          "target" : 90
+        },
+        {
+          "finished" : true,
+          "layer" : "179 C109",
+          "layerIssues" : [
+
+          ],
+          "layerReadyAfterOutputMs" : 0.80389999999999995,
+          "move" : "C last 179",
+          "output" : "179 C109",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 49.125100000000003,
+          "playerSeconds" : 5.9667000000000003,
+          "playerTimeIndex" : 179,
+          "seekMs" : 33.229500000000002,
+          "target" : 179
+        },
+        {
+          "finished" : true,
+          "layer" : "180 B0",
+          "layerIssues" : [
+
+          ],
+          "layerReadyAfterOutputMs" : 0.87570000000000003,
+          "move" : "B.1 first 180",
+          "output" : "180 B0",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 36.272300000000001,
+          "playerSeconds" : 6,
+          "playerTimeIndex" : 180,
+          "seekMs" : 20.959499999999998,
+          "target" : 180
+        },
+        {
+          "finished" : true,
+          "layer" : "239 B59",
+          "layerIssues" : [
+
+          ],
+          "layerReadyAfterOutputMs" : 7.3818000000000001,
+          "move" : "B.1 last 239",
+          "output" : "239 B59",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 36.845199999999998,
+          "playerSeconds" : 7.9667000000000003,
+          "playerTimeIndex" : 239,
+          "seekMs" : 20.668600000000001,
+          "target" : 239
+        },
+        {
+          "finished" : true,
+          "layer" : "240 B150",
+          "layerIssues" : [
+
+          ],
+          "layerReadyAfterOutputMs" : 8.0927000000000007,
+          "move" : "B.2 first 240",
+          "output" : "240 B150",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 40.354500000000002,
+          "playerSeconds" : 8,
+          "playerTimeIndex" : 240,
+          "seekMs" : 23.282900000000001,
+          "target" : 240
+        },
+        {
+          "finished" : true,
+          "layer" : "45 A75",
+          "layerIssues" : [
+
+          ],
+          "layerReadyAfterOutputMs" : 8.1562000000000001,
+          "move" : "back across cut → 45",
+          "output" : "45 A75",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 44.669800000000002,
+          "playerSeconds" : 1.5,
+          "playerTimeIndex" : 45,
+          "seekMs" : 28.900300000000001,
+          "target" : 45
+        },
+        {
+          "finished" : true,
+          "layer" : "270 B180",
+          "layerIssues" : [
+
+          ],
+          "layerReadyAfterOutputMs" : 8.2811000000000003,
+          "move" : "forward far → 270",
+          "output" : "270 B180",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 30.7133,
+          "playerSeconds" : 9,
+          "playerTimeIndex" : 270,
+          "seekMs" : 19.806000000000001,
+          "target" : 270
+        },
+        {
+          "finished" : true,
+          "layer" : "299 B209",
+          "layerIssues" : [
+
+          ],
+          "layerReadyAfterOutputMs" : 6.9992000000000001,
+          "move" : "near end 299",
+          "output" : "299 B209",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 30.876100000000001,
+          "playerSeconds" : 9.9666999999999994,
+          "playerTimeIndex" : 299,
+          "seekMs" : 20.144200000000001,
+          "target" : 299
+        },
+        {
+          "finished" : true,
+          "layer" : "299 B209",
+          "layerIssues" : [
+
+          ],
+          "layerReadyAfterOutputMs" : 0.76080000000000003,
+          "move" : "end 300",
+          "output" : "299 B209",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 24.039200000000001,
+          "playerSeconds" : 10,
+          "playerTimeIndex" : 300,
+          "seekMs" : 8.9168000000000003,
+          "target" : 300
+        },
+        {
+          "finished" : true,
+          "layer" : "299 B209",
+          "layerIssues" : [
+
+          ],
+          "layerReadyAfterOutputMs" : 0.75949999999999995,
+          "move" : "step back",
+          "output" : "299 B209",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 33.907299999999999,
+          "playerSeconds" : 9.9666999999999994,
+          "playerTimeIndex" : 299,
+          "seekMs" : 28.470300000000002,
+          "target" : 299
+        },
+        {
+          "finished" : true,
+          "layer" : "298 B208",
+          "layerIssues" : [
+
+          ],
+          "layerReadyAfterOutputMs" : 0.81989999999999996,
+          "move" : "step back",
+          "output" : "298 B208",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 29.297999999999998,
+          "playerSeconds" : 9.9332999999999991,
+          "playerTimeIndex" : 298,
+          "seekMs" : 28.472799999999999,
+          "target" : 298
+        },
+        {
+          "finished" : true,
+          "layer" : "0 A30",
+          "layerIssues" : [
+
+          ],
+          "layerReadyAfterOutputMs" : 0.73229999999999995,
+          "move" : "back to 0",
+          "output" : "0 A30",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 35.7425,
+          "playerSeconds" : 0,
+          "playerTimeIndex" : 0,
+          "seekMs" : 20.4497,
+          "target" : 0
+        }
+      ],
+      "name" : "일시정지 탐색(컷 경계 양쪽 89/90·179/180·239/240, 앞뒤로 크게, 끝 299·300, 끝에서 프레임 단위로 두 번 뒤로): 비디오 출력과 AVPlayerLayer 표시 버퍼가 모두 기대 소스·프레임(끝 시각은 299 유지)",
+      "outputReadyMs" : {
+        "max" : 52.609699999999997,
+        "mean" : 38.424799999999998,
+        "n" : 14,
+        "p50" : 36.272300000000001,
+        "p95" : 49.125100000000003
+      },
+      "playerLayerFound" : true,
+      "result" : "PASS",
+      "seekMs" : {
+        "max" : 36.032699999999998,
+        "mean" : 24.569400000000002,
+        "n" : 14,
+        "p50" : 23.282900000000001,
+        "p95" : 33.229500000000002
+      }
+    },
+    {
+      "endIssues" : [
+
+      ],
+      "endLayer" : "299 B209",
+      "endTimeIndex" : 300,
+      "id" : "E1",
+      "name" : "끝까지 재생 후 정지 화면(레이어) = 299(B 209) 유지, 처음부터 다시 재생: 첫 전달 프레임 0, 1 s 뒤 정지 화면 = 그 시각 프레임(끝 화면 잔상 없음)",
+      "replayDelivered" : 26,
+      "replayFirstDelivered" : 0,
+      "replayIssues" : [
+
+      ],
+      "replayLayer" : "24 A54",
+      "replayPausedAt" : 24,
+      "result" : "FAIL"
+    },
+    {
+      "id" : "S2",
+      "name" : "재생 중 탐색(컷 직전으로 앞·뒤, 끝 근처): 탐색 완료 뒤 이전 위치 프레임 없음, 전달 프레임 내용 = 기대값. 첫 프레임까지 시간 기록",
+      "result" : "PASS",
+      "seeks" : [
+        {
+          "firstFrame" : 178,
+          "firstFrameLatencyMs" : 128.23320000000001,
+          "framesAfter" : 27,
+          "seek" : "→ 177 (cut 180 직전)",
+          "seekMs" : 205.2388,
+          "stale" : 0,
+          "target" : 177,
+          "wrongContent" : 0
+        },
+        {
+          "firstFrame" : 86,
+          "firstFrameLatencyMs" : 126.2539,
+          "framesAfter" : 27,
+          "seek" : "→ 85 (뒤로, cut 90 직전)",
+          "seekMs" : 173.40969999999999,
+          "stale" : 0,
+          "target" : 85,
+          "wrongContent" : 0
+        },
+        {
+          "firstFrame" : 237,
+          "firstFrameLatencyMs" : 127.74120000000001,
+          "framesAfter" : 27,
+          "seek" : "→ 236 (cut 240 직전)",
+          "seekMs" : 192.20840000000001,
+          "stale" : 0,
+          "target" : 236,
+          "wrongContent" : 0
+        },
+        {
+          "firstFrame" : 291,
+          "firstFrameLatencyMs" : 141.875,
+          "framesAfter" : 10,
+          "seek" : "→ 290 (끝 근처)",
+          "seekMs" : 294.12950000000001,
+          "stale" : 0,
+          "target" : 290,
+          "wrongContent" : 0
+        }
+      ]
+    },
+    {
+      "differ" : 1,
+      "differFrames" : [
+        2
+      ],
+      "framesCompared" : 300,
+      "id" : "O1",
+      "name" : "같은 타임라인 해석: 재생 중 합성기 출력과 오프라인 합성기 출력(내보내기와 같은 읽기 경로)의 표본 지문(4행마다 1행 SHA-256)이 같은 프레임에서 일치",
+      "offlineFrames" : 300,
+      "result" : "FAIL"
+    }
+  ],
+  "sections" : {
+    "build" : {
+      "e1SourceTree" : {
+        "fileCount" : 20,
+        "files" : {
+          "Package.swift" : "a5add313ff07bf95bfbe01e1eff67dff933fa54cbec7d2c0f356f2638946ada2",
+          "Sources/e1/main.swift" : "643e08c9bd8936d56a3a8e20c5d9f49383ee9ce69f10622672d613ecc23b4702",
+          "Sources/E1Core/Carrier.swift" : "2e7acdc6acca83fc35a87a291718bd0780f7e5da603411ea5ad5b9e2dcfd9cf9",
+          "Sources/E1Core/Compositor.swift" : "8b00047fc90320c8e3dc5d9c93dc7d68bad6b88b2fb51a4ff889d5b962dd5ec7",
+          "Sources/E1Core/Decode.swift" : "262d9298b79da39d1ceda378ba38cea1a31c69406cbb65af6849d310a81711bd",
+          "Sources/E1Core/Exporter.swift" : "8fdbc90b670a3e919c2086d55fc6523a06189ad7934d71af00fe221f58fff46e",
+          "Sources/E1Core/Fixtures.swift" : "149137c948c66e5cc2b68414d3bb6bd30b1e0a9a7c77709852cf1fc30e2611c5",
+          "Sources/E1Core/OutputGuard.swift" : "3ac18cb101f730e6d3b47fa3c70091b03fd9dcb56a32a14dbff5a1a8170671bb",
+          "Sources/E1Core/Preview.swift" : "0f4e74f55b1ad9154158cdfb6c3ceb56d933310d4648b91997ab373f5b50cf85",
+          "Sources/E1Core/Renderer.swift" : "c5a889a85fd6a8b4620eaae68092ee4bb55260d0db7128ae50b624a7bffd0fae",
+          "Sources/E1Core/Spec.swift" : "a4c04f924ebe97b7b9a216c20a951221641941ca14d9064db35548b50f6c223c",
+          "Sources/E1Core/Spectrum.swift" : "f645bc3c11820e0d9936b8eadf909baed84e79645d9cd52a711dcdc1fbe25c28",
+          "Sources/E1Core/Timeline.swift" : "1f39b9381fdf1a98a8a9eefd6ce97fdb3d32539a4ec7dfcdb43b9fecabea4e0b",
+          "Sources/E1Core/Util.swift" : "03a3b1508805077d5183d337647ae4d6fb8a66a7b617a79b3eb633de53e0c950",
+          "Sources/E1Expect/Expectations.swift" : "2c663e58795999a9d8b74e1f96dd61f5ce921ef800036a06386be7e61fd4b9fc",
+          "Sources/e1preview/Diagnose.swift" : "0defc72c0ebd504663acb13c0572eaa45b21c2a9906a269ff2128156cf6433fe",
+          "Sources/e1preview/Frames.swift" : "a8305d3ddc809df96bbaeee7d5acb5197ac9149f27935226d3dffaab86360d51",
+          "Sources/e1preview/main.swift" : "22bc65218f4711b84de0695e28ec6720e9c481a890a7da0a7ba879090f1d0b53",
+          "Sources/e1preview/Present.swift" : "abae15ca346d28778c65f0cddafdbabcffd9fb0d5831d4b4d8e8360a02e2d0ce",
+          "Tests/E1CoreTests/CoreTests.swift" : "323d1552b31c24c1a6524bc6d5a78b0217ea7e499c878816da32b1069592e9de"
+        },
+        "treeSha256" : "27e635772ce3b1acea7236690f85f41e8704d1dd3040636402de4687d26438f6"
+      },
+      "e2SourceTree" : {
+        "fileCount" : 13,
+        "files" : {
+          "Package.swift" : "8cf9f81f07fda8a5fbb34d1f30ed870db78c3da6d8aadac0d51707e124836c10",
+          "Sources/e2/main.swift" : "ed2213d52c2aece7de6d0444d9d1ce93d625f15d43e57d4ab44bf64ae90db27b",
+          "Sources/E2Core/Compositor.swift" : "78299a75b56ffef0834d421c84ecadf0f074d9bf4051d57eb9fe5f45a8554c40",
+          "Sources/E2Core/EditTimeline.swift" : "23c3f1c1e03eaa2ea37b058624a3301d44d7cee10e781d719c1504d3aef34f99",
+          "Sources/E2Core/Exporter.swift" : "a3e1ae538c0c89f507b2bfd7819b70f3a520550cf745f1709e07babbb781a292",
+          "Sources/E2Core/Fixtures.swift" : "add8c5e853f9e26d20006f34b7519067992e9fc3ba80f7119db759ffd3bcf6a5",
+          "Sources/E2Core/Metrics.swift" : "01cee6906819c1fd4ccf3b0fbb2761be2c2f03691b183e5da437f189fcabb52c",
+          "Sources/E2Core/Spec4K.swift" : "9344d41a72a69e760d414fcd3a8efa95168d3b05f013c238bb9e54e7192d3b3b",
+          "Sources/E2Expect/Expectations.swift" : "d33c148dac033ca319aa4ac20300e133e40065ab9345d58d70dacbac880c0ec8",
+          "Sources/E2Judge/Env.swift" : "f3fb79d301a824cfb80b4a67d9198479532f937d60a80020d693ce7a631938a1",
+          "Sources/E2Judge/Judge.swift" : "1fa309af61801a8b51c20383479f5b381ac6573ae915fd549a5c4a16d4b6d5c0",
+          "Sources/e2preview/main.swift" : "a15987c2d8e1be71aa2b6e4896c53ce176ba40e58b0658cc25e63ea15ea339be",
+          "Tests/E2CoreTests/EditTests.swift" : "bdadb18a7d793fdd1f3e99af9ae73b3ecf06a2d68550db9f51e6aa0974eaea29"
+        },
+        "treeSha256" : "753f91c30a0056c6c3cfbae1adff3a9f1ed3d0e163edb6aed2df595927cfca93"
+      },
+      "executable" : {
+        "bytes" : 1748936,
+        "configuration" : "release",
+        "modified" : "2026-10-10T00:45:12Z",
+        "name" : "e2preview",
+        "sha256" : "dc183123a9317a42d8fef7c501875831ba98edd90e94a1f4cbe1ff43c3abcc40"
+      }
+    },
+    "endFootprintMiB" : 659.76779999999997,
+    "fixtures" : {
+      "M-music.wav" : "f6c8c44177c7bd7fdab96de52dadbfdb10852357f1ff34dc0b41ef036f9b2cda",
+      "src-A-3840x2160-30p-v2.mp4" : "886372585d6c6caf39f79cb9c191a2e6501dad932c78c7bd06f90151a80ffbf4",
+      "src-B-3840x2160-30p-v2.mp4" : "242362098ef854ab57f5b9c9625116867f1da19fec83ea7249b87a23aba34a42",
+      "src-C-3840x2160-30p-v2.mp4" : "548ff3039069cfd005718c1babf2000e51db5c1eb72dda353ee335d62913a13a"
+    },
+    "run" : {
+      "id" : "2026-10-10T004516Z",
+      "loadAvgStart" : [
+        148.72120000000001,
+        44.671900000000001,
+        19.829599999999999
+      ],
+      "os" : "Version 26.6.2 (Build 25G83)",
+      "startFootprintMiB" : 131.8289,
+      "volume" : 0,
+      "window" : "AVPlayerView 1280×760 (window 모드와 같은 구성)"
+    },
+    "summary" : {
+      "fail" : 3,
+      "failedIDs" : [
+        "V1-2",
+        "E1",
+        "O1"
+      ],
+      "pass" : 5,
+      "record" : 0
+    },
+    "wallSecondsTotal" : 49.261699999999998
+  }
+}

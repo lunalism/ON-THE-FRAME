@@ -1,0 +1,3260 @@
+{
+  "checks" : [
+    {
+      "id" : "I-src-A",
+      "name" : "소스 A 압축 샘플 구조(재정렬 샘플 수, 동기 샘플 위치, 시간 단위)",
+      "report" : {
+        "codec" : "avc1",
+        "file" : "src-A-3840x2160-30p-v2-noreorder.mp4",
+        "firstSamples" : [
+          {
+            "dependsOnOthers" : false,
+            "dts" : "0/600",
+            "index" : 0,
+            "pts" : "0/600",
+            "ptsFrame" : 0,
+            "sync" : true
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "20/600",
+            "index" : 1,
+            "pts" : "20/600",
+            "ptsFrame" : 1,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "40/600",
+            "index" : 2,
+            "pts" : "40/600",
+            "ptsFrame" : 2,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "60/600",
+            "index" : 3,
+            "pts" : "60/600",
+            "ptsFrame" : 3,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "80/600",
+            "index" : 4,
+            "pts" : "80/600",
+            "ptsFrame" : 4,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "100/600",
+            "index" : 5,
+            "pts" : "100/600",
+            "ptsFrame" : 5,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "120/600",
+            "index" : 6,
+            "pts" : "120/600",
+            "ptsFrame" : 6,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "140/600",
+            "index" : 7,
+            "pts" : "140/600",
+            "ptsFrame" : 7,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "160/600",
+            "index" : 8,
+            "pts" : "160/600",
+            "ptsFrame" : 8,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "180/600",
+            "index" : 9,
+            "pts" : "180/600",
+            "ptsFrame" : 9,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "200/600",
+            "index" : 10,
+            "pts" : "200/600",
+            "ptsFrame" : 10,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "220/600",
+            "index" : 11,
+            "pts" : "220/600",
+            "ptsFrame" : 11,
+            "sync" : false
+          }
+        ],
+        "formatExtensions" : {
+          "CVFieldCount" : "1",
+          "CVImageBufferChromaLocationBottomField" : "Left",
+          "CVImageBufferChromaLocationTopField" : "Left",
+          "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+          "CVImageBufferTransferFunction" : "ITU_R_709_2",
+          "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+          "Depth" : "24",
+          "FormatName" : "'avc1'",
+          "FullRangeVideo" : "0",
+          "RevisionLevel" : "0",
+          "SpatialQuality" : "0",
+          "TemporalQuality" : "0",
+          "Version" : "0"
+        },
+        "maxPtsMinusDtsFrames" : 0,
+        "minFrameDuration" : "20/600",
+        "naturalTimeScale" : 600,
+        "reorderedSamples" : 0,
+        "sampleCount" : 240,
+        "samplesAround" : {
+          "0" : [
+            {
+              "dependsOnOthers" : false,
+              "dts" : "0/600",
+              "index" : 0,
+              "pts" : "0/600",
+              "ptsFrame" : 0,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "20/600",
+              "index" : 1,
+              "pts" : "20/600",
+              "ptsFrame" : 1,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "40/600",
+              "index" : 2,
+              "pts" : "40/600",
+              "ptsFrame" : 2,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "60/600",
+              "index" : 3,
+              "pts" : "60/600",
+              "ptsFrame" : 3,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "80/600",
+              "index" : 4,
+              "pts" : "80/600",
+              "ptsFrame" : 4,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "100/600",
+              "index" : 5,
+              "pts" : "100/600",
+              "ptsFrame" : 5,
+              "sync" : false
+            }
+          ],
+          "20" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "320/600",
+              "index" : 16,
+              "pts" : "320/600",
+              "ptsFrame" : 16,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "340/600",
+              "index" : 17,
+              "pts" : "340/600",
+              "ptsFrame" : 17,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "360/600",
+              "index" : 18,
+              "pts" : "360/600",
+              "ptsFrame" : 18,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "380/600",
+              "index" : 19,
+              "pts" : "380/600",
+              "ptsFrame" : 19,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "400/600",
+              "index" : 20,
+              "pts" : "400/600",
+              "ptsFrame" : 20,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "420/600",
+              "index" : 21,
+              "pts" : "420/600",
+              "ptsFrame" : 21,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "440/600",
+              "index" : 22,
+              "pts" : "440/600",
+              "ptsFrame" : 22,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "460/600",
+              "index" : 23,
+              "pts" : "460/600",
+              "ptsFrame" : 23,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "480/600",
+              "index" : 24,
+              "pts" : "480/600",
+              "ptsFrame" : 24,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "500/600",
+              "index" : 25,
+              "pts" : "500/600",
+              "ptsFrame" : 25,
+              "sync" : false
+            }
+          ],
+          "30" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "520/600",
+              "index" : 26,
+              "pts" : "520/600",
+              "ptsFrame" : 26,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "540/600",
+              "index" : 27,
+              "pts" : "540/600",
+              "ptsFrame" : 27,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "560/600",
+              "index" : 28,
+              "pts" : "560/600",
+              "ptsFrame" : 28,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "580/600",
+              "index" : 29,
+              "pts" : "580/600",
+              "ptsFrame" : 29,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "600/600",
+              "index" : 30,
+              "pts" : "600/600",
+              "ptsFrame" : 30,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "620/600",
+              "index" : 31,
+              "pts" : "620/600",
+              "ptsFrame" : 31,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "640/600",
+              "index" : 32,
+              "pts" : "640/600",
+              "ptsFrame" : 32,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "660/600",
+              "index" : 33,
+              "pts" : "660/600",
+              "ptsFrame" : 33,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "680/600",
+              "index" : 34,
+              "pts" : "680/600",
+              "ptsFrame" : 34,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "700/600",
+              "index" : 35,
+              "pts" : "700/600",
+              "ptsFrame" : 35,
+              "sync" : false
+            }
+          ],
+          "31" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "540/600",
+              "index" : 27,
+              "pts" : "540/600",
+              "ptsFrame" : 27,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "560/600",
+              "index" : 28,
+              "pts" : "560/600",
+              "ptsFrame" : 28,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "580/600",
+              "index" : 29,
+              "pts" : "580/600",
+              "ptsFrame" : 29,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "600/600",
+              "index" : 30,
+              "pts" : "600/600",
+              "ptsFrame" : 30,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "620/600",
+              "index" : 31,
+              "pts" : "620/600",
+              "ptsFrame" : 31,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "640/600",
+              "index" : 32,
+              "pts" : "640/600",
+              "ptsFrame" : 32,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "660/600",
+              "index" : 33,
+              "pts" : "660/600",
+              "ptsFrame" : 33,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "680/600",
+              "index" : 34,
+              "pts" : "680/600",
+              "ptsFrame" : 34,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "700/600",
+              "index" : 35,
+              "pts" : "700/600",
+              "ptsFrame" : 35,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "720/600",
+              "index" : 36,
+              "pts" : "720/600",
+              "ptsFrame" : 36,
+              "sync" : false
+            }
+          ],
+          "32" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "560/600",
+              "index" : 28,
+              "pts" : "560/600",
+              "ptsFrame" : 28,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "580/600",
+              "index" : 29,
+              "pts" : "580/600",
+              "ptsFrame" : 29,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "600/600",
+              "index" : 30,
+              "pts" : "600/600",
+              "ptsFrame" : 30,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "620/600",
+              "index" : 31,
+              "pts" : "620/600",
+              "ptsFrame" : 31,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "640/600",
+              "index" : 32,
+              "pts" : "640/600",
+              "ptsFrame" : 32,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "660/600",
+              "index" : 33,
+              "pts" : "660/600",
+              "ptsFrame" : 33,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "680/600",
+              "index" : 34,
+              "pts" : "680/600",
+              "ptsFrame" : 34,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "700/600",
+              "index" : 35,
+              "pts" : "700/600",
+              "ptsFrame" : 35,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "720/600",
+              "index" : 36,
+              "pts" : "720/600",
+              "ptsFrame" : 36,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "740/600",
+              "index" : 37,
+              "pts" : "740/600",
+              "ptsFrame" : 37,
+              "sync" : false
+            }
+          ],
+          "90" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1720/600",
+              "index" : 86,
+              "pts" : "1720/600",
+              "ptsFrame" : 86,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1740/600",
+              "index" : 87,
+              "pts" : "1740/600",
+              "ptsFrame" : 87,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1760/600",
+              "index" : 88,
+              "pts" : "1760/600",
+              "ptsFrame" : 88,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1780/600",
+              "index" : 89,
+              "pts" : "1780/600",
+              "ptsFrame" : 89,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "1800/600",
+              "index" : 90,
+              "pts" : "1800/600",
+              "ptsFrame" : 90,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1820/600",
+              "index" : 91,
+              "pts" : "1820/600",
+              "ptsFrame" : 91,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1840/600",
+              "index" : 92,
+              "pts" : "1840/600",
+              "ptsFrame" : 92,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1860/600",
+              "index" : 93,
+              "pts" : "1860/600",
+              "ptsFrame" : 93,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1880/600",
+              "index" : 94,
+              "pts" : "1880/600",
+              "ptsFrame" : 94,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1900/600",
+              "index" : 95,
+              "pts" : "1900/600",
+              "ptsFrame" : 95,
+              "sync" : false
+            }
+          ],
+          "91" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1740/600",
+              "index" : 87,
+              "pts" : "1740/600",
+              "ptsFrame" : 87,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1760/600",
+              "index" : 88,
+              "pts" : "1760/600",
+              "ptsFrame" : 88,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1780/600",
+              "index" : 89,
+              "pts" : "1780/600",
+              "ptsFrame" : 89,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "1800/600",
+              "index" : 90,
+              "pts" : "1800/600",
+              "ptsFrame" : 90,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1820/600",
+              "index" : 91,
+              "pts" : "1820/600",
+              "ptsFrame" : 91,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1840/600",
+              "index" : 92,
+              "pts" : "1840/600",
+              "ptsFrame" : 92,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1860/600",
+              "index" : 93,
+              "pts" : "1860/600",
+              "ptsFrame" : 93,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1880/600",
+              "index" : 94,
+              "pts" : "1880/600",
+              "ptsFrame" : 94,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1900/600",
+              "index" : 95,
+              "pts" : "1900/600",
+              "ptsFrame" : 95,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1920/600",
+              "index" : 96,
+              "pts" : "1920/600",
+              "ptsFrame" : 96,
+              "sync" : false
+            }
+          ],
+          "92" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1760/600",
+              "index" : 88,
+              "pts" : "1760/600",
+              "ptsFrame" : 88,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1780/600",
+              "index" : 89,
+              "pts" : "1780/600",
+              "ptsFrame" : 89,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "1800/600",
+              "index" : 90,
+              "pts" : "1800/600",
+              "ptsFrame" : 90,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1820/600",
+              "index" : 91,
+              "pts" : "1820/600",
+              "ptsFrame" : 91,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1840/600",
+              "index" : 92,
+              "pts" : "1840/600",
+              "ptsFrame" : 92,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1860/600",
+              "index" : 93,
+              "pts" : "1860/600",
+              "ptsFrame" : 93,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1880/600",
+              "index" : 94,
+              "pts" : "1880/600",
+              "ptsFrame" : 94,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1900/600",
+              "index" : 95,
+              "pts" : "1900/600",
+              "ptsFrame" : 95,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1920/600",
+              "index" : 96,
+              "pts" : "1920/600",
+              "ptsFrame" : 96,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1940/600",
+              "index" : 97,
+              "pts" : "1940/600",
+              "ptsFrame" : 97,
+              "sync" : false
+            }
+          ],
+          "150" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2920/600",
+              "index" : 146,
+              "pts" : "2920/600",
+              "ptsFrame" : 146,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2940/600",
+              "index" : 147,
+              "pts" : "2940/600",
+              "ptsFrame" : 147,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2960/600",
+              "index" : 148,
+              "pts" : "2960/600",
+              "ptsFrame" : 148,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2980/600",
+              "index" : 149,
+              "pts" : "2980/600",
+              "ptsFrame" : 149,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "3000/600",
+              "index" : 150,
+              "pts" : "3000/600",
+              "ptsFrame" : 150,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3020/600",
+              "index" : 151,
+              "pts" : "3020/600",
+              "ptsFrame" : 151,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3040/600",
+              "index" : 152,
+              "pts" : "3040/600",
+              "ptsFrame" : 152,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3060/600",
+              "index" : 153,
+              "pts" : "3060/600",
+              "ptsFrame" : 153,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3080/600",
+              "index" : 154,
+              "pts" : "3080/600",
+              "ptsFrame" : 154,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3100/600",
+              "index" : 155,
+              "pts" : "3100/600",
+              "ptsFrame" : 155,
+              "sync" : false
+            }
+          ],
+          "151" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2940/600",
+              "index" : 147,
+              "pts" : "2940/600",
+              "ptsFrame" : 147,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2960/600",
+              "index" : 148,
+              "pts" : "2960/600",
+              "ptsFrame" : 148,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2980/600",
+              "index" : 149,
+              "pts" : "2980/600",
+              "ptsFrame" : 149,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "3000/600",
+              "index" : 150,
+              "pts" : "3000/600",
+              "ptsFrame" : 150,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3020/600",
+              "index" : 151,
+              "pts" : "3020/600",
+              "ptsFrame" : 151,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3040/600",
+              "index" : 152,
+              "pts" : "3040/600",
+              "ptsFrame" : 152,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3060/600",
+              "index" : 153,
+              "pts" : "3060/600",
+              "ptsFrame" : 153,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3080/600",
+              "index" : 154,
+              "pts" : "3080/600",
+              "ptsFrame" : 154,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3100/600",
+              "index" : 155,
+              "pts" : "3100/600",
+              "ptsFrame" : 155,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3120/600",
+              "index" : 156,
+              "pts" : "3120/600",
+              "ptsFrame" : 156,
+              "sync" : false
+            }
+          ],
+          "152" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2960/600",
+              "index" : 148,
+              "pts" : "2960/600",
+              "ptsFrame" : 148,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2980/600",
+              "index" : 149,
+              "pts" : "2980/600",
+              "ptsFrame" : 149,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "3000/600",
+              "index" : 150,
+              "pts" : "3000/600",
+              "ptsFrame" : 150,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3020/600",
+              "index" : 151,
+              "pts" : "3020/600",
+              "ptsFrame" : 151,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3040/600",
+              "index" : 152,
+              "pts" : "3040/600",
+              "ptsFrame" : 152,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3060/600",
+              "index" : 153,
+              "pts" : "3060/600",
+              "ptsFrame" : 153,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3080/600",
+              "index" : 154,
+              "pts" : "3080/600",
+              "ptsFrame" : 154,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3100/600",
+              "index" : 155,
+              "pts" : "3100/600",
+              "ptsFrame" : 155,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3120/600",
+              "index" : 156,
+              "pts" : "3120/600",
+              "ptsFrame" : 156,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3140/600",
+              "index" : 157,
+              "pts" : "3140/600",
+              "ptsFrame" : 157,
+              "sync" : false
+            }
+          ]
+        },
+        "syncFrames" : [
+          0,
+          30,
+          60,
+          90,
+          120,
+          150,
+          180,
+          210
+        ]
+      },
+      "result" : "RECORD"
+    },
+    {
+      "id" : "I-src-B",
+      "name" : "소스 B 압축 샘플 구조(재정렬 샘플 수, 동기 샘플 위치, 시간 단위)",
+      "report" : {
+        "codec" : "avc1",
+        "file" : "src-B-3840x2160-30p-v2-noreorder.mp4",
+        "firstSamples" : [
+          {
+            "dependsOnOthers" : false,
+            "dts" : "0/600",
+            "index" : 0,
+            "pts" : "0/600",
+            "ptsFrame" : 0,
+            "sync" : true
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "20/600",
+            "index" : 1,
+            "pts" : "20/600",
+            "ptsFrame" : 1,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "40/600",
+            "index" : 2,
+            "pts" : "40/600",
+            "ptsFrame" : 2,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "60/600",
+            "index" : 3,
+            "pts" : "60/600",
+            "ptsFrame" : 3,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "80/600",
+            "index" : 4,
+            "pts" : "80/600",
+            "ptsFrame" : 4,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "100/600",
+            "index" : 5,
+            "pts" : "100/600",
+            "ptsFrame" : 5,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "120/600",
+            "index" : 6,
+            "pts" : "120/600",
+            "ptsFrame" : 6,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "140/600",
+            "index" : 7,
+            "pts" : "140/600",
+            "ptsFrame" : 7,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "160/600",
+            "index" : 8,
+            "pts" : "160/600",
+            "ptsFrame" : 8,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "180/600",
+            "index" : 9,
+            "pts" : "180/600",
+            "ptsFrame" : 9,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "200/600",
+            "index" : 10,
+            "pts" : "200/600",
+            "ptsFrame" : 10,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "220/600",
+            "index" : 11,
+            "pts" : "220/600",
+            "ptsFrame" : 11,
+            "sync" : false
+          }
+        ],
+        "formatExtensions" : {
+          "CVFieldCount" : "1",
+          "CVImageBufferChromaLocationBottomField" : "Left",
+          "CVImageBufferChromaLocationTopField" : "Left",
+          "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+          "CVImageBufferTransferFunction" : "ITU_R_709_2",
+          "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+          "Depth" : "24",
+          "FormatName" : "'avc1'",
+          "FullRangeVideo" : "0",
+          "RevisionLevel" : "0",
+          "SpatialQuality" : "0",
+          "TemporalQuality" : "0",
+          "Version" : "0"
+        },
+        "maxPtsMinusDtsFrames" : 0,
+        "minFrameDuration" : "20/600",
+        "naturalTimeScale" : 600,
+        "reorderedSamples" : 0,
+        "sampleCount" : 240,
+        "samplesAround" : {
+          "0" : [
+            {
+              "dependsOnOthers" : false,
+              "dts" : "0/600",
+              "index" : 0,
+              "pts" : "0/600",
+              "ptsFrame" : 0,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "20/600",
+              "index" : 1,
+              "pts" : "20/600",
+              "ptsFrame" : 1,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "40/600",
+              "index" : 2,
+              "pts" : "40/600",
+              "ptsFrame" : 2,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "60/600",
+              "index" : 3,
+              "pts" : "60/600",
+              "ptsFrame" : 3,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "80/600",
+              "index" : 4,
+              "pts" : "80/600",
+              "ptsFrame" : 4,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "100/600",
+              "index" : 5,
+              "pts" : "100/600",
+              "ptsFrame" : 5,
+              "sync" : false
+            }
+          ],
+          "20" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "320/600",
+              "index" : 16,
+              "pts" : "320/600",
+              "ptsFrame" : 16,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "340/600",
+              "index" : 17,
+              "pts" : "340/600",
+              "ptsFrame" : 17,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "360/600",
+              "index" : 18,
+              "pts" : "360/600",
+              "ptsFrame" : 18,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "380/600",
+              "index" : 19,
+              "pts" : "380/600",
+              "ptsFrame" : 19,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "400/600",
+              "index" : 20,
+              "pts" : "400/600",
+              "ptsFrame" : 20,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "420/600",
+              "index" : 21,
+              "pts" : "420/600",
+              "ptsFrame" : 21,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "440/600",
+              "index" : 22,
+              "pts" : "440/600",
+              "ptsFrame" : 22,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "460/600",
+              "index" : 23,
+              "pts" : "460/600",
+              "ptsFrame" : 23,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "480/600",
+              "index" : 24,
+              "pts" : "480/600",
+              "ptsFrame" : 24,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "500/600",
+              "index" : 25,
+              "pts" : "500/600",
+              "ptsFrame" : 25,
+              "sync" : false
+            }
+          ],
+          "30" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "520/600",
+              "index" : 26,
+              "pts" : "520/600",
+              "ptsFrame" : 26,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "540/600",
+              "index" : 27,
+              "pts" : "540/600",
+              "ptsFrame" : 27,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "560/600",
+              "index" : 28,
+              "pts" : "560/600",
+              "ptsFrame" : 28,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "580/600",
+              "index" : 29,
+              "pts" : "580/600",
+              "ptsFrame" : 29,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "600/600",
+              "index" : 30,
+              "pts" : "600/600",
+              "ptsFrame" : 30,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "620/600",
+              "index" : 31,
+              "pts" : "620/600",
+              "ptsFrame" : 31,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "640/600",
+              "index" : 32,
+              "pts" : "640/600",
+              "ptsFrame" : 32,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "660/600",
+              "index" : 33,
+              "pts" : "660/600",
+              "ptsFrame" : 33,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "680/600",
+              "index" : 34,
+              "pts" : "680/600",
+              "ptsFrame" : 34,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "700/600",
+              "index" : 35,
+              "pts" : "700/600",
+              "ptsFrame" : 35,
+              "sync" : false
+            }
+          ],
+          "31" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "540/600",
+              "index" : 27,
+              "pts" : "540/600",
+              "ptsFrame" : 27,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "560/600",
+              "index" : 28,
+              "pts" : "560/600",
+              "ptsFrame" : 28,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "580/600",
+              "index" : 29,
+              "pts" : "580/600",
+              "ptsFrame" : 29,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "600/600",
+              "index" : 30,
+              "pts" : "600/600",
+              "ptsFrame" : 30,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "620/600",
+              "index" : 31,
+              "pts" : "620/600",
+              "ptsFrame" : 31,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "640/600",
+              "index" : 32,
+              "pts" : "640/600",
+              "ptsFrame" : 32,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "660/600",
+              "index" : 33,
+              "pts" : "660/600",
+              "ptsFrame" : 33,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "680/600",
+              "index" : 34,
+              "pts" : "680/600",
+              "ptsFrame" : 34,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "700/600",
+              "index" : 35,
+              "pts" : "700/600",
+              "ptsFrame" : 35,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "720/600",
+              "index" : 36,
+              "pts" : "720/600",
+              "ptsFrame" : 36,
+              "sync" : false
+            }
+          ],
+          "32" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "560/600",
+              "index" : 28,
+              "pts" : "560/600",
+              "ptsFrame" : 28,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "580/600",
+              "index" : 29,
+              "pts" : "580/600",
+              "ptsFrame" : 29,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "600/600",
+              "index" : 30,
+              "pts" : "600/600",
+              "ptsFrame" : 30,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "620/600",
+              "index" : 31,
+              "pts" : "620/600",
+              "ptsFrame" : 31,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "640/600",
+              "index" : 32,
+              "pts" : "640/600",
+              "ptsFrame" : 32,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "660/600",
+              "index" : 33,
+              "pts" : "660/600",
+              "ptsFrame" : 33,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "680/600",
+              "index" : 34,
+              "pts" : "680/600",
+              "ptsFrame" : 34,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "700/600",
+              "index" : 35,
+              "pts" : "700/600",
+              "ptsFrame" : 35,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "720/600",
+              "index" : 36,
+              "pts" : "720/600",
+              "ptsFrame" : 36,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "740/600",
+              "index" : 37,
+              "pts" : "740/600",
+              "ptsFrame" : 37,
+              "sync" : false
+            }
+          ],
+          "90" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1720/600",
+              "index" : 86,
+              "pts" : "1720/600",
+              "ptsFrame" : 86,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1740/600",
+              "index" : 87,
+              "pts" : "1740/600",
+              "ptsFrame" : 87,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1760/600",
+              "index" : 88,
+              "pts" : "1760/600",
+              "ptsFrame" : 88,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1780/600",
+              "index" : 89,
+              "pts" : "1780/600",
+              "ptsFrame" : 89,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "1800/600",
+              "index" : 90,
+              "pts" : "1800/600",
+              "ptsFrame" : 90,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1820/600",
+              "index" : 91,
+              "pts" : "1820/600",
+              "ptsFrame" : 91,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1840/600",
+              "index" : 92,
+              "pts" : "1840/600",
+              "ptsFrame" : 92,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1860/600",
+              "index" : 93,
+              "pts" : "1860/600",
+              "ptsFrame" : 93,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1880/600",
+              "index" : 94,
+              "pts" : "1880/600",
+              "ptsFrame" : 94,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1900/600",
+              "index" : 95,
+              "pts" : "1900/600",
+              "ptsFrame" : 95,
+              "sync" : false
+            }
+          ],
+          "91" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1740/600",
+              "index" : 87,
+              "pts" : "1740/600",
+              "ptsFrame" : 87,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1760/600",
+              "index" : 88,
+              "pts" : "1760/600",
+              "ptsFrame" : 88,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1780/600",
+              "index" : 89,
+              "pts" : "1780/600",
+              "ptsFrame" : 89,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "1800/600",
+              "index" : 90,
+              "pts" : "1800/600",
+              "ptsFrame" : 90,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1820/600",
+              "index" : 91,
+              "pts" : "1820/600",
+              "ptsFrame" : 91,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1840/600",
+              "index" : 92,
+              "pts" : "1840/600",
+              "ptsFrame" : 92,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1860/600",
+              "index" : 93,
+              "pts" : "1860/600",
+              "ptsFrame" : 93,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1880/600",
+              "index" : 94,
+              "pts" : "1880/600",
+              "ptsFrame" : 94,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1900/600",
+              "index" : 95,
+              "pts" : "1900/600",
+              "ptsFrame" : 95,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1920/600",
+              "index" : 96,
+              "pts" : "1920/600",
+              "ptsFrame" : 96,
+              "sync" : false
+            }
+          ],
+          "92" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1760/600",
+              "index" : 88,
+              "pts" : "1760/600",
+              "ptsFrame" : 88,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1780/600",
+              "index" : 89,
+              "pts" : "1780/600",
+              "ptsFrame" : 89,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "1800/600",
+              "index" : 90,
+              "pts" : "1800/600",
+              "ptsFrame" : 90,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1820/600",
+              "index" : 91,
+              "pts" : "1820/600",
+              "ptsFrame" : 91,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1840/600",
+              "index" : 92,
+              "pts" : "1840/600",
+              "ptsFrame" : 92,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1860/600",
+              "index" : 93,
+              "pts" : "1860/600",
+              "ptsFrame" : 93,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1880/600",
+              "index" : 94,
+              "pts" : "1880/600",
+              "ptsFrame" : 94,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1900/600",
+              "index" : 95,
+              "pts" : "1900/600",
+              "ptsFrame" : 95,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1920/600",
+              "index" : 96,
+              "pts" : "1920/600",
+              "ptsFrame" : 96,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1940/600",
+              "index" : 97,
+              "pts" : "1940/600",
+              "ptsFrame" : 97,
+              "sync" : false
+            }
+          ],
+          "150" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2920/600",
+              "index" : 146,
+              "pts" : "2920/600",
+              "ptsFrame" : 146,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2940/600",
+              "index" : 147,
+              "pts" : "2940/600",
+              "ptsFrame" : 147,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2960/600",
+              "index" : 148,
+              "pts" : "2960/600",
+              "ptsFrame" : 148,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2980/600",
+              "index" : 149,
+              "pts" : "2980/600",
+              "ptsFrame" : 149,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "3000/600",
+              "index" : 150,
+              "pts" : "3000/600",
+              "ptsFrame" : 150,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3020/600",
+              "index" : 151,
+              "pts" : "3020/600",
+              "ptsFrame" : 151,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3040/600",
+              "index" : 152,
+              "pts" : "3040/600",
+              "ptsFrame" : 152,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3060/600",
+              "index" : 153,
+              "pts" : "3060/600",
+              "ptsFrame" : 153,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3080/600",
+              "index" : 154,
+              "pts" : "3080/600",
+              "ptsFrame" : 154,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3100/600",
+              "index" : 155,
+              "pts" : "3100/600",
+              "ptsFrame" : 155,
+              "sync" : false
+            }
+          ],
+          "151" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2940/600",
+              "index" : 147,
+              "pts" : "2940/600",
+              "ptsFrame" : 147,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2960/600",
+              "index" : 148,
+              "pts" : "2960/600",
+              "ptsFrame" : 148,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2980/600",
+              "index" : 149,
+              "pts" : "2980/600",
+              "ptsFrame" : 149,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "3000/600",
+              "index" : 150,
+              "pts" : "3000/600",
+              "ptsFrame" : 150,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3020/600",
+              "index" : 151,
+              "pts" : "3020/600",
+              "ptsFrame" : 151,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3040/600",
+              "index" : 152,
+              "pts" : "3040/600",
+              "ptsFrame" : 152,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3060/600",
+              "index" : 153,
+              "pts" : "3060/600",
+              "ptsFrame" : 153,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3080/600",
+              "index" : 154,
+              "pts" : "3080/600",
+              "ptsFrame" : 154,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3100/600",
+              "index" : 155,
+              "pts" : "3100/600",
+              "ptsFrame" : 155,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3120/600",
+              "index" : 156,
+              "pts" : "3120/600",
+              "ptsFrame" : 156,
+              "sync" : false
+            }
+          ],
+          "152" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2960/600",
+              "index" : 148,
+              "pts" : "2960/600",
+              "ptsFrame" : 148,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2980/600",
+              "index" : 149,
+              "pts" : "2980/600",
+              "ptsFrame" : 149,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "3000/600",
+              "index" : 150,
+              "pts" : "3000/600",
+              "ptsFrame" : 150,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3020/600",
+              "index" : 151,
+              "pts" : "3020/600",
+              "ptsFrame" : 151,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3040/600",
+              "index" : 152,
+              "pts" : "3040/600",
+              "ptsFrame" : 152,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3060/600",
+              "index" : 153,
+              "pts" : "3060/600",
+              "ptsFrame" : 153,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3080/600",
+              "index" : 154,
+              "pts" : "3080/600",
+              "ptsFrame" : 154,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3100/600",
+              "index" : 155,
+              "pts" : "3100/600",
+              "ptsFrame" : 155,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3120/600",
+              "index" : 156,
+              "pts" : "3120/600",
+              "ptsFrame" : 156,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3140/600",
+              "index" : 157,
+              "pts" : "3140/600",
+              "ptsFrame" : 157,
+              "sync" : false
+            }
+          ]
+        },
+        "syncFrames" : [
+          0,
+          30,
+          60,
+          90,
+          120,
+          150,
+          180,
+          210
+        ]
+      },
+      "result" : "RECORD"
+    },
+    {
+      "id" : "I-src-C",
+      "name" : "소스 C 압축 샘플 구조(재정렬 샘플 수, 동기 샘플 위치, 시간 단위)",
+      "report" : {
+        "codec" : "avc1",
+        "file" : "src-C-3840x2160-30p-v2-noreorder.mp4",
+        "firstSamples" : [
+          {
+            "dependsOnOthers" : false,
+            "dts" : "0/600",
+            "index" : 0,
+            "pts" : "0/600",
+            "ptsFrame" : 0,
+            "sync" : true
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "20/600",
+            "index" : 1,
+            "pts" : "20/600",
+            "ptsFrame" : 1,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "40/600",
+            "index" : 2,
+            "pts" : "40/600",
+            "ptsFrame" : 2,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "60/600",
+            "index" : 3,
+            "pts" : "60/600",
+            "ptsFrame" : 3,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "80/600",
+            "index" : 4,
+            "pts" : "80/600",
+            "ptsFrame" : 4,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "100/600",
+            "index" : 5,
+            "pts" : "100/600",
+            "ptsFrame" : 5,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "120/600",
+            "index" : 6,
+            "pts" : "120/600",
+            "ptsFrame" : 6,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "140/600",
+            "index" : 7,
+            "pts" : "140/600",
+            "ptsFrame" : 7,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "160/600",
+            "index" : 8,
+            "pts" : "160/600",
+            "ptsFrame" : 8,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "180/600",
+            "index" : 9,
+            "pts" : "180/600",
+            "ptsFrame" : 9,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "200/600",
+            "index" : 10,
+            "pts" : "200/600",
+            "ptsFrame" : 10,
+            "sync" : false
+          },
+          {
+            "dependsOnOthers" : true,
+            "dts" : "220/600",
+            "index" : 11,
+            "pts" : "220/600",
+            "ptsFrame" : 11,
+            "sync" : false
+          }
+        ],
+        "formatExtensions" : {
+          "CVFieldCount" : "1",
+          "CVImageBufferChromaLocationBottomField" : "Left",
+          "CVImageBufferChromaLocationTopField" : "Left",
+          "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+          "CVImageBufferTransferFunction" : "ITU_R_709_2",
+          "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+          "Depth" : "24",
+          "FormatName" : "'avc1'",
+          "FullRangeVideo" : "0",
+          "RevisionLevel" : "0",
+          "SpatialQuality" : "0",
+          "TemporalQuality" : "0",
+          "Version" : "0"
+        },
+        "maxPtsMinusDtsFrames" : 0,
+        "minFrameDuration" : "20/600",
+        "naturalTimeScale" : 600,
+        "reorderedSamples" : 0,
+        "sampleCount" : 180,
+        "samplesAround" : {
+          "0" : [
+            {
+              "dependsOnOthers" : false,
+              "dts" : "0/600",
+              "index" : 0,
+              "pts" : "0/600",
+              "ptsFrame" : 0,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "20/600",
+              "index" : 1,
+              "pts" : "20/600",
+              "ptsFrame" : 1,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "40/600",
+              "index" : 2,
+              "pts" : "40/600",
+              "ptsFrame" : 2,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "60/600",
+              "index" : 3,
+              "pts" : "60/600",
+              "ptsFrame" : 3,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "80/600",
+              "index" : 4,
+              "pts" : "80/600",
+              "ptsFrame" : 4,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "100/600",
+              "index" : 5,
+              "pts" : "100/600",
+              "ptsFrame" : 5,
+              "sync" : false
+            }
+          ],
+          "20" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "320/600",
+              "index" : 16,
+              "pts" : "320/600",
+              "ptsFrame" : 16,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "340/600",
+              "index" : 17,
+              "pts" : "340/600",
+              "ptsFrame" : 17,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "360/600",
+              "index" : 18,
+              "pts" : "360/600",
+              "ptsFrame" : 18,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "380/600",
+              "index" : 19,
+              "pts" : "380/600",
+              "ptsFrame" : 19,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "400/600",
+              "index" : 20,
+              "pts" : "400/600",
+              "ptsFrame" : 20,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "420/600",
+              "index" : 21,
+              "pts" : "420/600",
+              "ptsFrame" : 21,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "440/600",
+              "index" : 22,
+              "pts" : "440/600",
+              "ptsFrame" : 22,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "460/600",
+              "index" : 23,
+              "pts" : "460/600",
+              "ptsFrame" : 23,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "480/600",
+              "index" : 24,
+              "pts" : "480/600",
+              "ptsFrame" : 24,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "500/600",
+              "index" : 25,
+              "pts" : "500/600",
+              "ptsFrame" : 25,
+              "sync" : false
+            }
+          ],
+          "30" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "520/600",
+              "index" : 26,
+              "pts" : "520/600",
+              "ptsFrame" : 26,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "540/600",
+              "index" : 27,
+              "pts" : "540/600",
+              "ptsFrame" : 27,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "560/600",
+              "index" : 28,
+              "pts" : "560/600",
+              "ptsFrame" : 28,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "580/600",
+              "index" : 29,
+              "pts" : "580/600",
+              "ptsFrame" : 29,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "600/600",
+              "index" : 30,
+              "pts" : "600/600",
+              "ptsFrame" : 30,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "620/600",
+              "index" : 31,
+              "pts" : "620/600",
+              "ptsFrame" : 31,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "640/600",
+              "index" : 32,
+              "pts" : "640/600",
+              "ptsFrame" : 32,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "660/600",
+              "index" : 33,
+              "pts" : "660/600",
+              "ptsFrame" : 33,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "680/600",
+              "index" : 34,
+              "pts" : "680/600",
+              "ptsFrame" : 34,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "700/600",
+              "index" : 35,
+              "pts" : "700/600",
+              "ptsFrame" : 35,
+              "sync" : false
+            }
+          ],
+          "31" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "540/600",
+              "index" : 27,
+              "pts" : "540/600",
+              "ptsFrame" : 27,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "560/600",
+              "index" : 28,
+              "pts" : "560/600",
+              "ptsFrame" : 28,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "580/600",
+              "index" : 29,
+              "pts" : "580/600",
+              "ptsFrame" : 29,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "600/600",
+              "index" : 30,
+              "pts" : "600/600",
+              "ptsFrame" : 30,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "620/600",
+              "index" : 31,
+              "pts" : "620/600",
+              "ptsFrame" : 31,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "640/600",
+              "index" : 32,
+              "pts" : "640/600",
+              "ptsFrame" : 32,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "660/600",
+              "index" : 33,
+              "pts" : "660/600",
+              "ptsFrame" : 33,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "680/600",
+              "index" : 34,
+              "pts" : "680/600",
+              "ptsFrame" : 34,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "700/600",
+              "index" : 35,
+              "pts" : "700/600",
+              "ptsFrame" : 35,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "720/600",
+              "index" : 36,
+              "pts" : "720/600",
+              "ptsFrame" : 36,
+              "sync" : false
+            }
+          ],
+          "32" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "560/600",
+              "index" : 28,
+              "pts" : "560/600",
+              "ptsFrame" : 28,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "580/600",
+              "index" : 29,
+              "pts" : "580/600",
+              "ptsFrame" : 29,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "600/600",
+              "index" : 30,
+              "pts" : "600/600",
+              "ptsFrame" : 30,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "620/600",
+              "index" : 31,
+              "pts" : "620/600",
+              "ptsFrame" : 31,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "640/600",
+              "index" : 32,
+              "pts" : "640/600",
+              "ptsFrame" : 32,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "660/600",
+              "index" : 33,
+              "pts" : "660/600",
+              "ptsFrame" : 33,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "680/600",
+              "index" : 34,
+              "pts" : "680/600",
+              "ptsFrame" : 34,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "700/600",
+              "index" : 35,
+              "pts" : "700/600",
+              "ptsFrame" : 35,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "720/600",
+              "index" : 36,
+              "pts" : "720/600",
+              "ptsFrame" : 36,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "740/600",
+              "index" : 37,
+              "pts" : "740/600",
+              "ptsFrame" : 37,
+              "sync" : false
+            }
+          ],
+          "90" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1720/600",
+              "index" : 86,
+              "pts" : "1720/600",
+              "ptsFrame" : 86,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1740/600",
+              "index" : 87,
+              "pts" : "1740/600",
+              "ptsFrame" : 87,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1760/600",
+              "index" : 88,
+              "pts" : "1760/600",
+              "ptsFrame" : 88,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1780/600",
+              "index" : 89,
+              "pts" : "1780/600",
+              "ptsFrame" : 89,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "1800/600",
+              "index" : 90,
+              "pts" : "1800/600",
+              "ptsFrame" : 90,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1820/600",
+              "index" : 91,
+              "pts" : "1820/600",
+              "ptsFrame" : 91,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1840/600",
+              "index" : 92,
+              "pts" : "1840/600",
+              "ptsFrame" : 92,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1860/600",
+              "index" : 93,
+              "pts" : "1860/600",
+              "ptsFrame" : 93,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1880/600",
+              "index" : 94,
+              "pts" : "1880/600",
+              "ptsFrame" : 94,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1900/600",
+              "index" : 95,
+              "pts" : "1900/600",
+              "ptsFrame" : 95,
+              "sync" : false
+            }
+          ],
+          "91" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1740/600",
+              "index" : 87,
+              "pts" : "1740/600",
+              "ptsFrame" : 87,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1760/600",
+              "index" : 88,
+              "pts" : "1760/600",
+              "ptsFrame" : 88,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1780/600",
+              "index" : 89,
+              "pts" : "1780/600",
+              "ptsFrame" : 89,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "1800/600",
+              "index" : 90,
+              "pts" : "1800/600",
+              "ptsFrame" : 90,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1820/600",
+              "index" : 91,
+              "pts" : "1820/600",
+              "ptsFrame" : 91,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1840/600",
+              "index" : 92,
+              "pts" : "1840/600",
+              "ptsFrame" : 92,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1860/600",
+              "index" : 93,
+              "pts" : "1860/600",
+              "ptsFrame" : 93,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1880/600",
+              "index" : 94,
+              "pts" : "1880/600",
+              "ptsFrame" : 94,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1900/600",
+              "index" : 95,
+              "pts" : "1900/600",
+              "ptsFrame" : 95,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1920/600",
+              "index" : 96,
+              "pts" : "1920/600",
+              "ptsFrame" : 96,
+              "sync" : false
+            }
+          ],
+          "92" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1760/600",
+              "index" : 88,
+              "pts" : "1760/600",
+              "ptsFrame" : 88,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1780/600",
+              "index" : 89,
+              "pts" : "1780/600",
+              "ptsFrame" : 89,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "1800/600",
+              "index" : 90,
+              "pts" : "1800/600",
+              "ptsFrame" : 90,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1820/600",
+              "index" : 91,
+              "pts" : "1820/600",
+              "ptsFrame" : 91,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1840/600",
+              "index" : 92,
+              "pts" : "1840/600",
+              "ptsFrame" : 92,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1860/600",
+              "index" : 93,
+              "pts" : "1860/600",
+              "ptsFrame" : 93,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1880/600",
+              "index" : 94,
+              "pts" : "1880/600",
+              "ptsFrame" : 94,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1900/600",
+              "index" : 95,
+              "pts" : "1900/600",
+              "ptsFrame" : 95,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1920/600",
+              "index" : 96,
+              "pts" : "1920/600",
+              "ptsFrame" : 96,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "1940/600",
+              "index" : 97,
+              "pts" : "1940/600",
+              "ptsFrame" : 97,
+              "sync" : false
+            }
+          ],
+          "150" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2920/600",
+              "index" : 146,
+              "pts" : "2920/600",
+              "ptsFrame" : 146,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2940/600",
+              "index" : 147,
+              "pts" : "2940/600",
+              "ptsFrame" : 147,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2960/600",
+              "index" : 148,
+              "pts" : "2960/600",
+              "ptsFrame" : 148,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2980/600",
+              "index" : 149,
+              "pts" : "2980/600",
+              "ptsFrame" : 149,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "3000/600",
+              "index" : 150,
+              "pts" : "3000/600",
+              "ptsFrame" : 150,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3020/600",
+              "index" : 151,
+              "pts" : "3020/600",
+              "ptsFrame" : 151,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3040/600",
+              "index" : 152,
+              "pts" : "3040/600",
+              "ptsFrame" : 152,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3060/600",
+              "index" : 153,
+              "pts" : "3060/600",
+              "ptsFrame" : 153,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3080/600",
+              "index" : 154,
+              "pts" : "3080/600",
+              "ptsFrame" : 154,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3100/600",
+              "index" : 155,
+              "pts" : "3100/600",
+              "ptsFrame" : 155,
+              "sync" : false
+            }
+          ],
+          "151" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2940/600",
+              "index" : 147,
+              "pts" : "2940/600",
+              "ptsFrame" : 147,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2960/600",
+              "index" : 148,
+              "pts" : "2960/600",
+              "ptsFrame" : 148,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2980/600",
+              "index" : 149,
+              "pts" : "2980/600",
+              "ptsFrame" : 149,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "3000/600",
+              "index" : 150,
+              "pts" : "3000/600",
+              "ptsFrame" : 150,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3020/600",
+              "index" : 151,
+              "pts" : "3020/600",
+              "ptsFrame" : 151,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3040/600",
+              "index" : 152,
+              "pts" : "3040/600",
+              "ptsFrame" : 152,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3060/600",
+              "index" : 153,
+              "pts" : "3060/600",
+              "ptsFrame" : 153,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3080/600",
+              "index" : 154,
+              "pts" : "3080/600",
+              "ptsFrame" : 154,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3100/600",
+              "index" : 155,
+              "pts" : "3100/600",
+              "ptsFrame" : 155,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3120/600",
+              "index" : 156,
+              "pts" : "3120/600",
+              "ptsFrame" : 156,
+              "sync" : false
+            }
+          ],
+          "152" : [
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2960/600",
+              "index" : 148,
+              "pts" : "2960/600",
+              "ptsFrame" : 148,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "2980/600",
+              "index" : 149,
+              "pts" : "2980/600",
+              "ptsFrame" : 149,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : false,
+              "dts" : "3000/600",
+              "index" : 150,
+              "pts" : "3000/600",
+              "ptsFrame" : 150,
+              "sync" : true
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3020/600",
+              "index" : 151,
+              "pts" : "3020/600",
+              "ptsFrame" : 151,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3040/600",
+              "index" : 152,
+              "pts" : "3040/600",
+              "ptsFrame" : 152,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3060/600",
+              "index" : 153,
+              "pts" : "3060/600",
+              "ptsFrame" : 153,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3080/600",
+              "index" : 154,
+              "pts" : "3080/600",
+              "ptsFrame" : 154,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3100/600",
+              "index" : 155,
+              "pts" : "3100/600",
+              "ptsFrame" : 155,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3120/600",
+              "index" : 156,
+              "pts" : "3120/600",
+              "ptsFrame" : 156,
+              "sync" : false
+            },
+            {
+              "dependsOnOthers" : true,
+              "dts" : "3140/600",
+              "index" : 157,
+              "pts" : "3140/600",
+              "ptsFrame" : 157,
+              "sync" : false
+            }
+          ]
+        },
+        "syncFrames" : [
+          0,
+          30,
+          60,
+          90,
+          120,
+          150
+        ]
+      },
+      "result" : "RECORD"
+    },
+    {
+      "frameDuration" : "1/30",
+      "id" : "I-comp",
+      "instructions" : [
+        "0/1 +300/30"
+      ],
+      "name" : "composition 비디오 트랙 구간 대응과 합성 명령 범위·프레임 간격",
+      "result" : "RECORD",
+      "segments" : [
+        {
+          "empty" : "false",
+          "source" : "30/30 +90/30",
+          "sourceTrackID" : "1",
+          "target" : "0/30 +90/30",
+          "url" : "src-A-3840x2160-30p-v2-noreorder.mp4"
+        },
+        {
+          "empty" : "false",
+          "source" : "20/30 +90/30",
+          "sourceTrackID" : "1",
+          "target" : "90/30 +90/30",
+          "url" : "src-C-3840x2160-30p-v2-noreorder.mp4"
+        },
+        {
+          "empty" : "false",
+          "source" : "0/30 +60/30",
+          "sourceTrackID" : "1",
+          "target" : "180/30 +60/30",
+          "url" : "src-B-3840x2160-30p-v2-noreorder.mp4"
+        },
+        {
+          "empty" : "false",
+          "source" : "150/30 +60/30",
+          "sourceTrackID" : "1",
+          "target" : "240/30 +60/30",
+          "url" : "src-B-3840x2160-30p-v2-noreorder.mp4"
+        }
+      ],
+      "videoTrackID" : 1
+    },
+    {
+      "audioFormat" : "aac  48000.0Hz ch=2",
+      "audioSamples" : 384000,
+      "clickDeltasSamples" : [
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1
+      ],
+      "decodeSeconds" : 1.0004,
+      "expectedFrames" : 240,
+      "fileMiB" : 29.2654,
+      "format" : {
+        "codec" : "avc1",
+        "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+        "CVImageBufferTransferFunction" : "ITU_R_709_2",
+        "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+        "dimensions" : "3840x2160"
+      },
+      "frames" : 240,
+      "id" : "F-src-A",
+      "issues" : [
+
+      ],
+      "name" : "소스 영상 A(H.264 4K 30p + AAC): 디코딩 프레임 수·PTS·소스 ID·프레임 번호·이동 상자·배경, 오디오 클릭 위치",
+      "onsets" : 8,
+      "result" : "PASS"
+    },
+    {
+      "audioFormat" : "aac  48000.0Hz ch=2",
+      "audioSamples" : 384000,
+      "clickDeltasSamples" : [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "decodeSeconds" : 0.95450000000000002,
+      "expectedFrames" : 240,
+      "fileMiB" : 29.008400000000002,
+      "format" : {
+        "codec" : "avc1",
+        "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+        "CVImageBufferTransferFunction" : "ITU_R_709_2",
+        "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+        "dimensions" : "3840x2160"
+      },
+      "frames" : 240,
+      "id" : "F-src-B",
+      "issues" : [
+
+      ],
+      "name" : "소스 영상 B(H.264 4K 30p + AAC): 디코딩 프레임 수·PTS·소스 ID·프레임 번호·이동 상자·배경, 오디오 클릭 위치",
+      "onsets" : 8,
+      "result" : "PASS"
+    },
+    {
+      "audioFormat" : "aac  48000.0Hz ch=2",
+      "audioSamples" : 288000,
+      "clickDeltasSamples" : [
+        -2,
+        -2,
+        -2,
+        -2,
+        -2,
+        -2
+      ],
+      "decodeSeconds" : 0.76029999999999998,
+      "expectedFrames" : 180,
+      "fileMiB" : 22.1418,
+      "format" : {
+        "codec" : "avc1",
+        "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+        "CVImageBufferTransferFunction" : "ITU_R_709_2",
+        "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+        "dimensions" : "3840x2160"
+      },
+      "frames" : 180,
+      "id" : "F-src-C",
+      "issues" : [
+
+      ],
+      "name" : "소스 영상 C(H.264 4K 30p + AAC): 디코딩 프레임 수·PTS·소스 ID·프레임 번호·이동 상자·배경, 오디오 클릭 위치",
+      "onsets" : 6,
+      "result" : "PASS"
+    }
+  ],
+  "sections" : {
+    "budgetAfter" : {
+      "e1-fhd/.build" : 590.90229999999997,
+      "e1-fhd/artifacts" : 73.296899999999994,
+      "e2-4k/.build" : 356.59379999999999,
+      "e2-4k/artifacts" : 357.20699999999999
+    },
+    "budgetBefore" : {
+      "e1-fhd/.build" : 590.90229999999997,
+      "e1-fhd/artifacts" : 73.296899999999994,
+      "e2-4k/.build" : 356.59379999999999,
+      "e2-4k/artifacts" : 274.98829999999998
+    },
+    "budgetTotalMiB" : 1378,
+    "build" : {
+      "e1SourceTree" : {
+        "fileCount" : 20,
+        "files" : {
+          "Package.swift" : "a5add313ff07bf95bfbe01e1eff67dff933fa54cbec7d2c0f356f2638946ada2",
+          "Sources/e1/main.swift" : "643e08c9bd8936d56a3a8e20c5d9f49383ee9ce69f10622672d613ecc23b4702",
+          "Sources/E1Core/Carrier.swift" : "2e7acdc6acca83fc35a87a291718bd0780f7e5da603411ea5ad5b9e2dcfd9cf9",
+          "Sources/E1Core/Compositor.swift" : "8b00047fc90320c8e3dc5d9c93dc7d68bad6b88b2fb51a4ff889d5b962dd5ec7",
+          "Sources/E1Core/Decode.swift" : "262d9298b79da39d1ceda378ba38cea1a31c69406cbb65af6849d310a81711bd",
+          "Sources/E1Core/Exporter.swift" : "8fdbc90b670a3e919c2086d55fc6523a06189ad7934d71af00fe221f58fff46e",
+          "Sources/E1Core/Fixtures.swift" : "149137c948c66e5cc2b68414d3bb6bd30b1e0a9a7c77709852cf1fc30e2611c5",
+          "Sources/E1Core/OutputGuard.swift" : "3ac18cb101f730e6d3b47fa3c70091b03fd9dcb56a32a14dbff5a1a8170671bb",
+          "Sources/E1Core/Preview.swift" : "0f4e74f55b1ad9154158cdfb6c3ceb56d933310d4648b91997ab373f5b50cf85",
+          "Sources/E1Core/Renderer.swift" : "c5a889a85fd6a8b4620eaae68092ee4bb55260d0db7128ae50b624a7bffd0fae",
+          "Sources/E1Core/Spec.swift" : "a4c04f924ebe97b7b9a216c20a951221641941ca14d9064db35548b50f6c223c",
+          "Sources/E1Core/Spectrum.swift" : "f645bc3c11820e0d9936b8eadf909baed84e79645d9cd52a711dcdc1fbe25c28",
+          "Sources/E1Core/Timeline.swift" : "1f39b9381fdf1a98a8a9eefd6ce97fdb3d32539a4ec7dfcdb43b9fecabea4e0b",
+          "Sources/E1Core/Util.swift" : "03a3b1508805077d5183d337647ae4d6fb8a66a7b617a79b3eb633de53e0c950",
+          "Sources/E1Expect/Expectations.swift" : "2c663e58795999a9d8b74e1f96dd61f5ce921ef800036a06386be7e61fd4b9fc",
+          "Sources/e1preview/Diagnose.swift" : "0defc72c0ebd504663acb13c0572eaa45b21c2a9906a269ff2128156cf6433fe",
+          "Sources/e1preview/Frames.swift" : "a8305d3ddc809df96bbaeee7d5acb5197ac9149f27935226d3dffaab86360d51",
+          "Sources/e1preview/main.swift" : "22bc65218f4711b84de0695e28ec6720e9c481a890a7da0a7ba879090f1d0b53",
+          "Sources/e1preview/Present.swift" : "abae15ca346d28778c65f0cddafdbabcffd9fb0d5831d4b4d8e8360a02e2d0ce",
+          "Tests/E1CoreTests/CoreTests.swift" : "323d1552b31c24c1a6524bc6d5a78b0217ea7e499c878816da32b1069592e9de"
+        },
+        "treeSha256" : "27e635772ce3b1acea7236690f85f41e8704d1dd3040636402de4687d26438f6"
+      },
+      "e2SourceTree" : {
+        "fileCount" : 14,
+        "files" : {
+          "Package.swift" : "8cf9f81f07fda8a5fbb34d1f30ed870db78c3da6d8aadac0d51707e124836c10",
+          "Sources/e2/main.swift" : "58daa310871b10c70e3661fb919ce55a43874bfc11bbdc19212b99ed3d0659e2",
+          "Sources/E2Core/Compositor.swift" : "ae795f8e3a9d9aa49a747ad2d9296a3acefd3c3b6442ac27d1579dfaaa498884",
+          "Sources/E2Core/EditTimeline.swift" : "23c3f1c1e03eaa2ea37b058624a3301d44d7cee10e781d719c1504d3aef34f99",
+          "Sources/E2Core/Exporter.swift" : "a3e1ae538c0c89f507b2bfd7819b70f3a520550cf745f1709e07babbb781a292",
+          "Sources/E2Core/Fixtures.swift" : "46fdf29369903bdef69a5880011e734b324401333b5fe971f037659978ae1d1e",
+          "Sources/E2Core/Inspect.swift" : "b9a10e153018d4d20a9cf1c466de699bf9a376102dd889ed59bf9f50770b847c",
+          "Sources/E2Core/Metrics.swift" : "01cee6906819c1fd4ccf3b0fbb2761be2c2f03691b183e5da437f189fcabb52c",
+          "Sources/E2Core/Spec4K.swift" : "9344d41a72a69e760d414fcd3a8efa95168d3b05f013c238bb9e54e7192d3b3b",
+          "Sources/E2Expect/Expectations.swift" : "d33c148dac033ca319aa4ac20300e133e40065ab9345d58d70dacbac880c0ec8",
+          "Sources/E2Judge/Env.swift" : "03fdaa9cadca31e9eec1ea88f42484cf2e7893a7ec5531ae0590b866c4041711",
+          "Sources/E2Judge/Judge.swift" : "1fa309af61801a8b51c20383479f5b381ac6573ae915fd549a5c4a16d4b6d5c0",
+          "Sources/e2preview/main.swift" : "24dfef9229a489f04fb840476f37d266d0bf6fe180a07e6602b446696dbbfbf8",
+          "Tests/E2CoreTests/EditTests.swift" : "bdadb18a7d793fdd1f3e99af9ae73b3ecf06a2d68550db9f51e6aa0974eaea29"
+        },
+        "treeSha256" : "4a9212f172e8e6ea2af9734129a856e26767c03767b8f96d1bcc6f9eaca56c42"
+      },
+      "executable" : {
+        "bytes" : 1796032,
+        "configuration" : "release",
+        "modified" : "2026-10-10T01:15:18Z",
+        "name" : "e2",
+        "sha256" : "c48091005e54ccba8aab9883b0693ae1f0fac1a0334e8598a261c2d6372a817c"
+      }
+    },
+    "fixtures" : {
+      "M-music.wav" : "f6c8c44177c7bd7fdab96de52dadbfdb10852357f1ff34dc0b41ef036f9b2cda",
+      "src-A-3840x2160-30p-v2-noreorder.mp4" : "18afae5dd6e00c8dfa8cfc53a47a50c318b1f109406f7ddf7ebae2d00a840f86 (created this run, 5.0 s)",
+      "src-B-3840x2160-30p-v2-noreorder.mp4" : "fd0bb75b7c20426db9fe6a204b305d44587898ae357a931df6304f2e559691e0 (created this run, 9.2 s)",
+      "src-C-3840x2160-30p-v2-noreorder.mp4" : "ea7d3fa652d5594066a9f4ef2cdb840a2828c04fc6f04c7e5f7dbb8babc252ef (created this run, 4.7 s)"
+    },
+    "peakFootprintMiBAtEnd" : 44.375700000000002,
+    "run" : {
+      "id" : "2026-10-10T011520Z",
+      "loadAvgStart" : [
+        4.1753,
+        4.5132000000000003,
+        10.1836
+      ],
+      "mode" : "inspect",
+      "os" : "Version 26.6.2 (Build 25G83)",
+      "settings" : "3840x2160 30p SDR H.264/AAC, timeline 10 s, generated fixtures (experimental, not product limits)"
+    },
+    "summary" : {
+      "fail" : 0,
+      "failedIDs" : [
+
+      ],
+      "pass" : 3,
+      "record" : 4
+    },
+    "wallSecondsTotal" : 22.351199999999999
+  }
+}

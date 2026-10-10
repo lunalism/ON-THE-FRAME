@@ -37,9 +37,10 @@ public final class ExportControl: @unchecked Sendable {
     public var cancelRequestedAt: UInt64? { lock.lock(); defer { lock.unlock() }; return _cancelRequestedAt }
     public var cancelAckAt: UInt64? { lock.lock(); defer { lock.unlock() }; return _cancelAckAt }
 
+    // 아래 상태 전환·실패 기록 메서드는 E2 내보내기(experiments/e2-4k)가 같은 취소·실패 규칙을 쓰도록 public이다.
     /// 진행 상태로 전환. 이미 취소 요청이 들어왔으면 cancelling을 유지한다.
-    func enter(_ s: ExportState) { lock.lock(); if _state != .cancelling { _state = s }; lock.unlock() }
-    func finish(_ s: ExportState) { lock.lock(); _state = s; lock.unlock() }
+    public func enter(_ s: ExportState) { lock.lock(); if _state != .cancelling { _state = s }; lock.unlock() }
+    public func finish(_ s: ExportState) { lock.lock(); _state = s; lock.unlock() }
 
     /// 취소 요청(준비·실행 중 모두 유효). 확인(acknowledgement)은 상태가 cancelling으로 바뀐 시점이다.
     public func cancel() {
@@ -53,10 +54,10 @@ public final class ExportControl: @unchecked Sendable {
         lock.unlock()
     }
 
-    func fail(_ e: Error) { lock.lock(); if _failure == nil { _failure = e }; lock.unlock() }
-    var failure: Error? { lock.lock(); defer { lock.unlock() }; return _failure }
-    var isCancelling: Bool { lock.lock(); defer { lock.unlock() }; return _state == .cancelling }
-    var shouldStop: Bool { lock.lock(); defer { lock.unlock() }; return _state == .cancelling || _failure != nil }
+    public func fail(_ e: Error) { lock.lock(); if _failure == nil { _failure = e }; lock.unlock() }
+    public var failure: Error? { lock.lock(); defer { lock.unlock() }; return _failure }
+    public var isCancelling: Bool { lock.lock(); defer { lock.unlock() }; return _state == .cancelling }
+    public var shouldStop: Bool { lock.lock(); defer { lock.unlock() }; return _state == .cancelling || _failure != nil }
 }
 
 public struct ExportJob: Sendable {

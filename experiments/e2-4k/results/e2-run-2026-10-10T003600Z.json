@@ -1,0 +1,828 @@
+{
+  "checks" : [
+    {
+      "audioFormat" : "aac  48000.0Hz ch=2",
+      "audioSamples" : 384000,
+      "clickDeltasSamples" : [
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1
+      ],
+      "decodeSeconds" : 1.2076,
+      "expectedFrames" : 240,
+      "fileMiB" : 28.921199999999999,
+      "format" : {
+        "codec" : "avc1",
+        "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+        "CVImageBufferTransferFunction" : "ITU_R_709_2",
+        "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+        "dimensions" : "3840x2160"
+      },
+      "frames" : 240,
+      "id" : "F-src-A",
+      "issues" : [
+
+      ],
+      "name" : "소스 영상 A(H.264 4K 30p + AAC): 디코딩 프레임 수·PTS·소스 ID·프레임 번호·이동 상자·배경, 오디오 클릭 위치",
+      "onsets" : 8,
+      "result" : "PASS"
+    },
+    {
+      "audioFormat" : "aac  48000.0Hz ch=2",
+      "audioSamples" : 384000,
+      "clickDeltasSamples" : [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "decodeSeconds" : 0.9536,
+      "expectedFrames" : 240,
+      "fileMiB" : 28.8552,
+      "format" : {
+        "codec" : "avc1",
+        "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+        "CVImageBufferTransferFunction" : "ITU_R_709_2",
+        "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+        "dimensions" : "3840x2160"
+      },
+      "frames" : 240,
+      "id" : "F-src-B",
+      "issues" : [
+
+      ],
+      "name" : "소스 영상 B(H.264 4K 30p + AAC): 디코딩 프레임 수·PTS·소스 ID·프레임 번호·이동 상자·배경, 오디오 클릭 위치",
+      "onsets" : 8,
+      "result" : "PASS"
+    },
+    {
+      "audioFormat" : "aac  48000.0Hz ch=2",
+      "audioSamples" : 288000,
+      "clickDeltasSamples" : [
+        -2,
+        -2,
+        -2,
+        -2,
+        -2,
+        -2
+      ],
+      "decodeSeconds" : 0.77959999999999996,
+      "expectedFrames" : 180,
+      "fileMiB" : 21.662500000000001,
+      "format" : {
+        "codec" : "avc1",
+        "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+        "CVImageBufferTransferFunction" : "ITU_R_709_2",
+        "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+        "dimensions" : "3840x2160"
+      },
+      "frames" : 180,
+      "id" : "F-src-C",
+      "issues" : [
+
+      ],
+      "name" : "소스 영상 C(H.264 4K 30p + AAC): 디코딩 프레임 수·PTS·소스 ID·프레임 번호·이동 상자·배경, 오디오 클릭 위치",
+      "onsets" : 6,
+      "result" : "PASS"
+    },
+    {
+      "boundaries" : [
+        {
+          "expected" : "A30",
+          "frame" : 0,
+          "model" : "A30",
+          "ok" : true
+        },
+        {
+          "expected" : "A119",
+          "frame" : 89,
+          "model" : "A119",
+          "ok" : true
+        },
+        {
+          "expected" : "C20",
+          "frame" : 90,
+          "model" : "C20",
+          "ok" : true
+        },
+        {
+          "expected" : "C109",
+          "frame" : 179,
+          "model" : "C109",
+          "ok" : true
+        },
+        {
+          "expected" : "B0",
+          "frame" : 180,
+          "model" : "B0",
+          "ok" : true
+        },
+        {
+          "expected" : "B59",
+          "frame" : 239,
+          "model" : "B59",
+          "ok" : true
+        },
+        {
+          "expected" : "B150",
+          "frame" : 240,
+          "model" : "B150",
+          "ok" : true
+        },
+        {
+          "expected" : "B209",
+          "frame" : 299,
+          "model" : "B209",
+          "ok" : true
+        }
+      ],
+      "editLog" : [
+        "append A = A[0, 240)",
+        "append B = B[0, 240)",
+        "append C = C[0, 180)",
+        "trim A: A[0, 240) → [30, 120)",
+        "split B at timeline 150 → B.1 B[0, 60), B.2 B[60, 240)",
+        "trim B.2: B[60, 240) → [150, 210)",
+        "trim C: C[0, 180) → [20, 110)",
+        "move C from index 3 to 1"
+      ],
+      "id" : "T1",
+      "lastValidFrame" : 299,
+      "name" : "편집 모델(붙이기·트림·분할·트림·이동): 결과 구간과 컷 경계의 소스 대응 = 독립 기대값, 길이 300, 마지막 유효 프레임 299",
+      "result" : "PASS",
+      "segments" : [
+        "[0, 90) A A@30",
+        "[90, 180) C C@20",
+        "[180, 240) B.1 B@0",
+        "[240, 300) B.2 B@150"
+      ]
+    },
+    {
+      "id" : "T2",
+      "name" : "잘못된 편집(소스 밖 트림, 컷 위치 분할, 길이 0)과 빈 타임라인 composition 구성은 거부",
+      "rejections" : {
+        "empty timeline build" : "invalidSource: empty timeline: no valid video frame",
+        "split at cut" : "edit: split point 90 not inside a clip",
+        "trim beyond source" : "edit: range outside source A [200, 300) of 240",
+        "zero length" : "edit: empty clip A"
+      },
+      "result" : "PASS"
+    },
+    {
+      "compositorErrors" : [
+
+      ],
+      "compositorRequests" : 300,
+      "copyMs" : {
+        "max" : 5.9187000000000003,
+        "mean" : 1.4172,
+        "n" : 300,
+        "p50" : 1.2423,
+        "p95" : 2.681
+      },
+      "fps" : 135.8246,
+      "frames" : 300,
+      "id" : "C1",
+      "issues" : [
+
+      ],
+      "maxInFlight" : 1,
+      "name" : "오프라인 합성기(AVAssetReaderVideoCompositionOutput, 내보내기와 같은 읽기 경로): 300프레임, PTS n\/30, 프레임마다 타임라인 코드·소스 ID·소스 프레임·이동 상자·자막 = 독립 기대값",
+      "overlayMs" : {
+        "max" : 5.0098000000000003,
+        "mean" : 0.64649999999999996,
+        "n" : 300,
+        "p50" : 0.70050000000000001,
+        "p95" : 1.2208000000000001
+      },
+      "ptsMismatch" : 0,
+      "result" : "PASS",
+      "wallSeconds" : 2.2086999999999999
+    },
+    {
+      "clicks" : [
+        {
+          "responseFrame" : 76,
+          "status" : "pass",
+          "t" : 2.5167000000000002
+        },
+        {
+          "responseFrame" : 196,
+          "status" : "pass",
+          "t" : 6.5167000000000002
+        },
+        {
+          "responseFrame" : 256,
+          "status" : "pass",
+          "t" : 8.5167000000000002
+        }
+      ],
+      "clipBandNonZero" : [
+
+      ],
+      "id" : "C2",
+      "isolationFramesChecked" : 288,
+      "name" : "선택 오디오 스펙트럼(오프라인 합성기 출력): 톤 구간 최대 밴드, 무음 구간 막대 0, 클립 오디오 밴드(23·25·27) 0, 클릭 반응 프레임",
+      "quietFramesChecked" : 108,
+      "quietNonZero" : [
+
+      ],
+      "result" : "PASS",
+      "toneFramesChecked" : 162,
+      "toneMismatch" : [
+
+      ],
+      "toneMismatchBarHeights" : {
+
+      }
+    },
+    {
+      "heldTimelineFrame" : 299,
+      "id" : "H1",
+      "name" : "끝 유지용 보관 프레임 = 마지막 유효 프레임 299의 소스(B 209)",
+      "result" : "PASS",
+      "sourceFrame" : 209,
+      "sourceID" : 90
+    },
+    {
+      "id" : "C2-control",
+      "name" : "대조: 클립 오디오 트랙을 분석하면 해당 클립 밴드(23·25·27)가 0보다 크다(선택 오디오만 쓰지 않으면 격리 검사가 실패해야 함)",
+      "probes" : [
+        {
+          "band" : 23,
+          "clip" : "A",
+          "t" : 1.5,
+          "value" : 0.74160000000000004
+        },
+        {
+          "band" : 27,
+          "clip" : "C",
+          "t" : 4.5,
+          "value" : 0.74229999999999996
+        },
+        {
+          "band" : 25,
+          "clip" : "B.1",
+          "t" : 7,
+          "value" : 0.74219999999999997
+        },
+        {
+          "band" : 25,
+          "clip" : "B.2",
+          "t" : 9,
+          "value" : 0.74209999999999998
+        }
+      ],
+      "result" : "PASS"
+    },
+    {
+      "compositorErrors" : [
+
+      ],
+      "compositorRequests" : 300,
+      "copyMs" : {
+        "max" : 72.681200000000004,
+        "mean" : 3.0268000000000002,
+        "n" : 300,
+        "p50" : 2.2907000000000002,
+        "p95" : 6.5545999999999998
+      },
+      "id" : "X1",
+      "loadAvgAfter" : [
+        4.7436999999999996,
+        5.1177000000000001,
+        4.8315000000000001
+      ],
+      "loadAvgBefore" : [
+        4.9828999999999999,
+        5.1703999999999999,
+        4.8486000000000002
+      ],
+      "name" : "4K 내보내기(합성기 경로, H.264 + AAC): 완료, 승격, 임시 디렉터리 정리",
+      "overlayMs" : {
+        "max" : 4.5510000000000002,
+        "mean" : 1.0225,
+        "n" : 300,
+        "p50" : 0.88900000000000001,
+        "p95" : 2.4228000000000001
+      },
+      "realtimeFactor" : 1.4775,
+      "report" : {
+        "audioFramesAppended" : 480000,
+        "distinctPixelBuffers" : 13,
+        "encodeSeconds" : 6.7680216250000003,
+        "finishWritingMs" : 119.224334,
+        "outcome" : "completed",
+        "outputBytes" : 50289921,
+        "peakFootprintMiB" : 630.48581695556641,
+        "promoted" : true,
+        "startFootprintMiB" : 53.328903198242188,
+        "tempDirCreated" : true,
+        "tempDirRemoved" : true,
+        "videoFramesAppended" : 300,
+        "wallSeconds" : 6.8982213750000003
+      },
+      "result" : "PASS"
+    },
+    {
+      "audioFormat" : "aac  48000.0Hz ch=2",
+      "audioRange" : [
+        0,
+        10
+      ],
+      "boundaries" : [
+        {
+          "decoded" : "A30",
+          "expected" : "A30",
+          "frame" : 0
+        },
+        {
+          "decoded" : "A119",
+          "expected" : "A119",
+          "frame" : 89
+        },
+        {
+          "decoded" : "C20",
+          "expected" : "C20",
+          "frame" : 90
+        },
+        {
+          "decoded" : "C109",
+          "expected" : "C109",
+          "frame" : 179
+        },
+        {
+          "decoded" : "B0",
+          "expected" : "B0",
+          "frame" : 180
+        },
+        {
+          "decoded" : "B59",
+          "expected" : "B59",
+          "frame" : 239
+        },
+        {
+          "decoded" : "B150",
+          "expected" : "B150",
+          "frame" : 240
+        },
+        {
+          "decoded" : "B209",
+          "expected" : "B209",
+          "frame" : 299
+        }
+      ],
+      "decodeSeconds" : 1.2282,
+      "fileMiB" : 47.9602,
+      "format" : {
+        "codec" : "avc1",
+        "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+        "CVImageBufferTransferFunction" : "ITU_R_709_2",
+        "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+        "dimensions" : "3840x2160"
+      },
+      "frames" : 300,
+      "id" : "X2",
+      "issues" : [
+
+      ],
+      "name" : "디코딩한 내보내기: 300프레임, PTS n\/30, 비디오 10 s, 3840×2160 H.264, 프레임마다 소스 ID·소스 프레임·타임라인 코드·이동 상자·자막 = 독립 기대값(컷 경계 포함)",
+      "ptsMismatch" : 0,
+      "result" : "PASS",
+      "videoRange" : [
+        0,
+        10
+      ]
+    },
+    {
+      "clicks" : [
+        {
+          "responseFrame" : 76,
+          "status" : "pass",
+          "t" : 2.5167000000000002
+        },
+        {
+          "responseFrame" : 196,
+          "status" : "pass",
+          "t" : 6.5167000000000002
+        },
+        {
+          "responseFrame" : 256,
+          "status" : "pass",
+          "t" : 8.5167000000000002
+        }
+      ],
+      "clipBandNonZero" : [
+
+      ],
+      "id" : "X3",
+      "isolationFramesChecked" : 288,
+      "name" : "디코딩한 내보내기의 스펙트럼: 선택 오디오 톤·무음·클릭 반응, 클립 오디오 밴드 0",
+      "quietFramesChecked" : 108,
+      "quietNonZero" : [
+
+      ],
+      "result" : "FAIL",
+      "toneFramesChecked" : 162,
+      "toneMismatch" : [
+        62,
+        63
+      ],
+      "toneMismatchBarHeights" : {
+        "62" : [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          106,
+          314,
+          0,
+          568,
+          142,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "63" : [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          107,
+          315,
+          0,
+          568,
+          142,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "decodedSamples" : 480000,
+      "expected" : [
+        {
+          "deltaSamples" : "-1",
+          "expectedSample" : 12000,
+          "kind" : "clip",
+          "ok" : true
+        },
+        {
+          "deltaSamples" : "-1",
+          "expectedSample" : 60000,
+          "kind" : "clip",
+          "ok" : true
+        },
+        {
+          "deltaSamples" : "-1",
+          "expectedSample" : 108000,
+          "kind" : "clip",
+          "ok" : true
+        },
+        {
+          "deltaSamples" : "0",
+          "expectedSample" : 120800,
+          "kind" : "music",
+          "ok" : true
+        },
+        {
+          "deltaSamples" : "-2",
+          "expectedSample" : 188800,
+          "kind" : "clip",
+          "ok" : true
+        },
+        {
+          "deltaSamples" : "-2",
+          "expectedSample" : 236800,
+          "kind" : "clip",
+          "ok" : true
+        },
+        {
+          "deltaSamples" : "-2",
+          "expectedSample" : 284800,
+          "kind" : "clip",
+          "ok" : true
+        },
+        {
+          "deltaSamples" : "0",
+          "expectedSample" : 292800,
+          "kind" : "clip",
+          "ok" : true
+        },
+        {
+          "deltaSamples" : "-1",
+          "expectedSample" : 312800,
+          "kind" : "music",
+          "ok" : true
+        },
+        {
+          "deltaSamples" : "0",
+          "expectedSample" : 340800,
+          "kind" : "clip",
+          "ok" : true
+        },
+        {
+          "deltaSamples" : "0",
+          "expectedSample" : 388800,
+          "kind" : "clip",
+          "ok" : true
+        },
+        {
+          "deltaSamples" : "-1",
+          "expectedSample" : 408800,
+          "kind" : "music",
+          "ok" : true
+        },
+        {
+          "deltaSamples" : "0",
+          "expectedSample" : 436800,
+          "kind" : "clip",
+          "ok" : true
+        }
+      ],
+      "expectedSamples" : 480000,
+      "extraOnsets" : [
+
+      ],
+      "id" : "X4",
+      "name" : "디코딩한 내보내기 오디오: 음악 클릭 3개와 편집 뒤 남은 클립 오디오 클릭 10개가 기대 타임라인 위치(±1 ms), 잘려 나간 클릭 없음",
+      "onsetCount" : 13,
+      "result" : "PASS"
+    },
+    {
+      "id" : "P1",
+      "name" : "취소(60프레임 뒤): cancelled, 대상 없음, 임시 디렉터리 삭제, 정지 시간 기록",
+      "report" : {
+        "audioFramesAppended" : 283264,
+        "distinctPixelBuffers" : 13,
+        "encodeSeconds" : 0,
+        "finishWritingMs" : 0,
+        "framesAtStop" : 60,
+        "outcome" : "cancelled",
+        "outputBytes" : 0,
+        "peakFootprintMiB" : 696.25148773193359,
+        "promoted" : false,
+        "startFootprintMiB" : 154.87586975097656,
+        "tAckMs" : 4.1e-05,
+        "tCleanupMs" : 0.46375,
+        "tempDirCreated" : true,
+        "tempDirRemoved" : true,
+        "tStopMs" : 285.93908299999998,
+        "tWorkersStoppedMs" : 46.898000000000003,
+        "videoFramesAppended" : 60,
+        "wallSeconds" : 1.3251685419999999
+      },
+      "result" : "PASS"
+    },
+    {
+      "id" : "P2",
+      "name" : "실패 주입(프레임 90): failed(injectedFailure), 대상 없음, 임시 디렉터리 삭제",
+      "report" : {
+        "audioFramesAppended" : 335872,
+        "distinctPixelBuffers" : 13,
+        "encodeSeconds" : 0,
+        "error" : "injectedFailure at frame 90",
+        "errorKind" : "injectedFailure",
+        "finishWritingMs" : 0,
+        "outcome" : "failed",
+        "outputBytes" : 0,
+        "peakFootprintMiB" : 699.23579406738281,
+        "promoted" : false,
+        "startFootprintMiB" : 142.75084686279297,
+        "tempDirCreated" : true,
+        "tempDirRemoved" : true,
+        "videoFramesAppended" : 90,
+        "wallSeconds" : 4.9529529999999999
+      },
+      "result" : "PASS"
+    },
+    {
+      "id" : "P3",
+      "name" : "기존 대상: 시작 전 거부(destinationExists), 기존 파일 해시 그대로, 임시 디렉터리 만들지 않음",
+      "report" : {
+        "audioFramesAppended" : 0,
+        "distinctPixelBuffers" : 0,
+        "encodeSeconds" : 0,
+        "error" : "destinationExists: <repo>\/experiments\/e2-4k\/artifacts\/runs\/2026-10-10T003600Z\/existing.mp4",
+        "errorKind" : "destinationExists",
+        "finishWritingMs" : 0,
+        "outcome" : "failed",
+        "outputBytes" : 0,
+        "peakFootprintMiB" : 284.5479736328125,
+        "promoted" : false,
+        "startFootprintMiB" : 284.5479736328125,
+        "tempDirCreated" : false,
+        "tempDirRemoved" : false,
+        "videoFramesAppended" : 0,
+        "wallSeconds" : 0.00044891700000000001
+      },
+      "result" : "PASS"
+    },
+    {
+      "fileSurvived" : true,
+      "id" : "P4",
+      "name" : "실행 중 대상 생성: 승격 거부(promotionConflict, RENAME_EXCL), 그 파일 그대로, 임시 디렉터리 삭제",
+      "report" : {
+        "audioFramesAppended" : 480000,
+        "distinctPixelBuffers" : 14,
+        "encodeSeconds" : 9.1280359999999998,
+        "error" : "promotionConflict: <repo>\/experiments\/e2-4k\/artifacts\/runs\/2026-10-10T003600Z\/race.mp4",
+        "errorKind" : "promotionConflict",
+        "finishWritingMs" : 1456.615,
+        "outcome" : "failed",
+        "outputBytes" : 0,
+        "peakFootprintMiB" : 839.03282928466797,
+        "promoted" : false,
+        "startFootprintMiB" : 285.4542236328125,
+        "tempDirCreated" : true,
+        "tempDirRemoved" : true,
+        "videoFramesAppended" : 300,
+        "wallSeconds" : 9.2366688329999995
+      },
+      "result" : "PASS"
+    },
+    {
+      "id" : "P5",
+      "name" : "원본을 대상으로 지정: 거부(destinationIsSource)",
+      "report" : {
+        "audioFramesAppended" : 0,
+        "distinctPixelBuffers" : 0,
+        "encodeSeconds" : 0,
+        "error" : "destinationIsSource: <repo>\/experiments\/e2-4k\/artifacts\/fixtures\/src-A-3840x2160-30p-v2.mp4",
+        "errorKind" : "destinationIsSource",
+        "finishWritingMs" : 0,
+        "outcome" : "failed",
+        "outputBytes" : 0,
+        "peakFootprintMiB" : 67.563369750976562,
+        "promoted" : false,
+        "startFootprintMiB" : 67.563369750976562,
+        "tempDirCreated" : false,
+        "tempDirRemoved" : false,
+        "videoFramesAppended" : 0,
+        "wallSeconds" : 0.00057212500000000004
+      },
+      "result" : "PASS"
+    },
+    {
+      "id" : "P6",
+      "leftovers" : [
+
+      ],
+      "name" : "보호 검사 뒤: 원본(소스 영상 3개·음악) 해시 그대로, 실험 임시 디렉터리 남지 않음",
+      "result" : "PASS",
+      "sources" : {
+        "M-music.wav" : "f6c8c44177c7bd7fdab96de52dadbfdb10852357f1ff34dc0b41ef036f9b2cda",
+        "src-A-3840x2160-30p-v2.mp4" : "886372585d6c6caf39f79cb9c191a2e6501dad932c78c7bd06f90151a80ffbf4",
+        "src-B-3840x2160-30p-v2.mp4" : "242362098ef854ab57f5b9c9625116867f1da19fec83ea7249b87a23aba34a42",
+        "src-C-3840x2160-30p-v2.mp4" : "548ff3039069cfd005718c1babf2000e51db5c1eb72dda353ee335d62913a13a"
+      }
+    }
+  ],
+  "sections" : {
+    "budgetAfter" : {
+      "e1-fhd\/.build" : 596.35550000000001,
+      "e1-fhd\/artifacts" : 74.347700000000003,
+      "e2-4k\/.build" : 148.71879999999999,
+      "e2-4k\/artifacts" : 182.23050000000001
+    },
+    "budgetBefore" : {
+      "e1-fhd\/.build" : 596.35550000000001,
+      "e1-fhd\/artifacts" : 74.347700000000003,
+      "e2-4k\/.build" : 148.71879999999999,
+      "e2-4k\/artifacts" : 133.8203
+    },
+    "budgetTotalMiB" : 1001.6523,
+    "build" : {
+      "e1SourceTree" : {
+        "fileCount" : 20,
+        "files" : {
+          "Package.swift" : "a5add313ff07bf95bfbe01e1eff67dff933fa54cbec7d2c0f356f2638946ada2",
+          "Sources\/e1\/main.swift" : "643e08c9bd8936d56a3a8e20c5d9f49383ee9ce69f10622672d613ecc23b4702",
+          "Sources\/E1Core\/Carrier.swift" : "2e7acdc6acca83fc35a87a291718bd0780f7e5da603411ea5ad5b9e2dcfd9cf9",
+          "Sources\/E1Core\/Compositor.swift" : "8b00047fc90320c8e3dc5d9c93dc7d68bad6b88b2fb51a4ff889d5b962dd5ec7",
+          "Sources\/E1Core\/Decode.swift" : "262d9298b79da39d1ceda378ba38cea1a31c69406cbb65af6849d310a81711bd",
+          "Sources\/E1Core\/Exporter.swift" : "8fdbc90b670a3e919c2086d55fc6523a06189ad7934d71af00fe221f58fff46e",
+          "Sources\/E1Core\/Fixtures.swift" : "149137c948c66e5cc2b68414d3bb6bd30b1e0a9a7c77709852cf1fc30e2611c5",
+          "Sources\/E1Core\/OutputGuard.swift" : "3ac18cb101f730e6d3b47fa3c70091b03fd9dcb56a32a14dbff5a1a8170671bb",
+          "Sources\/E1Core\/Preview.swift" : "0f4e74f55b1ad9154158cdfb6c3ceb56d933310d4648b91997ab373f5b50cf85",
+          "Sources\/E1Core\/Renderer.swift" : "c5a889a85fd6a8b4620eaae68092ee4bb55260d0db7128ae50b624a7bffd0fae",
+          "Sources\/E1Core\/Spec.swift" : "a4c04f924ebe97b7b9a216c20a951221641941ca14d9064db35548b50f6c223c",
+          "Sources\/E1Core\/Spectrum.swift" : "f645bc3c11820e0d9936b8eadf909baed84e79645d9cd52a711dcdc1fbe25c28",
+          "Sources\/E1Core\/Timeline.swift" : "1f39b9381fdf1a98a8a9eefd6ce97fdb3d32539a4ec7dfcdb43b9fecabea4e0b",
+          "Sources\/E1Core\/Util.swift" : "03a3b1508805077d5183d337647ae4d6fb8a66a7b617a79b3eb633de53e0c950",
+          "Sources\/E1Expect\/Expectations.swift" : "2c663e58795999a9d8b74e1f96dd61f5ce921ef800036a06386be7e61fd4b9fc",
+          "Sources\/e1preview\/Diagnose.swift" : "0defc72c0ebd504663acb13c0572eaa45b21c2a9906a269ff2128156cf6433fe",
+          "Sources\/e1preview\/Frames.swift" : "a8305d3ddc809df96bbaeee7d5acb5197ac9149f27935226d3dffaab86360d51",
+          "Sources\/e1preview\/main.swift" : "22bc65218f4711b84de0695e28ec6720e9c481a890a7da0a7ba879090f1d0b53",
+          "Sources\/e1preview\/Present.swift" : "abae15ca346d28778c65f0cddafdbabcffd9fb0d5831d4b4d8e8360a02e2d0ce",
+          "Tests\/E1CoreTests\/CoreTests.swift" : "323d1552b31c24c1a6524bc6d5a78b0217ea7e499c878816da32b1069592e9de"
+        },
+        "treeSha256" : "27e635772ce3b1acea7236690f85f41e8704d1dd3040636402de4687d26438f6"
+      },
+      "e2SourceTree" : {
+        "fileCount" : 13,
+        "files" : {
+          "Package.swift" : "8cf9f81f07fda8a5fbb34d1f30ed870db78c3da6d8aadac0d51707e124836c10",
+          "Sources\/e2\/main.swift" : "ed2213d52c2aece7de6d0444d9d1ce93d625f15d43e57d4ab44bf64ae90db27b",
+          "Sources\/E2Core\/Compositor.swift" : "ae9f377b6a410aa5ef628bfe0e85acf7f05ed9a22361b40970e16e5e6890b023",
+          "Sources\/E2Core\/EditTimeline.swift" : "23c3f1c1e03eaa2ea37b058624a3301d44d7cee10e781d719c1504d3aef34f99",
+          "Sources\/E2Core\/Exporter.swift" : "a3e1ae538c0c89f507b2bfd7819b70f3a520550cf745f1709e07babbb781a292",
+          "Sources\/E2Core\/Fixtures.swift" : "add8c5e853f9e26d20006f34b7519067992e9fc3ba80f7119db759ffd3bcf6a5",
+          "Sources\/E2Core\/Metrics.swift" : "b656c9d487aec3440f21e323188f94c6fd282e435b85481522807214e960a7ce",
+          "Sources\/E2Core\/Spec4K.swift" : "9344d41a72a69e760d414fcd3a8efa95168d3b05f013c238bb9e54e7192d3b3b",
+          "Sources\/E2Expect\/Expectations.swift" : "d33c148dac033ca319aa4ac20300e133e40065ab9345d58d70dacbac880c0ec8",
+          "Sources\/E2Judge\/Env.swift" : "f3fb79d301a824cfb80b4a67d9198479532f937d60a80020d693ce7a631938a1",
+          "Sources\/E2Judge\/Judge.swift" : "5a983e55ba7157829a2e4870ca70301ea06fb4feb1d5a75e064b217742af5838",
+          "Sources\/e2preview\/main.swift" : "d368dcbc05412e06d0d98c03178271ee82211ef7f2fc86c2a5f8c4a6d5172964",
+          "Tests\/E2CoreTests\/EditTests.swift" : "bdadb18a7d793fdd1f3e99af9ae73b3ecf06a2d68550db9f51e6aa0974eaea29"
+        },
+        "treeSha256" : "6184d9296ef5a5758a2afa90c93593b89b1e44df6324bd7b4df160006e968b27"
+      },
+      "executable" : {
+        "bytes" : 1663344,
+        "configuration" : "release",
+        "modified" : "2026-10-10T00:35:59Z",
+        "name" : "e2",
+        "sha256" : "f9acdc8d413533080e8351a28885adc6eab727d3b3c9d0be45b54ad99f580c56"
+      }
+    },
+    "fixtures" : {
+      "M-music.wav" : "f6c8c44177c7bd7fdab96de52dadbfdb10852357f1ff34dc0b41ef036f9b2cda",
+      "src-A-3840x2160-30p-v2.mp4" : "886372585d6c6caf39f79cb9c191a2e6501dad932c78c7bd06f90151a80ffbf4",
+      "src-B-3840x2160-30p-v2.mp4" : "242362098ef854ab57f5b9c9625116867f1da19fec83ea7249b87a23aba34a42",
+      "src-C-3840x2160-30p-v2.mp4" : "548ff3039069cfd005718c1babf2000e51db5c1eb72dda353ee335d62913a13a"
+    },
+    "peakFootprintMiBAtEnd" : 108.9383,
+    "run" : {
+      "id" : "2026-10-10T003600Z",
+      "loadAvgStart" : [
+        5.0688000000000004,
+        5.1904000000000003,
+        4.8540000000000001
+      ],
+      "mode" : "all",
+      "os" : "Version 26.6.2 (Build 25G83)",
+      "settings" : "3840x2160 30p SDR H.264\/AAC, timeline 10 s, generated fixtures (experimental, not product limits)"
+    },
+    "runDir" : "artifacts\/runs\/2026-10-10T003600Z",
+    "summary" : {
+      "fail" : 1,
+      "failedIDs" : [
+        "X3"
+      ],
+      "pass" : 18,
+      "record" : 0
+    },
+    "wallSecondsTotal" : 29.9636
+  }
+}

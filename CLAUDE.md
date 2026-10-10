@@ -13,14 +13,15 @@ Claude Code는 [docs/DECISIONS.md](docs/DECISIONS.md)에 "확정"으로 기록�
 ## 현재 단계
 
 - 기획 단계다. 제품 애플리케이션 코드와 Xcode 프로젝트는 만들지 않는다.
-- **작업 승인(2026-10-09): E1-a(A-001)와 E1-b(A-002)만 허용했고, 둘 다 완료되었다(E1 완료 2026-10-10, 시험한 Mac의 짧은 FHD 통합 실험에 한함).** 새 실험 단계(E2 등)는 별도 승인 전까지 시작하지 않는다. 실험 코드는 [experiments/e1-fhd/](experiments/e1-fhd/)에만 둔다([docs/DECISIONS.md](docs/DECISIONS.md) §2.1).
+- **작업 승인: E1-a(A-001)·E1-b(A-002)는 완료(E1 완료 2026-10-10, 시험한 Mac의 짧은 FHD 통합 실험에 한함). E2(A-003, 2026-10-10)만 진행 중으로 허용.** 실험 코드는 [experiments/e1-fhd/](experiments/e1-fhd/)와 [experiments/e2-4k/](experiments/e2-4k/)에만 둔다([docs/DECISIONS.md](docs/DECISIONS.md) §2.1). E3 등 다른 단계는 별도 승인 전까지 시작하지 않는다.
+  - E2: 짧은 4K 컷 편집 실험. 3840×2160, 30fps, SDR, H.264/AAC, 최종 타임라인 10초, 생성 fixture만. 실제 소스 영상 디코딩·합성, 트림·분할·이동(비디오 트랙 1개 순차 하드 컷, 실험 범위), 자막 3개, 선택 오디오 스펙트럼, 같은 타임라인 해석의 프리뷰·내보내기, 출력 보호·취소·실패. E1 부품은 패키지 전체를 복제하지 않고 재사용한다. 실험 전용 최소 창 허용. 성능은 측정만 하고 제품 기준을 만들지 않는다. 60분·3시간 실행, 4K60, HDR은 허용하지 않는다.
   - E1-a: 헤드리스 FHD 합성·내보내기 실험과 짧은 검증 실행.
   - E1-b: 기존 렌더러·타임라인 모델·선택 소스 스펙트럼 캐시를 사용자 정의 합성기로 `AVPlayer`에 연결한 실제 프리뷰, 내보내기와의 비교, 필요한 E1-a 수정, 짧은 검증 실행. 실험 전용 최소 창(재생·일시정지·탐색)은 허용하며 제품 UI가 아니다.
   - 허용: Swift + AVFoundation/AVKit 실험 코드(잠정), 합성 fixture, 10초 FHD 수준의 짧은 내보내기·재생, 빌드·테스트 실행.
-  - 산출물: 생성 fixture·캐시·출력·빌드 산출물은 데이터 볼륨의 `experiments/e1-fhd/artifacts/`, `experiments/e1-fhd/.build/`에 두고 Git에서 무시한다. 실험 소유 산출물 합계는 2 GiB 이하이며, 넘기 전에 멈추고 보고한다. 시스템 캐시를 옮기거나 전역 설정(화면 기록 권한 포함)을 바꾸지 않는다. 외부 미디어를 쓰지 않는다.
-  - 허용하지 않음: 제품 앱 UI, 프로젝트 저장, 4K, 긴 내보내기·재생, 라이선스 인프라, 도구 설치, commit·push·merge.
-  - 소유자 관찰이 필요한 항목이 남아 있는 동안 E1을 완료로 선언하지 않는다.
-  - A-001·A-002는 P-001~P-006 승인이나 기술 스택·플랫폼 정책 확정이 아니다. E2 이후 단계는 별도 승인을 받고, 승인 범위에 맞게 이 절을 갱신한 뒤 진행한다. 승인 범위를 넘는 코드는 만들지 않는다.
+  - 산출물: 생성 fixture·캐시·출력·빌드 산출물은 데이터 볼륨의 각 실험 디렉터리 `artifacts/`, `.build/`에 두고 Git에서 무시한다. 실험 소유 산출물 합계(E1·E2 합산)는 2 GiB 이하이며, 넘기 전에 멈추고 보고한다. 시스템 캐시를 옮기거나 전역 설정(화면 기록 권한 포함)을 바꾸지 않는다. 외부 미디어를 쓰지 않는다.
+  - 허용하지 않음: 제품 앱 UI, 프로젝트 저장, E2 범위 밖의 4K, 긴 내보내기·재생, 라이선스 인프라, 도구 설치, commit·push·merge.
+  - 소유자 관찰이 필요한 항목이 남아 있는 동안 그 실험(E1, E2)을 완료로 선언하지 않는다.
+  - A-001~A-003은 P-001~P-006 승인이나 기술 스택·플랫폼 정책 확정이 아니다. E3 이후 단계는 별도 승인을 받고, 승인 범위에 맞게 이 절을 갱신한 뒤 진행한다. 승인 범위를 넘는 코드는 만들지 않는다.
 - 기술 스택, 최소 macOS 버전, 프로젝트 파일 포맷, 라이선스는 미정이다([docs/DECISIONS.md](docs/DECISIONS.md) 참조).
 - 기술 비교와 잠정 추천은 [docs/TECHNOLOGY-EVALUATION.md](docs/TECHNOLOGY-EVALUATION.md), 단계별 실험 계획은 [docs/EXPERIMENT-PLAN.md](docs/EXPERIMENT-PLAN.md)에 있으며, 모두 제안일 뿐 확정이 아니다.
 - 소유자 확인 방향(2026-10-09): 개인용으로 시작, 성공 시 상업 배포, 최대 3시간·4K는 지원 목표(미입증). 초기 구현에 라이선스 인프라를 넣지 않는다([docs/DECISIONS.md](docs/DECISIONS.md) D-011~D-017). 검증 전에는 3시간·4K 지원을 주장하지 않는다.
@@ -67,3 +68,4 @@ Claude Code는 [docs/DECISIONS.md](docs/DECISIONS.md)에 "확정"으로 기록�
 | [docs/TECHNOLOGY-EVALUATION.md](docs/TECHNOLOGY-EVALUATION.md) | 기술 방식 비교, 잠정 추천, macOS/CPU 정책 제안, 초기 통합 실험(E1) 상세 |
 | [docs/EXPERIMENT-PLAN.md](docs/EXPERIMENT-PLAN.md) | 단계별 실험 계획(E1 FHD → E2 4K → E3 3시간), 메모리·디스크 구조 제안, 승인 구분 |
 | [experiments/e1-fhd/README.md](experiments/e1-fhd/README.md) | E1 실험(E1-a 내보내기, E1-b 프리뷰) 코드 구성, 재현 명령, 결과·증거 경계, 소유자 관찰 체크리스트, 한계 |
+| [experiments/e2-4k/README.md](experiments/e2-4k/README.md) | E2 실험(짧은 4K 컷 편집) 코드 구성, 재현 명령, 결과·증거 경계, 열린 결함, 소유자 관찰 체크리스트, 한계 |

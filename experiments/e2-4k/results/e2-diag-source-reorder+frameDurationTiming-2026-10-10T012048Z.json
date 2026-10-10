@@ -1,0 +1,505 @@
+{
+  "checks" : [
+    {
+      "id" : "DS-A30",
+      "name" : "시작 A30(타임라인 0) reorder+frameDurationTiming: 합성기가 받은 소스 = 기대 소스(3회 중 어긋난 횟수)",
+      "result" : "RECORD",
+      "runs" : [
+        {
+          "compositorMismatch" : [
+
+          ],
+          "compositorReceived" : [
+            "t0@0/30 want A30 got A30 sfc 232 mt 0/30",
+            "t0@0/30 want A30 got A30 sfc 232 mt 0/30",
+            "t1@1/30 want A31 got A31 sfc 398 mt 20/600",
+            "t2@2/30 want A32 got A32 sfc 407 mt 40/600",
+            "t3@3/30 want A33 got A33 sfc 123 mt 60/600",
+            "t4@4/30 want A34 got A34 sfc 268 mt 80/600",
+            "t5@5/30 want A35 got A35 sfc 266 mt 100/600",
+            "t6@6/30 want A36 got A36 sfc 274 mt 120/600",
+            "t7@7/30 want A37 got A37 sfc 253 mt 140/600",
+            "t8@8/30 want A38 got A38 sfc 279 mt 160/600",
+            "t9@9/30 want A39 got A39 sfc 278 mt 180/600",
+            "t10@10/30 want A40 got A40 sfc 398 mt 200/600",
+            "t11@11/30 want A41 got A41 sfc 232 mt 220/600"
+          ],
+          "videoOutputFrames" : 13,
+          "videoOutputMismatch" : [
+
+          ]
+        },
+        {
+          "compositorMismatch" : [
+
+          ],
+          "compositorReceived" : [
+            "t0@0/30 want A30 got A30 sfc 283 mt 0/30",
+            "t0@0/30 want A30 got A30 sfc 283 mt 0/30",
+            "t1@1/30 want A31 got A31 sfc 278 mt 20/600",
+            "t2@2/30 want A32 got A32 sfc 407 mt 40/600",
+            "t3@3/30 want A33 got A33 sfc 428 mt 60/600",
+            "t4@4/30 want A34 got A34 sfc 274 mt 80/600",
+            "t5@5/30 want A35 got A35 sfc 253 mt 100/600",
+            "t6@6/30 want A36 got A36 sfc 283 mt 120/600",
+            "t7@7/30 want A37 got A37 sfc 316 mt 140/600",
+            "t8@8/30 want A38 got A38 sfc 279 mt 160/600",
+            "t9@9/30 want A39 got A39 sfc 278 mt 180/600",
+            "t10@10/30 want A40 got A40 sfc 407 mt 200/600",
+            "t11@11/30 want A41 got A41 sfc 232 mt 220/600"
+          ],
+          "videoOutputFrames" : 13,
+          "videoOutputMismatch" : [
+
+          ]
+        },
+        {
+          "compositorMismatch" : [
+
+          ],
+          "compositorReceived" : [
+            "t0@0/30 want A30 got A30 sfc 289 mt 0/30",
+            "t0@0/30 want A30 got A30 sfc 289 mt 0/30",
+            "t1@1/30 want A31 got A31 sfc 278 mt 20/600",
+            "t2@2/30 want A32 got A32 sfc 274 mt 40/600",
+            "t3@3/30 want A33 got A33 sfc 407 mt 60/600",
+            "t4@4/30 want A34 got A34 sfc 232 mt 80/600",
+            "t5@5/30 want A35 got A35 sfc 253 mt 100/600",
+            "t6@6/30 want A36 got A36 sfc 289 mt 120/600",
+            "t7@7/30 want A37 got A37 sfc 123 mt 140/600",
+            "t8@8/30 want A38 got A38 sfc 316 mt 160/600",
+            "t9@9/30 want A39 got A39 sfc 278 mt 180/600",
+            "t10@10/30 want A40 got A40 sfc 274 mt 200/600",
+            "t11@11/30 want A41 got A41 sfc 398 mt 220/600"
+          ],
+          "videoOutputFrames" : 13,
+          "videoOutputMismatch" : [
+
+          ]
+        }
+      ],
+      "runsWithMismatch" : 0
+    },
+    {
+      "id" : "DS-A90",
+      "name" : "시작 A90(타임라인 60) reorder+frameDurationTiming: 합성기가 받은 소스 = 기대 소스(3회 중 어긋난 횟수)",
+      "result" : "RECORD",
+      "runs" : [
+        {
+          "compositorMismatch" : [
+            "t62: A91 != A92"
+          ],
+          "compositorReceived" : [
+            "t60@60/30 want A90 got A90 sfc 232 mt 1200/600",
+            "t60@60/30 want A90 got A90 sfc 232 mt 1200/600",
+            "t61@61/30 want A91 got A91 sfc 253 mt 1220/600",
+            "t62@62/30 want A92 got A91 sfc 253 mt 1220/600 ✗",
+            "t63@63/30 want A93 got A93 sfc 274 mt 1260/600",
+            "t64@64/30 want A94 got A94 sfc 123 mt 1280/600",
+            "t65@65/30 want A95 got A95 sfc 407 mt 1300/600",
+            "t66@66/30 want A96 got A96 sfc 398 mt 1320/600",
+            "t67@67/30 want A97 got A97 sfc 289 mt 1340/600",
+            "t68@68/30 want A98 got A98 sfc 428 mt 1360/600",
+            "t69@69/30 want A99 got A99 sfc 266 mt 1380/600",
+            "t70@70/30 want A100 got A100 sfc 307 mt 1400/600",
+            "t71@71/30 want A101 got A101 sfc 232 mt 1420/600"
+          ],
+          "videoOutputFrames" : 13,
+          "videoOutputMismatch" : [
+            "t62: A91"
+          ]
+        },
+        {
+          "compositorMismatch" : [
+            "t62: A91 != A92"
+          ],
+          "compositorReceived" : [
+            "t60@60/30 want A90 got A90 sfc 274 mt 1200/600",
+            "t60@60/30 want A90 got A90 sfc 274 mt 1200/600",
+            "t61@61/30 want A91 got A91 sfc 133 mt 1220/600",
+            "t62@62/30 want A92 got A91 sfc 133 mt 1220/600 ✗",
+            "t63@63/30 want A93 got A93 sfc 253 mt 1260/600",
+            "t64@64/30 want A94 got A94 sfc 398 mt 1280/600",
+            "t65@65/30 want A95 got A95 sfc 407 mt 1300/600",
+            "t66@66/30 want A96 got A96 sfc 274 mt 1320/600",
+            "t67@67/30 want A97 got A97 sfc 123 mt 1340/600",
+            "t68@68/30 want A98 got A98 sfc 289 mt 1360/600",
+            "t69@69/30 want A99 got A99 sfc 266 mt 1380/600",
+            "t70@70/30 want A100 got A100 sfc 133 mt 1400/600",
+            "t71@71/30 want A101 got A101 sfc 232 mt 1420/600"
+          ],
+          "videoOutputFrames" : 13,
+          "videoOutputMismatch" : [
+            "t62: A91"
+          ]
+        },
+        {
+          "compositorMismatch" : [
+            "t62: A91 != A92"
+          ],
+          "compositorReceived" : [
+            "t60@60/30 want A90 got A90 sfc 398 mt 1200/600",
+            "t60@60/30 want A90 got A90 sfc 398 mt 1200/600",
+            "t61@61/30 want A91 got A91 sfc 407 mt 1220/600",
+            "t62@62/30 want A92 got A91 sfc 407 mt 1220/600 ✗",
+            "t63@63/30 want A93 got A93 sfc 133 mt 1260/600",
+            "t64@64/30 want A94 got A94 sfc 279 mt 1280/600",
+            "t65@65/30 want A95 got A95 sfc 289 mt 1300/600",
+            "t66@66/30 want A96 got A96 sfc 232 mt 1320/600",
+            "t67@67/30 want A97 got A97 sfc 253 mt 1340/600",
+            "t68@68/30 want A98 got A98 sfc 319 mt 1360/600",
+            "t69@69/30 want A99 got A99 sfc 123 mt 1380/600",
+            "t70@70/30 want A100 got A100 sfc 268 mt 1400/600",
+            "t71@71/30 want A101 got A101 sfc 398 mt 1420/600"
+          ],
+          "videoOutputFrames" : 13,
+          "videoOutputMismatch" : [
+            "t62: A91"
+          ]
+        }
+      ],
+      "runsWithMismatch" : 3
+    },
+    {
+      "id" : "DS-B150",
+      "name" : "시작 B150(타임라인 240) reorder+frameDurationTiming: 합성기가 받은 소스 = 기대 소스(3회 중 어긋난 횟수)",
+      "result" : "RECORD",
+      "runs" : [
+        {
+          "compositorMismatch" : [
+            "t242: B151 != B152"
+          ],
+          "compositorReceived" : [
+            "t240@240/30 want B150 got B150 sfc 133 mt 240/30",
+            "t240@240/30 want B150 got B150 sfc 133 mt 240/30",
+            "t241@241/30 want B151 got B151 sfc 278 mt 4820/600",
+            "t242@242/30 want B152 got B151 sfc 278 mt 4820/600 ✗",
+            "t243@243/30 want B153 got B153 sfc 407 mt 4860/600",
+            "t244@244/30 want B154 got B154 sfc 232 mt 4880/600",
+            "t245@245/30 want B155 got B155 sfc 289 mt 4900/600",
+            "t246@246/30 want B156 got B156 sfc 398 mt 4920/600",
+            "t247@247/30 want B157 got B157 sfc 279 mt 4940/600",
+            "t248@248/30 want B158 got B158 sfc 123 mt 4960/600",
+            "t249@249/30 want B159 got B159 sfc 133 mt 4980/600",
+            "t250@250/30 want B160 got B160 sfc 316 mt 5000/600",
+            "t251@251/30 want B161 got B161 sfc 253 mt 5020/600"
+          ],
+          "videoOutputFrames" : 13,
+          "videoOutputMismatch" : [
+            "t242: B151"
+          ]
+        },
+        {
+          "compositorMismatch" : [
+
+          ],
+          "compositorReceived" : [
+            "t240@240/30 want B150 got B150 sfc 407 mt 240/30",
+            "t240@240/30 want B150 got B150 sfc 407 mt 240/30",
+            "t241@241/30 want B151 got B151 sfc 253 mt 4820/600",
+            "t242@242/30 want B152 got B152 sfc 398 mt 4840/600",
+            "t243@243/30 want B153 got B153 sfc 278 mt 4860/600",
+            "t244@244/30 want B154 got B154 sfc 289 mt 4880/600",
+            "t245@245/30 want B155 got B155 sfc 133 mt 4900/600",
+            "t246@246/30 want B156 got B156 sfc 316 mt 4920/600",
+            "t247@247/30 want B157 got B157 sfc 232 mt 4940/600",
+            "t248@248/30 want B158 got B158 sfc 307 mt 4960/600",
+            "t249@249/30 want B159 got B159 sfc 407 mt 4980/600",
+            "t250@250/30 want B160 got B160 sfc 253 mt 5000/600",
+            "t251@251/30 want B161 got B161 sfc 279 mt 5020/600"
+          ],
+          "videoOutputFrames" : 13,
+          "videoOutputMismatch" : [
+
+          ]
+        },
+        {
+          "compositorMismatch" : [
+            "t242: B151 != B152"
+          ],
+          "compositorReceived" : [
+            "t240@240/30 want B150 got B150 sfc 278 mt 240/30",
+            "t240@240/30 want B150 got B150 sfc 278 mt 240/30",
+            "t241@241/30 want B151 got B151 sfc 307 mt 4820/600",
+            "t242@242/30 want B152 got B151 sfc 307 mt 4820/600 ✗",
+            "t243@243/30 want B153 got B153 sfc 398 mt 4860/600",
+            "t244@244/30 want B154 got B154 sfc 253 mt 4880/600",
+            "t245@245/30 want B155 got B155 sfc 407 mt 4900/600",
+            "t246@246/30 want B156 got B156 sfc 289 mt 4920/600",
+            "t247@247/30 want B157 got B157 sfc 266 mt 4940/600",
+            "t248@248/30 want B158 got B158 sfc 279 mt 4960/600",
+            "t249@249/30 want B159 got B159 sfc 278 mt 4980/600",
+            "t250@250/30 want B160 got B160 sfc 274 mt 5000/600",
+            "t251@251/30 want B161 got B161 sfc 316 mt 5020/600"
+          ],
+          "videoOutputFrames" : 13,
+          "videoOutputMismatch" : [
+            "t242: B151"
+          ]
+        }
+      ],
+      "runsWithMismatch" : 2
+    },
+    {
+      "id" : "DS-B0",
+      "name" : "시작 B0(타임라인 180) reorder+frameDurationTiming: 합성기가 받은 소스 = 기대 소스(3회 중 어긋난 횟수)",
+      "result" : "RECORD",
+      "runs" : [
+        {
+          "compositorMismatch" : [
+
+          ],
+          "compositorReceived" : [
+            "t180@180/30 want B0 got B0 sfc 307 mt 180/30",
+            "t180@180/30 want B0 got B0 sfc 307 mt 180/30",
+            "t181@181/30 want B1 got B1 sfc 398 mt 3620/600",
+            "t182@182/30 want B2 got B2 sfc 133 mt 3640/600",
+            "t183@183/30 want B3 got B3 sfc 268 mt 3660/600",
+            "t184@184/30 want B4 got B4 sfc 316 mt 3680/600",
+            "t185@185/30 want B5 got B5 sfc 253 mt 3700/600",
+            "t186@186/30 want B6 got B6 sfc 428 mt 3720/600",
+            "t187@187/30 want B7 got B7 sfc 307 mt 3740/600",
+            "t188@188/30 want B8 got B8 sfc 278 mt 3760/600",
+            "t189@189/30 want B9 got B9 sfc 398 mt 3780/600",
+            "t190@190/30 want B10 got B10 sfc 274 mt 3800/600",
+            "t191@191/30 want B11 got B11 sfc 133 mt 3820/600"
+          ],
+          "videoOutputFrames" : 13,
+          "videoOutputMismatch" : [
+
+          ]
+        },
+        {
+          "compositorMismatch" : [
+
+          ],
+          "compositorReceived" : [
+            "t180@180/30 want B0 got B0 sfc 253 mt 180/30",
+            "t180@180/30 want B0 got B0 sfc 253 mt 180/30",
+            "t181@181/30 want B1 got B1 sfc 316 mt 3620/600",
+            "t182@182/30 want B2 got B2 sfc 407 mt 3640/600",
+            "t183@183/30 want B3 got B3 sfc 133 mt 3660/600",
+            "t184@184/30 want B4 got B4 sfc 268 mt 3680/600",
+            "t185@185/30 want B5 got B5 sfc 428 mt 3700/600",
+            "t186@186/30 want B6 got B6 sfc 274 mt 3720/600",
+            "t187@187/30 want B7 got B7 sfc 253 mt 3740/600",
+            "t188@188/30 want B8 got B8 sfc 279 mt 3760/600",
+            "t189@189/30 want B9 got B9 sfc 316 mt 3780/600",
+            "t190@190/30 want B10 got B10 sfc 283 mt 3800/600",
+            "t191@191/30 want B11 got B11 sfc 407 mt 3820/600"
+          ],
+          "videoOutputFrames" : 13,
+          "videoOutputMismatch" : [
+
+          ]
+        },
+        {
+          "compositorMismatch" : [
+
+          ],
+          "compositorReceived" : [
+            "t180@180/30 want B0 got B0 sfc 428 mt 180/30",
+            "t180@180/30 want B0 got B0 sfc 428 mt 180/30",
+            "t181@181/30 want B1 got B1 sfc 307 mt 3620/600",
+            "t182@182/30 want B2 got B2 sfc 266 mt 3640/600",
+            "t183@183/30 want B3 got B3 sfc 407 mt 3660/600",
+            "t184@184/30 want B4 got B4 sfc 133 mt 3680/600",
+            "t185@185/30 want B5 got B5 sfc 283 mt 3700/600",
+            "t186@186/30 want B6 got B6 sfc 268 mt 3720/600",
+            "t187@187/30 want B7 got B7 sfc 123 mt 3740/600",
+            "t188@188/30 want B8 got B8 sfc 253 mt 3760/600",
+            "t189@189/30 want B9 got B9 sfc 278 mt 3780/600",
+            "t190@190/30 want B10 got B10 sfc 428 mt 3800/600",
+            "t191@191/30 want B11 got B11 sfc 307 mt 3820/600"
+          ],
+          "videoOutputFrames" : 13,
+          "videoOutputMismatch" : [
+
+          ]
+        }
+      ],
+      "runsWithMismatch" : 0
+    },
+    {
+      "id" : "DS-C20",
+      "name" : "시작 C20(타임라인 90) reorder+frameDurationTiming: 합성기가 받은 소스 = 기대 소스(3회 중 어긋난 횟수)",
+      "result" : "RECORD",
+      "runs" : [
+        {
+          "compositorMismatch" : [
+
+          ],
+          "compositorReceived" : [
+            "t90@90/30 want C20 got C20 sfc 133 mt 90/30",
+            "t90@90/30 want C20 got C20 sfc 133 mt 90/30",
+            "t91@91/30 want C21 got C21 sfc 278 mt 1820/600",
+            "t92@92/30 want C22 got C22 sfc 307 mt 1840/600",
+            "t93@93/30 want C23 got C23 sfc 266 mt 1860/600",
+            "t94@94/30 want C24 got C24 sfc 407 mt 1880/600",
+            "t95@95/30 want C25 got C25 sfc 123 mt 1900/600",
+            "t96@96/30 want C26 got C26 sfc 283 mt 1920/600",
+            "t97@97/30 want C27 got C27 sfc 428 mt 1940/600",
+            "t98@98/30 want C28 got C28 sfc 253 mt 1960/600",
+            "t99@99/30 want C29 got C29 sfc 133 mt 1980/600",
+            "t100@100/30 want C30 got C30 sfc 279 mt 2000/600",
+            "t101@101/30 want C31 got C31 sfc 278 mt 2020/600"
+          ],
+          "videoOutputFrames" : 13,
+          "videoOutputMismatch" : [
+
+          ]
+        },
+        {
+          "compositorMismatch" : [
+
+          ],
+          "compositorReceived" : [
+            "t90@90/30 want C20 got C20 sfc 407 mt 90/30",
+            "t90@90/30 want C20 got C20 sfc 407 mt 90/30",
+            "t91@91/30 want C21 got C21 sfc 133 mt 1820/600",
+            "t92@92/30 want C22 got C22 sfc 278 mt 1840/600",
+            "t93@93/30 want C23 got C23 sfc 307 mt 1860/600",
+            "t94@94/30 want C24 got C24 sfc 266 mt 1880/600",
+            "t95@95/30 want C25 got C25 sfc 289 mt 1900/600",
+            "t96@96/30 want C26 got C26 sfc 123 mt 1920/600",
+            "t97@97/30 want C27 got C27 sfc 279 mt 1940/600",
+            "t98@98/30 want C28 got C28 sfc 274 mt 1960/600",
+            "t99@99/30 want C29 got C29 sfc 407 mt 1980/600",
+            "t100@100/30 want C30 got C30 sfc 319 mt 2000/600",
+            "t101@101/30 want C31 got C31 sfc 133 mt 2020/600"
+          ],
+          "videoOutputFrames" : 13,
+          "videoOutputMismatch" : [
+
+          ]
+        },
+        {
+          "compositorMismatch" : [
+
+          ],
+          "compositorReceived" : [
+            "t90@90/30 want C20 got C20 sfc 266 mt 90/30",
+            "t90@90/30 want C20 got C20 sfc 266 mt 90/30",
+            "t91@91/30 want C21 got C21 sfc 407 mt 1820/600",
+            "t92@92/30 want C22 got C22 sfc 133 mt 1840/600",
+            "t93@93/30 want C23 got C23 sfc 278 mt 1860/600",
+            "t94@94/30 want C24 got C24 sfc 307 mt 1880/600",
+            "t95@95/30 want C25 got C25 sfc 428 mt 1900/600",
+            "t96@96/30 want C26 got C26 sfc 289 mt 1920/600",
+            "t97@97/30 want C27 got C27 sfc 266 mt 1940/600",
+            "t98@98/30 want C28 got C28 sfc 279 mt 1960/600",
+            "t99@99/30 want C29 got C29 sfc 283 mt 1980/600",
+            "t100@100/30 want C30 got C30 sfc 316 mt 2000/600",
+            "t101@101/30 want C31 got C31 sfc 407 mt 2020/600"
+          ],
+          "videoOutputFrames" : 13,
+          "videoOutputMismatch" : [
+
+          ]
+        }
+      ],
+      "runsWithMismatch" : 0
+    }
+  ],
+  "sections" : {
+    "build" : {
+      "e1SourceTree" : {
+        "fileCount" : 20,
+        "files" : {
+          "Package.swift" : "a5add313ff07bf95bfbe01e1eff67dff933fa54cbec7d2c0f356f2638946ada2",
+          "Sources/e1/main.swift" : "643e08c9bd8936d56a3a8e20c5d9f49383ee9ce69f10622672d613ecc23b4702",
+          "Sources/E1Core/Carrier.swift" : "2e7acdc6acca83fc35a87a291718bd0780f7e5da603411ea5ad5b9e2dcfd9cf9",
+          "Sources/E1Core/Compositor.swift" : "8b00047fc90320c8e3dc5d9c93dc7d68bad6b88b2fb51a4ff889d5b962dd5ec7",
+          "Sources/E1Core/Decode.swift" : "262d9298b79da39d1ceda378ba38cea1a31c69406cbb65af6849d310a81711bd",
+          "Sources/E1Core/Exporter.swift" : "8fdbc90b670a3e919c2086d55fc6523a06189ad7934d71af00fe221f58fff46e",
+          "Sources/E1Core/Fixtures.swift" : "149137c948c66e5cc2b68414d3bb6bd30b1e0a9a7c77709852cf1fc30e2611c5",
+          "Sources/E1Core/OutputGuard.swift" : "3ac18cb101f730e6d3b47fa3c70091b03fd9dcb56a32a14dbff5a1a8170671bb",
+          "Sources/E1Core/Preview.swift" : "0f4e74f55b1ad9154158cdfb6c3ceb56d933310d4648b91997ab373f5b50cf85",
+          "Sources/E1Core/Renderer.swift" : "c5a889a85fd6a8b4620eaae68092ee4bb55260d0db7128ae50b624a7bffd0fae",
+          "Sources/E1Core/Spec.swift" : "a4c04f924ebe97b7b9a216c20a951221641941ca14d9064db35548b50f6c223c",
+          "Sources/E1Core/Spectrum.swift" : "f645bc3c11820e0d9936b8eadf909baed84e79645d9cd52a711dcdc1fbe25c28",
+          "Sources/E1Core/Timeline.swift" : "1f39b9381fdf1a98a8a9eefd6ce97fdb3d32539a4ec7dfcdb43b9fecabea4e0b",
+          "Sources/E1Core/Util.swift" : "03a3b1508805077d5183d337647ae4d6fb8a66a7b617a79b3eb633de53e0c950",
+          "Sources/E1Expect/Expectations.swift" : "2c663e58795999a9d8b74e1f96dd61f5ce921ef800036a06386be7e61fd4b9fc",
+          "Sources/e1preview/Diagnose.swift" : "0defc72c0ebd504663acb13c0572eaa45b21c2a9906a269ff2128156cf6433fe",
+          "Sources/e1preview/Frames.swift" : "a8305d3ddc809df96bbaeee7d5acb5197ac9149f27935226d3dffaab86360d51",
+          "Sources/e1preview/main.swift" : "22bc65218f4711b84de0695e28ec6720e9c481a890a7da0a7ba879090f1d0b53",
+          "Sources/e1preview/Present.swift" : "abae15ca346d28778c65f0cddafdbabcffd9fb0d5831d4b4d8e8360a02e2d0ce",
+          "Tests/E1CoreTests/CoreTests.swift" : "323d1552b31c24c1a6524bc6d5a78b0217ea7e499c878816da32b1069592e9de"
+        },
+        "treeSha256" : "27e635772ce3b1acea7236690f85f41e8704d1dd3040636402de4687d26438f6"
+      },
+      "e2SourceTree" : {
+        "fileCount" : 14,
+        "files" : {
+          "Package.swift" : "8cf9f81f07fda8a5fbb34d1f30ed870db78c3da6d8aadac0d51707e124836c10",
+          "Sources/e2/main.swift" : "3fe1b641da603376a56c82aab971e4d1b265cc86d1485fe24aae310f182f794c",
+          "Sources/E2Core/Compositor.swift" : "1b36d5e6b9a18d31ec7a819358774386b247ad201aaaf77896aa030532cf5554",
+          "Sources/E2Core/EditTimeline.swift" : "23c3f1c1e03eaa2ea37b058624a3301d44d7cee10e781d719c1504d3aef34f99",
+          "Sources/E2Core/Exporter.swift" : "a3e1ae538c0c89f507b2bfd7819b70f3a520550cf745f1709e07babbb781a292",
+          "Sources/E2Core/Fixtures.swift" : "46fdf29369903bdef69a5880011e734b324401333b5fe971f037659978ae1d1e",
+          "Sources/E2Core/Inspect.swift" : "b9a10e153018d4d20a9cf1c466de699bf9a376102dd889ed59bf9f50770b847c",
+          "Sources/E2Core/Metrics.swift" : "01cee6906819c1fd4ccf3b0fbb2761be2c2f03691b183e5da437f189fcabb52c",
+          "Sources/E2Core/Spec4K.swift" : "9344d41a72a69e760d414fcd3a8efa95168d3b05f013c238bb9e54e7192d3b3b",
+          "Sources/E2Expect/Expectations.swift" : "d33c148dac033ca319aa4ac20300e133e40065ab9345d58d70dacbac880c0ec8",
+          "Sources/E2Judge/Env.swift" : "cefedc1242dc53ddb9d753299db6c60c6c79fbd9a9e3baf05884805067307955",
+          "Sources/E2Judge/Judge.swift" : "1fa309af61801a8b51c20383479f5b381ac6573ae915fd549a5c4a16d4b6d5c0",
+          "Sources/e2preview/main.swift" : "ab99da52b48530f9018ced29a97a22f85b193f9c8e257e60763689f6bfe441ee",
+          "Tests/E2CoreTests/EditTests.swift" : "bdadb18a7d793fdd1f3e99af9ae73b3ecf06a2d68550db9f51e6aa0974eaea29"
+        },
+        "treeSha256" : "a464ba4f23989baf764555367eec24d02560decabc8f4a9061e7110718af3d84"
+      },
+      "executable" : {
+        "bytes" : 1915096,
+        "configuration" : "release",
+        "modified" : "2026-10-10T01:18:44Z",
+        "name" : "e2preview",
+        "sha256" : "21d8d0ef028e3f24ff4c1e69ca36346944a5c9d64d8bf9f9b5e0530fa182f431"
+      }
+    },
+    "fixtures" : {
+      "M-music.wav" : "f6c8c44177c7bd7fdab96de52dadbfdb10852357f1ff34dc0b41ef036f9b2cda",
+      "src-A-3840x2160-30p-v2.mp4" : "886372585d6c6caf39f79cb9c191a2e6501dad932c78c7bd06f90151a80ffbf4",
+      "src-B-3840x2160-30p-v2.mp4" : "242362098ef854ab57f5b9c9625116867f1da19fec83ea7249b87a23aba34a42",
+      "src-C-3840x2160-30p-v2.mp4" : "548ff3039069cfd005718c1babf2000e51db5c1eb72dda353ee335d62913a13a"
+    },
+    "run" : {
+      "id" : "2026-10-10T012048Z",
+      "loadAvgStart" : [
+        9.4667999999999992,
+        6.1543000000000001,
+        9.1211000000000002
+      ],
+      "options" : "reorder+frameDurationTiming",
+      "playerWaitsToMinimizeStalling" : false,
+      "repsPerStart" : 3,
+      "seekingWaitsForVideoCompositionRendering" : false,
+      "sourceTrackIDForFrameTiming" : 0,
+      "window" : "AVPlayerView 1280×760"
+    },
+    "sourceBufferAttachmentKeys" : [
+      "AlphaChannelIsOpaque",
+      "CGColorSpace",
+      "CVFieldCount",
+      "CVImageBufferChromaLocationBottomField",
+      "CVImageBufferChromaLocationTopField",
+      "CVImageBufferColorPrimaries",
+      "CVImageBufferTransferFunction",
+      "CVImageBufferYCbCrMatrix",
+      "HorizontalDisparityAdjustment",
+      "QTMovieTime"
+    ],
+    "summary" : {
+      "fail" : 0,
+      "failedIDs" : [
+
+      ],
+      "pass" : 0,
+      "record" : 5
+    },
+    "summary2" : {
+      "runs" : 15,
+      "runsWithMismatch" : 5
+    }
+  }
+}

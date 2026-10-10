@@ -10,7 +10,7 @@
 
 | 경로 | 내용 |
 | --- | --- |
-| `Package.swift` | Swift package(tools 6.0, Swift 5 언어 모드 + `-strict-concurrency=complete`, 배포 대상 macOS 15 — 실험용이며 O-01 결정 아님) |
+| `Package.swift` | Swift package(tools 6.0, Swift 5 언어 모드 + `-strict-concurrency=complete`, 배포 대상 macOS 15 — 실험용이며 O-01 결정 아님). `E1Core` library product를 선언해 E2가 재사용한다(2026-10-10) |
 | `Sources/E1Core/Spec.swift` | fixture·배치·인코딩 상수 |
 | `Sources/E1Core/Fixtures.swift` | 합성 오디오 fixture 정의, WAV 바이트 직접 생성, SHA-256 |
 | `Sources/E1Core/Timeline.swift` | 원본 식별(`SourceRef`: 내용 SHA-256 + 경로), 클립 배치(`s_in`, `d`, `t_start`), 반열린 구간 대응식, 프레임 격자(`FrameGrid`: 마지막 유효 프레임) |
@@ -447,6 +447,18 @@ cd experiments/e1-fhd && swift build -c release && .build/release/e1preview wind
 | `artifacts/runs/<실행>/` | 출력 파일·보호 검사 파일(Git 무시) |
 | `artifacts/last-run.log`, `artifacts/last-preview.log`, `artifacts/last-compositor.log` | 마지막 실행 콘솔 출력(Git 무시) |
 | `artifacts/fixtures/carrier-160x90-10s.mov` | 운반 영상 fixture(Git 무시) |
+
+## 9.1 E2의 공유 코드 변경 (2026-10-10)
+
+E2([../e2-4k/README.md](../e2-4k/README.md))가 `E1Core`를 경로 의존성으로 재사용하도록 두 가지를 바꿨다. 동작은 바뀌지 않는다.
+- `Package.swift`에 `E1Core` library product 선언
+- `ExportControl`의 `enter`·`finish`·`fail`·`failure`·`isCancelling`·`shouldStop` 공개
+
+회귀 검사(소스 트리 `27e635772ce3…`):
+- Release 빌드 경고 0개, 단위 테스트 9/9 통과
+- `results/e1-compositor-2026-10-10T005014Z.json`(`e1 compositor --path-a-run 2026-10-09T135951Z`): 40 PASS, 0 FAIL, 5 RECORD
+- `e1 all`(경로 A·출력 보호)은 접근 수준만 바뀌어 다시 실행하지 않았다. 해당 증거는 기존 `results/e1-run-2026-10-09T135951Z.json`이다.
+- 이 변경으로 E1 소스 트리 해시가 바뀌었다. E1 완료 판단에 쓴 증거(§6, §8)는 변경 전 트리의 것이다.
 
 ## 10. 다음 단계 판단
 

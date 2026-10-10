@@ -1,0 +1,289 @@
+{
+  "checks" : [
+    {
+      "anomaly" : false,
+      "id" : "DF-first",
+      "name" : "새 프로세스 첫 재생(reorder+timingTrack): 첫 30프레임 요청 누락·받은 소스 시각 불일치·소스 픽셀 불일치·전달 불일치 없음",
+      "result" : "RECORD"
+    },
+    {
+      "anomaly" : false,
+      "id" : "DF-warm",
+      "name" : "같은 프로세스 다시 재생(대조)",
+      "result" : "RECORD"
+    }
+  ],
+  "sections" : {
+    "build" : {
+      "e1SourceTree" : {
+        "fileCount" : 20,
+        "files" : {
+          "Package.swift" : "a5add313ff07bf95bfbe01e1eff67dff933fa54cbec7d2c0f356f2638946ada2",
+          "Sources/e1/main.swift" : "643e08c9bd8936d56a3a8e20c5d9f49383ee9ce69f10622672d613ecc23b4702",
+          "Sources/E1Core/Carrier.swift" : "2e7acdc6acca83fc35a87a291718bd0780f7e5da603411ea5ad5b9e2dcfd9cf9",
+          "Sources/E1Core/Compositor.swift" : "8b00047fc90320c8e3dc5d9c93dc7d68bad6b88b2fb51a4ff889d5b962dd5ec7",
+          "Sources/E1Core/Decode.swift" : "262d9298b79da39d1ceda378ba38cea1a31c69406cbb65af6849d310a81711bd",
+          "Sources/E1Core/Exporter.swift" : "8fdbc90b670a3e919c2086d55fc6523a06189ad7934d71af00fe221f58fff46e",
+          "Sources/E1Core/Fixtures.swift" : "149137c948c66e5cc2b68414d3bb6bd30b1e0a9a7c77709852cf1fc30e2611c5",
+          "Sources/E1Core/OutputGuard.swift" : "3ac18cb101f730e6d3b47fa3c70091b03fd9dcb56a32a14dbff5a1a8170671bb",
+          "Sources/E1Core/Preview.swift" : "0f4e74f55b1ad9154158cdfb6c3ceb56d933310d4648b91997ab373f5b50cf85",
+          "Sources/E1Core/Renderer.swift" : "c5a889a85fd6a8b4620eaae68092ee4bb55260d0db7128ae50b624a7bffd0fae",
+          "Sources/E1Core/Spec.swift" : "a4c04f924ebe97b7b9a216c20a951221641941ca14d9064db35548b50f6c223c",
+          "Sources/E1Core/Spectrum.swift" : "f645bc3c11820e0d9936b8eadf909baed84e79645d9cd52a711dcdc1fbe25c28",
+          "Sources/E1Core/Timeline.swift" : "1f39b9381fdf1a98a8a9eefd6ce97fdb3d32539a4ec7dfcdb43b9fecabea4e0b",
+          "Sources/E1Core/Util.swift" : "03a3b1508805077d5183d337647ae4d6fb8a66a7b617a79b3eb633de53e0c950",
+          "Sources/E1Expect/Expectations.swift" : "2c663e58795999a9d8b74e1f96dd61f5ce921ef800036a06386be7e61fd4b9fc",
+          "Sources/e1preview/Diagnose.swift" : "0defc72c0ebd504663acb13c0572eaa45b21c2a9906a269ff2128156cf6433fe",
+          "Sources/e1preview/Frames.swift" : "a8305d3ddc809df96bbaeee7d5acb5197ac9149f27935226d3dffaab86360d51",
+          "Sources/e1preview/main.swift" : "22bc65218f4711b84de0695e28ec6720e9c481a890a7da0a7ba879090f1d0b53",
+          "Sources/e1preview/Present.swift" : "abae15ca346d28778c65f0cddafdbabcffd9fb0d5831d4b4d8e8360a02e2d0ce",
+          "Tests/E1CoreTests/CoreTests.swift" : "323d1552b31c24c1a6524bc6d5a78b0217ea7e499c878816da32b1069592e9de"
+        },
+        "treeSha256" : "27e635772ce3b1acea7236690f85f41e8704d1dd3040636402de4687d26438f6"
+      },
+      "e2SourceTree" : {
+        "fileCount" : 14,
+        "files" : {
+          "Package.swift" : "8cf9f81f07fda8a5fbb34d1f30ed870db78c3da6d8aadac0d51707e124836c10",
+          "Sources/e2/main.swift" : "3fe1b641da603376a56c82aab971e4d1b265cc86d1485fe24aae310f182f794c",
+          "Sources/E2Core/Compositor.swift" : "494e666183eb53478545a642074133eee2c6a0045febb8b1c74baf7e42be7df7",
+          "Sources/E2Core/EditTimeline.swift" : "23c3f1c1e03eaa2ea37b058624a3301d44d7cee10e781d719c1504d3aef34f99",
+          "Sources/E2Core/Exporter.swift" : "a3e1ae538c0c89f507b2bfd7819b70f3a520550cf745f1709e07babbb781a292",
+          "Sources/E2Core/Fixtures.swift" : "46fdf29369903bdef69a5880011e734b324401333b5fe971f037659978ae1d1e",
+          "Sources/E2Core/Inspect.swift" : "b9a10e153018d4d20a9cf1c466de699bf9a376102dd889ed59bf9f50770b847c",
+          "Sources/E2Core/Metrics.swift" : "01cee6906819c1fd4ccf3b0fbb2761be2c2f03691b183e5da437f189fcabb52c",
+          "Sources/E2Core/Spec4K.swift" : "9344d41a72a69e760d414fcd3a8efa95168d3b05f013c238bb9e54e7192d3b3b",
+          "Sources/E2Expect/Expectations.swift" : "d33c148dac033ca319aa4ac20300e133e40065ab9345d58d70dacbac880c0ec8",
+          "Sources/E2Judge/Env.swift" : "cefedc1242dc53ddb9d753299db6c60c6c79fbd9a9e3baf05884805067307955",
+          "Sources/E2Judge/Judge.swift" : "1fa309af61801a8b51c20383479f5b381ac6573ae915fd549a5c4a16d4b6d5c0",
+          "Sources/e2preview/main.swift" : "cdf969be9a8302a570952d884940c0856a94c1fdf87cb3d089a967e1a6795961",
+          "Tests/E2CoreTests/EditTests.swift" : "bdadb18a7d793fdd1f3e99af9ae73b3ecf06a2d68550db9f51e6aa0974eaea29"
+        },
+        "treeSha256" : "5cbbf09649c6fd3a7f663f36472eeabcc21b587aa24aabd7f58b15f8b1ade84c"
+      },
+      "executable" : {
+        "bytes" : 1943432,
+        "configuration" : "release",
+        "modified" : "2026-10-10T01:39:24Z",
+        "name" : "e2preview",
+        "sha256" : "bff06f4fb216a3829606b8be2b66877257ffdbdee2aa6f0441e66f88eca5232a"
+      }
+    },
+    "events" : [
+      "175872746 ms: harness ready (item readyToPlay), player time 520/600 rate 0.0",
+      "175872786 ms: cancelAllPendingVideoCompositionRequests",
+      "175872802 ms: cancelAllPendingVideoCompositionRequests",
+      "175872802 ms: window shown, player time 520/600 rate 0.0",
+      "175872821 ms: cancelAllPendingVideoCompositionRequests",
+      "175872837 ms: cancelAllPendingVideoCompositionRequests",
+      "175872852 ms: renderContextChanged 3840.0x2160.0",
+      "175873069 ms: after 250 ms, player time 520/600 rate 0.0 timeControl 0",
+      "175873325 ms: layer found true, readyForDisplay true",
+      "175873325 ms: first: seekExact(0) begin, player time 520/600",
+      "175873326 ms: cancelAllPendingVideoCompositionRequests",
+      "175873347 ms: first: seekExact(0) done finished=true",
+      "175873347 ms: first: play",
+      "175873347 ms: cancelAllPendingVideoCompositionRequests",
+      "175874607 ms: first: pause at 1009006250/1000000000",
+      "175874607 ms: warm-replay: seekExact(0) begin, player time 1009006250/1000000000",
+      "175874608 ms: cancelAllPendingVideoCompositionRequests",
+      "175874627 ms: warm-replay: seekExact(0) done finished=true",
+      "175874627 ms: warm-replay: play",
+      "175874627 ms: cancelAllPendingVideoCompositionRequests",
+      "175875897 ms: warm-replay: pause at 1041115023/1000000000"
+    ],
+    "fixtures" : {
+      "M-music.wav" : "f6c8c44177c7bd7fdab96de52dadbfdb10852357f1ff34dc0b41ef036f9b2cda",
+      "src-A-3840x2160-30p-v2.mp4" : "886372585d6c6caf39f79cb9c191a2e6501dad932c78c7bd06f90151a80ffbf4",
+      "src-B-3840x2160-30p-v2.mp4" : "242362098ef854ab57f5b9c9625116867f1da19fec83ea7249b87a23aba34a42",
+      "src-C-3840x2160-30p-v2.mp4" : "548ff3039069cfd005718c1babf2000e51db5c1eb72dda353ee335d62913a13a"
+    },
+    "phases" : [
+      {
+        "completionOutOfOrder" : 0,
+        "deliveredFirst" : [
+          "t26 A56 at 880.7 ms",
+          "t0 A30 at 893.3 ms",
+          "t0 A30 at 913.3 ms",
+          "t1 A31 at 1109.7 ms",
+          "t2 A32 at 1141.5 ms",
+          "t3 A33 at 1173.4 ms",
+          "t4 A34 at 1209.7 ms",
+          "t5 A35 at 1241.7 ms",
+          "t6 A36 at 1273.4 ms",
+          "t7 A37 at 1309.2 ms",
+          "t8 A38 at 1341.7 ms",
+          "t9 A39 at 1373.4 ms"
+        ],
+        "deliveredMismatch" : [
+
+        ],
+        "maxInFlight" : 1,
+        "notRequestedWithinFirst30" : [
+
+        ],
+        "phase" : "first",
+        "pixelMismatch" : [
+
+        ],
+        "playAtMs" : 880.71730000000002,
+        "pollGapsOver20ms" : [
+
+        ],
+        "requests" : [
+          "seq 3 t0@0/1 start 880.6 done 890.7 mt 0/30 want A30",
+          "seq 4 t0@0/1 start 891.4 done 911.4 mt 0/30 want A30",
+          "seq 5 t1@20/600 start 892.3 done 925.1 mt 20/600 want A31",
+          "seq 6 t2@40/600 start 898.4 done 935.2 mt 40/600 want A32",
+          "seq 7 t3@60/600 start 899.3 done 944.6 mt 60/600 want A33",
+          "seq 8 t4@80/600 start 912.0 done 955.2 mt 80/600 want A34",
+          "seq 9 t5@100/600 start 925.3 done 966.2 mt 100/600 want A35",
+          "seq 10 t6@120/600 start 935.2 done 984.9 mt 120/600 want A36",
+          "seq 11 t7@140/600 start 944.6 done 999.3 mt 140/600 want A37",
+          "seq 12 t8@160/600 start 955.2 done 1007.9 mt 160/600 want A38",
+          "seq 13 t9@180/600 start 966.3 done 1015.7 mt 180/600 want A39",
+          "seq 14 t10@200/600 start 985.1 done 1026.9 mt 200/600 want A40",
+          "seq 15 t11@220/600 start 1141.6 done 1148.8 mt 220/600 want A41",
+          "seq 16 t12@240/600 start 1308.2 done 1323.9 mt 240/600 want A42",
+          "seq 17 t13@260/600 start 1308.7 done 1334.7 mt 260/600 want A43",
+          "seq 18 t14@280/600 start 1309.1 done 1339.8 mt 280/600 want A44",
+          "seq 19 t15@300/600 start 1309.7 done 1347.2 mt 300/600 want A45",
+          "seq 20 t16@320/600 start 1324.1 done 1352.8 mt 320/600 want A46",
+          "seq 21 t17@340/600 start 1334.8 done 1360.2 mt 340/600 want A47",
+          "seq 22 t18@360/600 start 1373.6 done 1382.8 mt 360/600 want A48",
+          "seq 23 t19@380/600 start 1542.1 done 1562.5 mt 380/600 want A49",
+          "seq 24 t20@400/600 start 1543.0 done 1572.9 mt 400/600 want A50",
+          "seq 25 t21@420/600 start 1543.4 done 1581.3 mt 420/600 want A51",
+          "seq 26 t22@440/600 start 1544.0 done 1587.5 mt 440/600 want A52",
+          "seq 27 t23@460/600 start 1562.6 done 1592.8 mt 460/600 want A53",
+          "seq 28 t24@480/600 start 1573.0 done 1597.8 mt 480/600 want A54",
+          "seq 29 t25@500/600 start 1606.7 done 1611.8 mt 500/600 want A55",
+          "seq 30 t26@520/600 start 1773.8 done 1793.0 mt 520/600 want A56",
+          "seq 31 t27@540/600 start 1774.5 done 1800.0 mt 540/600 want A57",
+          "seq 32 t28@560/600 start 1775.0 done 1805.8 mt 560/600 want A58",
+          "seq 33 t29@580/600 start 1775.4 done 1812.0 mt 580/600 want A59",
+          "seq 34 t30@600/600 start 1793.1 done 1817.5 mt 600/600 want A60",
+          "seq 35 t31@620/600 start 1800.1 done 1823.7 mt 620/600 want A61",
+          "seq 36 t32@640/600 start 1841.5 done 1846.8 mt 640/600 want A62",
+          "seq 37 t33@660/600 start 2010.0 done 2020.6 mt 660/600 want A63",
+          "seq 38 t34@680/600 start 2010.2 done 2026.0 mt 680/600 want A64",
+          "seq 39 t35@700/600 start 2010.4 done 2031.2 mt 700/600 want A65",
+          "seq 40 t36@720/600 start 2010.6 done 2036.5 mt 720/600 want A66",
+          "seq 41 t37@740/600 start 2020.7 done 2042.0 mt 740/600 want A67",
+          "seq 42 t38@760/600 start 2026.0 done 2047.6 mt 760/600 want A68"
+        ],
+        "requestsAfterSeek" : 41,
+        "timeMismatch" : [
+
+        ]
+      },
+      {
+        "completionOutOfOrder" : 0,
+        "deliveredFirst" : [
+          "t0 A30 at 2166.1 ms",
+          "t0 A30 at 2181.7 ms",
+          "t1 A31 at 2357.3 ms",
+          "t2 A32 at 2389.9 ms",
+          "t3 A33 at 2421.9 ms",
+          "t4 A34 at 2457.2 ms",
+          "t5 A35 at 2489.8 ms",
+          "t6 A36 at 2521.9 ms",
+          "t7 A37 at 2557.2 ms",
+          "t8 A38 at 2589.9 ms",
+          "t9 A39 at 2621.7 ms",
+          "t10 A40 at 2657.3 ms"
+        ],
+        "deliveredMismatch" : [
+
+        ],
+        "maxInFlight" : 1,
+        "notRequestedWithinFirst30" : [
+
+        ],
+        "phase" : "warm-replay",
+        "pixelMismatch" : [
+
+        ],
+        "playAtMs" : 2160.8564999999999,
+        "pollGapsOver20ms" : [
+
+        ],
+        "requests" : [
+          "seq 44 t0@0/1 start 2160.8 done 2166.1 mt 0/30 want A30",
+          "seq 45 t0@0/1 start 2166.6 done 2179.1 mt 0/30 want A30",
+          "seq 46 t1@20/600 start 2168.0 done 2187.2 mt 20/600 want A31",
+          "seq 47 t2@40/600 start 2173.8 done 2192.9 mt 40/600 want A32",
+          "seq 48 t3@60/600 start 2173.8 done 2198.7 mt 60/600 want A33",
+          "seq 49 t4@80/600 start 2183.8 done 2204.3 mt 80/600 want A34",
+          "seq 50 t5@100/600 start 2187.3 done 2209.9 mt 100/600 want A35",
+          "seq 51 t6@120/600 start 2193.0 done 2215.3 mt 120/600 want A36",
+          "seq 52 t7@140/600 start 2198.7 done 2220.8 mt 140/600 want A37",
+          "seq 53 t8@160/600 start 2204.3 done 2226.9 mt 160/600 want A38",
+          "seq 54 t9@180/600 start 2210.0 done 2232.8 mt 180/600 want A39",
+          "seq 55 t10@200/600 start 2215.3 done 2238.7 mt 200/600 want A40",
+          "seq 56 t11@220/600 start 2390.0 done 2394.8 mt 220/600 want A41",
+          "seq 57 t12@240/600 start 2557.5 done 2573.3 mt 240/600 want A42",
+          "seq 58 t13@260/600 start 2558.1 done 2581.6 mt 260/600 want A43",
+          "seq 59 t14@280/600 start 2558.5 done 2587.2 mt 280/600 want A44",
+          "seq 60 t15@300/600 start 2558.9 done 2592.4 mt 300/600 want A45",
+          "seq 61 t16@320/600 start 2573.4 done 2597.4 mt 320/600 want A46",
+          "seq 62 t17@340/600 start 2581.7 done 2602.5 mt 340/600 want A47",
+          "seq 63 t18@360/600 start 2621.8 done 2626.9 mt 360/600 want A48",
+          "seq 64 t19@380/600 start 2790.5 done 2808.6 mt 380/600 want A49",
+          "seq 65 t20@400/600 start 2790.8 done 2818.5 mt 400/600 want A50",
+          "seq 66 t21@420/600 start 2790.9 done 2825.0 mt 420/600 want A51",
+          "seq 67 t22@440/600 start 2791.1 done 2831.4 mt 440/600 want A52",
+          "seq 68 t23@460/600 start 2808.7 done 2837.5 mt 460/600 want A53",
+          "seq 69 t24@480/600 start 2818.6 done 2843.2 mt 480/600 want A54",
+          "seq 70 t25@500/600 start 2825.2 done 2848.6 mt 500/600 want A55",
+          "seq 71 t26@520/600 start 2890.0 done 2896.1 mt 520/600 want A56",
+          "seq 72 t27@540/600 start 3057.5 done 3068.9 mt 540/600 want A57",
+          "seq 73 t28@560/600 start 3058.3 done 3079.5 mt 560/600 want A58",
+          "seq 74 t29@580/600 start 3058.7 done 3086.7 mt 580/600 want A59",
+          "seq 75 t30@600/600 start 3058.9 done 3092.1 mt 600/600 want A60",
+          "seq 76 t31@620/600 start 3069.0 done 3097.5 mt 620/600 want A61",
+          "seq 77 t32@640/600 start 3079.6 done 3102.9 mt 640/600 want A62",
+          "seq 78 t33@660/600 start 3121.8 done 3127.8 mt 660/600 want A63",
+          "seq 79 t34@680/600 start 3290.1 done 3309.3 mt 680/600 want A64",
+          "seq 80 t35@700/600 start 3290.6 done 3318.4 mt 700/600 want A65",
+          "seq 81 t36@720/600 start 3291.1 done 3324.4 mt 720/600 want A66",
+          "seq 82 t37@740/600 start 3291.5 done 3330.4 mt 740/600 want A67",
+          "seq 83 t38@760/600 start 3309.4 done 3336.1 mt 760/600 want A68"
+        ],
+        "requestsAfterSeek" : 42,
+        "timeMismatch" : [
+
+        ]
+      }
+    ],
+    "preSeekRequests" : [
+      "seq 1 t26 mt 520/600",
+      "seq 2 t26 mt 520/600",
+      "seq 3 t0 mt 0/30",
+      "seq 4 t0 mt 0/30",
+      "seq 5 t1 mt 20/600",
+      "seq 6 t2 mt 40/600"
+    ],
+    "run" : {
+      "diagnoseSourcePixels" : false,
+      "frameTiming" : "video track",
+      "id" : "2026-10-10T013949Z",
+      "loadAvgStart" : [
+        5.7930000000000001,
+        4.9916999999999998,
+        5.9135999999999997
+      ],
+      "options" : "reorder+timingTrack",
+      "videoTrackID" : 1,
+      "waitsToMinimizeStalling" : false
+    },
+    "summary" : {
+      "fail" : 0,
+      "failedIDs" : [
+
+      ],
+      "pass" : 0,
+      "record" : 2
+    }
+  }
+}

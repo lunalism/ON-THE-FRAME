@@ -1,0 +1,528 @@
+{
+  "checks" : [
+    {
+      "id" : "D-end→90 즉시 재생(C 시작)",
+      "name" : "탐색 뒤 재생 시작 end→90 즉시 재생(C 시작): 시작 15프레임의 전달 내용 = 기대값(3회 중 어긋난 횟수 기록)",
+      "result" : "RECORD",
+      "runs" : [
+        {
+          "delivered" : 14,
+          "requests" : [
+            "90",
+            "90",
+            "91",
+            "92",
+            "93",
+            "94"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 16,
+          "requests" : [
+            "90",
+            "90",
+            "91",
+            "92",
+            "93",
+            "94"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 16,
+          "requests" : [
+            "90",
+            "90",
+            "91",
+            "92",
+            "93",
+            "94"
+          ],
+          "wrong" : [
+
+          ]
+        }
+      ],
+      "runsWithWrongSource" : 0
+    },
+    {
+      "id" : "D-end→240 즉시 재생(B.2 시작)",
+      "name" : "탐색 뒤 재생 시작 end→240 즉시 재생(B.2 시작): 시작 15프레임의 전달 내용 = 기대값(3회 중 어긋난 횟수 기록)",
+      "result" : "RECORD",
+      "runs" : [
+        {
+          "delivered" : 16,
+          "requests" : [
+            "240",
+            "240",
+            "241",
+            "242",
+            "243",
+            "244"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 16,
+          "requests" : [
+            "240",
+            "240",
+            "241",
+            "242",
+            "243",
+            "244"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 16,
+          "requests" : [
+            "240",
+            "240",
+            "241",
+            "242",
+            "243",
+            "244"
+          ],
+          "wrong" : [
+
+          ]
+        }
+      ],
+      "runsWithWrongSource" : 0
+    },
+    {
+      "id" : "D-end→0 preroll 뒤 재생",
+      "name" : "탐색 뒤 재생 시작 end→0 preroll 뒤 재생: 시작 15프레임의 전달 내용 = 기대값(3회 중 어긋난 횟수 기록)",
+      "result" : "RECORD",
+      "runs" : [
+        {
+          "delivered" : 15,
+          "requests" : [
+            "8",
+            "9",
+            "10",
+            "11",
+            "12",
+            "13"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 15,
+          "requests" : [
+            "7",
+            "8",
+            "9",
+            "10",
+            "11",
+            "12"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 15,
+          "requests" : [
+            "8",
+            "9",
+            "10",
+            "11",
+            "12",
+            "13"
+          ],
+          "wrong" : [
+
+          ]
+        }
+      ],
+      "runsWithWrongSource" : 0
+    },
+    {
+      "id" : "D-end→0 즉시 재생",
+      "name" : "탐색 뒤 재생 시작 end→0 즉시 재생: 시작 15프레임의 전달 내용 = 기대값(3회 중 어긋난 횟수 기록)",
+      "result" : "RECORD",
+      "runs" : [
+        {
+          "delivered" : 16,
+          "requests" : [
+            "0",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 16,
+          "requests" : [
+            "0",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 16,
+          "requests" : [
+            "0",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4"
+          ],
+          "wrong" : [
+
+          ]
+        }
+      ],
+      "runsWithWrongSource" : 0
+    },
+    {
+      "id" : "D-end→0 500 ms 뒤 재생",
+      "name" : "탐색 뒤 재생 시작 end→0 500 ms 뒤 재생: 시작 15프레임의 전달 내용 = 기대값(3회 중 어긋난 횟수 기록)",
+      "result" : "RECORD",
+      "runs" : [
+        {
+          "delivered" : 15,
+          "requests" : [
+            "0",
+            "1",
+            "3",
+            "4",
+            "5",
+            "6"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 16,
+          "requests" : [
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 16,
+          "requests" : [
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5"
+          ],
+          "wrong" : [
+
+          ]
+        }
+      ],
+      "runsWithWrongSource" : 0
+    },
+    {
+      "id" : "D-150→0 즉시 재생",
+      "name" : "탐색 뒤 재생 시작 150→0 즉시 재생: 시작 15프레임의 전달 내용 = 기대값(3회 중 어긋난 횟수 기록)",
+      "result" : "RECORD",
+      "runs" : [
+        {
+          "delivered" : 16,
+          "requests" : [
+            "0",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 16,
+          "requests" : [
+            "0",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 16,
+          "requests" : [
+            "0",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4"
+          ],
+          "wrong" : [
+
+          ]
+        }
+      ],
+      "runsWithWrongSource" : 0
+    },
+    {
+      "id" : "D-0→0 즉시 재생(같은 위치)",
+      "name" : "탐색 뒤 재생 시작 0→0 즉시 재생(같은 위치): 시작 15프레임의 전달 내용 = 기대값(3회 중 어긋난 횟수 기록)",
+      "result" : "RECORD",
+      "runs" : [
+        {
+          "delivered" : 15,
+          "requests" : [
+            "0",
+            "1",
+            "3",
+            "4",
+            "5",
+            "6"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 16,
+          "requests" : [
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 16,
+          "requests" : [
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5"
+          ],
+          "wrong" : [
+
+          ]
+        }
+      ],
+      "runsWithWrongSource" : 0
+    },
+    {
+      "id" : "D-end→60 즉시 재생",
+      "name" : "탐색 뒤 재생 시작 end→60 즉시 재생: 시작 15프레임의 전달 내용 = 기대값(3회 중 어긋난 횟수 기록)",
+      "result" : "RECORD",
+      "runs" : [
+        {
+          "delivered" : 16,
+          "requests" : [
+            "60",
+            "60",
+            "61",
+            "62",
+            "63",
+            "64"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 16,
+          "requests" : [
+            "60",
+            "60",
+            "61",
+            "62",
+            "63",
+            "64"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 16,
+          "requests" : [
+            "60",
+            "60",
+            "61",
+            "62",
+            "63",
+            "64"
+          ],
+          "wrong" : [
+
+          ]
+        }
+      ],
+      "runsWithWrongSource" : 0
+    },
+    {
+      "id" : "D-end→180 즉시 재생(B.1 시작)",
+      "name" : "탐색 뒤 재생 시작 end→180 즉시 재생(B.1 시작): 시작 15프레임의 전달 내용 = 기대값(3회 중 어긋난 횟수 기록)",
+      "result" : "RECORD",
+      "runs" : [
+        {
+          "delivered" : 16,
+          "requests" : [
+            "180",
+            "180",
+            "181",
+            "182",
+            "183",
+            "184"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 16,
+          "requests" : [
+            "180",
+            "180",
+            "181",
+            "182",
+            "183",
+            "184"
+          ],
+          "wrong" : [
+
+          ]
+        },
+        {
+          "delivered" : 16,
+          "requests" : [
+            "180",
+            "180",
+            "181",
+            "182",
+            "183",
+            "184"
+          ],
+          "wrong" : [
+
+          ]
+        }
+      ],
+      "runsWithWrongSource" : 0
+    }
+  ],
+  "sections" : {
+    "build" : {
+      "e1SourceTree" : {
+        "fileCount" : 20,
+        "files" : {
+          "Package.swift" : "a5add313ff07bf95bfbe01e1eff67dff933fa54cbec7d2c0f356f2638946ada2",
+          "Sources/e1/main.swift" : "643e08c9bd8936d56a3a8e20c5d9f49383ee9ce69f10622672d613ecc23b4702",
+          "Sources/E1Core/Carrier.swift" : "2e7acdc6acca83fc35a87a291718bd0780f7e5da603411ea5ad5b9e2dcfd9cf9",
+          "Sources/E1Core/Compositor.swift" : "8b00047fc90320c8e3dc5d9c93dc7d68bad6b88b2fb51a4ff889d5b962dd5ec7",
+          "Sources/E1Core/Decode.swift" : "262d9298b79da39d1ceda378ba38cea1a31c69406cbb65af6849d310a81711bd",
+          "Sources/E1Core/Exporter.swift" : "8fdbc90b670a3e919c2086d55fc6523a06189ad7934d71af00fe221f58fff46e",
+          "Sources/E1Core/Fixtures.swift" : "149137c948c66e5cc2b68414d3bb6bd30b1e0a9a7c77709852cf1fc30e2611c5",
+          "Sources/E1Core/OutputGuard.swift" : "3ac18cb101f730e6d3b47fa3c70091b03fd9dcb56a32a14dbff5a1a8170671bb",
+          "Sources/E1Core/Preview.swift" : "0f4e74f55b1ad9154158cdfb6c3ceb56d933310d4648b91997ab373f5b50cf85",
+          "Sources/E1Core/Renderer.swift" : "c5a889a85fd6a8b4620eaae68092ee4bb55260d0db7128ae50b624a7bffd0fae",
+          "Sources/E1Core/Spec.swift" : "a4c04f924ebe97b7b9a216c20a951221641941ca14d9064db35548b50f6c223c",
+          "Sources/E1Core/Spectrum.swift" : "f645bc3c11820e0d9936b8eadf909baed84e79645d9cd52a711dcdc1fbe25c28",
+          "Sources/E1Core/Timeline.swift" : "1f39b9381fdf1a98a8a9eefd6ce97fdb3d32539a4ec7dfcdb43b9fecabea4e0b",
+          "Sources/E1Core/Util.swift" : "03a3b1508805077d5183d337647ae4d6fb8a66a7b617a79b3eb633de53e0c950",
+          "Sources/E1Expect/Expectations.swift" : "2c663e58795999a9d8b74e1f96dd61f5ce921ef800036a06386be7e61fd4b9fc",
+          "Sources/e1preview/Diagnose.swift" : "0defc72c0ebd504663acb13c0572eaa45b21c2a9906a269ff2128156cf6433fe",
+          "Sources/e1preview/Frames.swift" : "a8305d3ddc809df96bbaeee7d5acb5197ac9149f27935226d3dffaab86360d51",
+          "Sources/e1preview/main.swift" : "22bc65218f4711b84de0695e28ec6720e9c481a890a7da0a7ba879090f1d0b53",
+          "Sources/e1preview/Present.swift" : "abae15ca346d28778c65f0cddafdbabcffd9fb0d5831d4b4d8e8360a02e2d0ce",
+          "Tests/E1CoreTests/CoreTests.swift" : "323d1552b31c24c1a6524bc6d5a78b0217ea7e499c878816da32b1069592e9de"
+        },
+        "treeSha256" : "27e635772ce3b1acea7236690f85f41e8704d1dd3040636402de4687d26438f6"
+      },
+      "e2SourceTree" : {
+        "fileCount" : 14,
+        "files" : {
+          "Package.swift" : "8cf9f81f07fda8a5fbb34d1f30ed870db78c3da6d8aadac0d51707e124836c10",
+          "Sources/e2/main.swift" : "3fe1b641da603376a56c82aab971e4d1b265cc86d1485fe24aae310f182f794c",
+          "Sources/E2Core/Compositor.swift" : "1b36d5e6b9a18d31ec7a819358774386b247ad201aaaf77896aa030532cf5554",
+          "Sources/E2Core/EditTimeline.swift" : "23c3f1c1e03eaa2ea37b058624a3301d44d7cee10e781d719c1504d3aef34f99",
+          "Sources/E2Core/Exporter.swift" : "a3e1ae538c0c89f507b2bfd7819b70f3a520550cf745f1709e07babbb781a292",
+          "Sources/E2Core/Fixtures.swift" : "46fdf29369903bdef69a5880011e734b324401333b5fe971f037659978ae1d1e",
+          "Sources/E2Core/Inspect.swift" : "b9a10e153018d4d20a9cf1c466de699bf9a376102dd889ed59bf9f50770b847c",
+          "Sources/E2Core/Metrics.swift" : "01cee6906819c1fd4ccf3b0fbb2761be2c2f03691b183e5da437f189fcabb52c",
+          "Sources/E2Core/Spec4K.swift" : "9344d41a72a69e760d414fcd3a8efa95168d3b05f013c238bb9e54e7192d3b3b",
+          "Sources/E2Expect/Expectations.swift" : "d33c148dac033ca319aa4ac20300e133e40065ab9345d58d70dacbac880c0ec8",
+          "Sources/E2Judge/Env.swift" : "cefedc1242dc53ddb9d753299db6c60c6c79fbd9a9e3baf05884805067307955",
+          "Sources/E2Judge/Judge.swift" : "1fa309af61801a8b51c20383479f5b381ac6573ae915fd549a5c4a16d4b6d5c0",
+          "Sources/e2preview/main.swift" : "460f637ed88660baee001574cc4ed3ec494f6ee7dcf7caede2d2d487acae3da0",
+          "Tests/E2CoreTests/EditTests.swift" : "bdadb18a7d793fdd1f3e99af9ae73b3ecf06a2d68550db9f51e6aa0974eaea29"
+        },
+        "treeSha256" : "48abcd841d9d96f8dabb4612938dbcb96c2bc8391a3948a2a240ec2c14646a52"
+      },
+      "executable" : {
+        "bytes" : 1915352,
+        "configuration" : "release",
+        "modified" : "2026-10-10T01:21:36Z",
+        "name" : "e2preview",
+        "sha256" : "f87690b49733cf6845bdbf9d36cbdd400931cfe812ddd102054f39a6d07f1e84"
+      }
+    },
+    "run" : {
+      "id" : "2026-10-10T012449Z",
+      "loadAvgStart" : [
+        5.8686999999999996,
+        6.6260000000000003,
+        8.6610999999999994
+      ],
+      "window" : "AVPlayerView 1280×760"
+    },
+    "summary" : {
+      "fail" : 0,
+      "failedIDs" : [
+
+      ],
+      "pass" : 0,
+      "record" : 9
+    }
+  }
+}
