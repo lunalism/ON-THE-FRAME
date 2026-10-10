@@ -1,0 +1,301 @@
+{
+  "checks" : [
+    {
+      "clickDeltas" : [
+        -1,
+        -1
+      ],
+      "decodeSeconds" : 0.98350000000000004,
+      "format" : {
+        "codec" : "avc1",
+        "dimensions" : "1920x1080"
+      },
+      "frames" : 600,
+      "id" : "F-src-A",
+      "issues" : [
+
+      ],
+      "name" : "소스 A(FHD H.264 + AAC, 600프레임): 프레임 수·PTS·소스 ID·프레임 번호·상자·플래시(15, 315)·배경, 클릭 위치",
+      "onsets" : 2,
+      "ptsMismatch" : 0,
+      "result" : "PASS"
+    },
+    {
+      "clickDeltas" : [
+        0,
+        0
+      ],
+      "decodeSeconds" : 0.79300000000000004,
+      "format" : {
+        "codec" : "avc1",
+        "dimensions" : "1920x1080"
+      },
+      "frames" : 600,
+      "id" : "F-src-B",
+      "issues" : [
+
+      ],
+      "name" : "소스 B(FHD H.264 + AAC, 600프레임): 프레임 수·PTS·소스 ID·프레임 번호·상자·플래시(15, 315)·배경, 클릭 위치",
+      "onsets" : 2,
+      "ptsMismatch" : 0,
+      "result" : "PASS"
+    },
+    {
+      "clickDeltas" : [
+        -2,
+        -2
+      ],
+      "decodeSeconds" : 0.82850000000000001,
+      "format" : {
+        "codec" : "avc1",
+        "dimensions" : "1920x1080"
+      },
+      "frames" : 600,
+      "id" : "F-src-C",
+      "issues" : [
+
+      ],
+      "name" : "소스 C(FHD H.264 + AAC, 600프레임): 프레임 수·PTS·소스 ID·프레임 번호·상자·플래시(15, 315)·배경, 클릭 위치",
+      "onsets" : 2,
+      "ptsMismatch" : 0,
+      "result" : "PASS"
+    },
+    {
+      "id" : "D-iso",
+      "name" : "격리 실패 프레임의 선택 오디오(음악만) 분석 캐시 밴드 21~27 값",
+      "result" : "RECORD",
+      "rows" : [
+        "frame 14459 source 481.4667 s  21:0.000 22:0.000 23:0.000 24:0.000 25:0.000 26:0.000 27:0.000",
+        "frame 14460 source 481.5000 s  21:0.000 22:0.000 23:0.000 24:0.000 25:0.000 26:0.000 27:0.000",
+        "frame 14461 source 481.5333 s  21:0.148 22:0.692 23:0.059 24:0.000 25:0.000 26:0.000 27:0.000",
+        "frame 14462 source 481.5667 s  21:0.097 22:0.829 23:0.013 24:0.000 25:0.000 26:0.000 27:0.000",
+        "frame 14463 source 481.6000 s  21:0.000 22:0.836 23:0.000 24:0.000 25:0.000 26:0.000 27:0.000",
+        "frame 14465 source 481.6667 s  21:0.000 22:0.836 23:0.000 24:0.000 25:0.000 26:0.000 27:0.000",
+        "frame 15899 source 529.4667 s  21:0.000 22:0.836 23:0.000 24:0.000 25:0.000 26:0.000 27:0.000",
+        "frame 15900 source 529.5000 s  21:0.000 22:0.836 23:0.000 24:0.000 25:0.000 26:0.000 27:0.000",
+        "frame 15901 source 529.5333 s  21:0.160 22:0.798 23:0.072 24:0.000 25:0.000 26:0.000 27:0.000",
+        "frame 15902 source 529.5667 s  21:0.054 22:0.505 23:0.000 24:0.000 25:0.000 26:0.000 27:0.000",
+        "frame 15904 source 529.6333 s  21:0.000 22:0.000 23:0.000 24:0.000 25:0.000 26:0.000 27:0.000",
+        "frame 3000 source 99.5000 s  21:0.000 22:0.000 23:0.000 24:0.000 25:0.000 26:0.000 27:0.000"
+      ]
+    }
+  ],
+  "sections" : {
+    "budgetAfter" : {
+      "e1-fhd/.build" : 590.89999999999998,
+      "e1-fhd/artifacts" : 73.299999999999997,
+      "e2-4k/.build" : 361.69999999999999,
+      "e2-4k/artifacts" : 549.5,
+      "e3-fhd-10min/.build" : 188.80000000000001,
+      "e3-fhd-10min/artifacts" : 932.79999999999995
+    },
+    "budgetBefore" : {
+      "e1-fhd/.build" : 590.89999999999998,
+      "e1-fhd/artifacts" : 73.299999999999997,
+      "e2-4k/.build" : 361.69999999999999,
+      "e2-4k/artifacts" : 549.5,
+      "e3-fhd-10min/.build" : 188.80000000000001,
+      "e3-fhd-10min/artifacts" : 932.79999999999995
+    },
+    "budgetTotalMiB" : 2697,
+    "build" : {
+      "e1SourceTree" : {
+        "fileCount" : 20,
+        "files" : {
+          "Package.swift" : "a5add313ff07bf95bfbe01e1eff67dff933fa54cbec7d2c0f356f2638946ada2",
+          "Sources/e1/main.swift" : "643e08c9bd8936d56a3a8e20c5d9f49383ee9ce69f10622672d613ecc23b4702",
+          "Sources/E1Core/Carrier.swift" : "2e7acdc6acca83fc35a87a291718bd0780f7e5da603411ea5ad5b9e2dcfd9cf9",
+          "Sources/E1Core/Compositor.swift" : "8b00047fc90320c8e3dc5d9c93dc7d68bad6b88b2fb51a4ff889d5b962dd5ec7",
+          "Sources/E1Core/Decode.swift" : "262d9298b79da39d1ceda378ba38cea1a31c69406cbb65af6849d310a81711bd",
+          "Sources/E1Core/Exporter.swift" : "8fdbc90b670a3e919c2086d55fc6523a06189ad7934d71af00fe221f58fff46e",
+          "Sources/E1Core/Fixtures.swift" : "149137c948c66e5cc2b68414d3bb6bd30b1e0a9a7c77709852cf1fc30e2611c5",
+          "Sources/E1Core/OutputGuard.swift" : "3ac18cb101f730e6d3b47fa3c70091b03fd9dcb56a32a14dbff5a1a8170671bb",
+          "Sources/E1Core/Preview.swift" : "0f4e74f55b1ad9154158cdfb6c3ceb56d933310d4648b91997ab373f5b50cf85",
+          "Sources/E1Core/Renderer.swift" : "c5a889a85fd6a8b4620eaae68092ee4bb55260d0db7128ae50b624a7bffd0fae",
+          "Sources/E1Core/Spec.swift" : "a4c04f924ebe97b7b9a216c20a951221641941ca14d9064db35548b50f6c223c",
+          "Sources/E1Core/Spectrum.swift" : "f645bc3c11820e0d9936b8eadf909baed84e79645d9cd52a711dcdc1fbe25c28",
+          "Sources/E1Core/Timeline.swift" : "1f39b9381fdf1a98a8a9eefd6ce97fdb3d32539a4ec7dfcdb43b9fecabea4e0b",
+          "Sources/E1Core/Util.swift" : "03a3b1508805077d5183d337647ae4d6fb8a66a7b617a79b3eb633de53e0c950",
+          "Sources/E1Expect/Expectations.swift" : "2c663e58795999a9d8b74e1f96dd61f5ce921ef800036a06386be7e61fd4b9fc",
+          "Sources/e1preview/Diagnose.swift" : "0defc72c0ebd504663acb13c0572eaa45b21c2a9906a269ff2128156cf6433fe",
+          "Sources/e1preview/Frames.swift" : "a8305d3ddc809df96bbaeee7d5acb5197ac9149f27935226d3dffaab86360d51",
+          "Sources/e1preview/main.swift" : "22bc65218f4711b84de0695e28ec6720e9c481a890a7da0a7ba879090f1d0b53",
+          "Sources/e1preview/Present.swift" : "abae15ca346d28778c65f0cddafdbabcffd9fb0d5831d4b4d8e8360a02e2d0ce",
+          "Tests/E1CoreTests/CoreTests.swift" : "323d1552b31c24c1a6524bc6d5a78b0217ea7e499c878816da32b1069592e9de"
+        },
+        "treeSha256" : "27e635772ce3b1acea7236690f85f41e8704d1dd3040636402de4687d26438f6"
+      },
+      "e2SourceTree" : {
+        "fileCount" : 14,
+        "files" : {
+          "Package.swift" : "4cf5bba0902b23ccecce1e06ef5327ab152c2c0e4bf1e81532ad9ea4e72dd6f0",
+          "Sources/e2/main.swift" : "3fe1b641da603376a56c82aab971e4d1b265cc86d1485fe24aae310f182f794c",
+          "Sources/E2Core/Compositor.swift" : "c483760e083b4ab6bb474ceecda61937bb66c3d1eeb5012a08372fb5c322a666",
+          "Sources/E2Core/EditTimeline.swift" : "d9f1ff892dc3aaabd6829c53c7ad879bc6d34444301dedbe7d445157e7db9104",
+          "Sources/E2Core/Exporter.swift" : "a3e1ae538c0c89f507b2bfd7819b70f3a520550cf745f1709e07babbb781a292",
+          "Sources/E2Core/Fixtures.swift" : "ec65b853296bb29f058011d7db3cee4e3d08b9cec0ac08d4f220ffbaf49a9657",
+          "Sources/E2Core/Inspect.swift" : "b9a10e153018d4d20a9cf1c466de699bf9a376102dd889ed59bf9f50770b847c",
+          "Sources/E2Core/Metrics.swift" : "706b66226c2552c47894c9491cfe8ce1d88a9a693cb8a3956379536c03779437",
+          "Sources/E2Core/Spec4K.swift" : "54e69c02fbb101007cc462aadbe2f0e794a74b6713371d11e1df3da147a35739",
+          "Sources/E2Expect/Expectations.swift" : "d33c148dac033ca319aa4ac20300e133e40065ab9345d58d70dacbac880c0ec8",
+          "Sources/E2Judge/Env.swift" : "cefedc1242dc53ddb9d753299db6c60c6c79fbd9a9e3baf05884805067307955",
+          "Sources/E2Judge/Judge.swift" : "1fa309af61801a8b51c20383479f5b381ac6573ae915fd549a5c4a16d4b6d5c0",
+          "Sources/e2preview/main.swift" : "cdf969be9a8302a570952d884940c0856a94c1fdf87cb3d089a967e1a6795961",
+          "Tests/E2CoreTests/EditTests.swift" : "bdadb18a7d793fdd1f3e99af9ae73b3ecf06a2d68550db9f51e6aa0974eaea29"
+        },
+        "treeSha256" : "b32f1c5b23787fa16f87b52cc1298315f3afb18b30fb6befbce49c21bccae3ef"
+      },
+      "e3SourceTree" : {
+        "fileCount" : 6,
+        "files" : {
+          "Package.swift" : "b894ed3847f7f7f07e1bfa2f26c67d230ecf538759fcafe780e5c6dd4aee3349",
+          "Sources/e3/main.swift" : "caa608d90ccc2f9458b315fdf958125b8627898d753a75d5370933572aab652f",
+          "Sources/E3Core/E3Core.swift" : "9d9256698544fa5635d742c3cc5738f6e750378c09daa7fca3d3034cd9d91cb3",
+          "Sources/E3Expect/Expectations.swift" : "6135f6e654a8ec777421e72bcbbbefec9775d2645fb3e94460560d7d8210ca57",
+          "Sources/E3Judge/Judge3.swift" : "e952dc5d77297c85356e029f87408423301738069c126130f678fba1787444d1",
+          "Sources/e3preview/main.swift" : "025335c462d0c07a549eb353978522edd7c59b78de530e5a72c4834945d322b0"
+        },
+        "treeSha256" : "97b942c4c8865796cfff20defd13edc4369756beabda91a0c2d852f9a5be58d8"
+      },
+      "executable" : {
+        "bytes" : 2072272,
+        "configuration" : "release",
+        "modified" : "2026-10-10T02:31:42Z",
+        "name" : "e3",
+        "sha256" : "f771d88f4214c1ba7620d3099d25c5425ef020837fa9bf5219a3ab5abd809823"
+      }
+    },
+    "fixtures" : {
+      "e3-M-music-610s.wav" : "9afa09e00e3372c6df5ebb6d2592706c6709239e1a02efd24a4c17e0a7575270",
+      "e3-src-A-1920x1080-30p.mp4" : "171f4cebafed9c96072a862e41a08f9d96de1513f53e3a64c35998b7fa598e76",
+      "e3-src-B-1920x1080-30p.mp4" : "5014c7b3f4589a0d987bc6c81fd17056f4057cc02bf50c78bf08c3586a494ec3",
+      "e3-src-C-1920x1080-30p.mp4" : "0f790bd0a1ecd1b149ff0abe5ba324c8c25b56856f5e602bf91131ab0a2decfe"
+    },
+    "memory" : {
+      "limits" : {
+        "footprintMiB" : 8192,
+        "freeFloorMiB" : 6144,
+        "ownedLimitMiB" : 4096
+      },
+      "maxOwnedMiB" : 2697,
+      "minFreeMiB" : 271533.79999999999,
+      "phases" : [
+        {
+          "footprintMiB" : {
+            "end" : 78,
+            "max" : 78,
+            "median" : 77.900000000000006,
+            "min" : 3.2999999999999998,
+            "start" : 3.2999999999999998
+          },
+          "freeMiBMin" : 271533.79999999999,
+          "phase" : "load",
+          "rssMiB" : {
+            "end" : 86.5,
+            "max" : 86.5,
+            "start" : 11.6
+          },
+          "samples" : 3,
+          "seconds" : 2,
+          "thermalMax" : 1
+        },
+        {
+          "footprintMiB" : {
+            "end" : 223.80000000000001,
+            "max" : 225.40000000000001,
+            "median" : 223.80000000000001,
+            "min" : 223.19999999999999,
+            "start" : 223.19999999999999
+          },
+          "freeMiBMin" : 271533.90000000002,
+          "phase" : "verify-sources",
+          "rssMiB" : {
+            "end" : 247.40000000000001,
+            "max" : 248.90000000000001,
+            "start" : 245.09999999999999
+          },
+          "samples" : 3,
+          "seconds" : 3,
+          "thermalMax" : 1
+        },
+        {
+          "footprintMiB" : {
+            "end" : 213.90000000000001,
+            "max" : 214.19999999999999,
+            "median" : 214.09999999999999,
+            "min" : 213.90000000000001,
+            "start" : 214.19999999999999
+          },
+          "freeMiBMin" : 271533.90000000002,
+          "phase" : "cleanup",
+          "rssMiB" : {
+            "end" : 229.19999999999999,
+            "max" : 229.5,
+            "start" : 229.5
+          },
+          "samples" : 10,
+          "seconds" : 10,
+          "thermalMax" : 1
+        }
+      ],
+      "stopReason" : "none"
+    },
+    "memoryCSV" : "artifacts/runs/2026-10-10T023144Z/memory-e3.csv",
+    "run" : {
+      "id" : "2026-10-10T023144Z",
+      "mode" : "diag-iso",
+      "os" : "Version 26.6.2 (Build 25G83)",
+      "settings" : "1920x1080 30p SDR H.264/AAC, timeline 600 s, generated short sources repeated (experimental, not product limits)",
+      "workloadStart" : {
+        "loadAvg" : [
+          3.5015000000000001,
+          3.9784999999999999,
+          4.0248999999999997
+        ],
+        "power" : "Now drawing from 'AC Power'",
+        "thermalState" : 1,
+        "topCPU" : [
+          "100.0 Python",
+          "33.9 e3",
+          "27.7 XprotectService",
+          "24.2 WindowServer",
+          "10.8 trustd"
+        ]
+      }
+    },
+    "status" : {
+      "correctnessChecks" : 3,
+      "correctnessFailed" : [
+
+      ],
+      "correctnessPassed" : true,
+      "execution" : "complete",
+      "note" : "실행 완료와 정확도 통과는 별개다. 성능 값은 기준 없는 기록이다."
+    },
+    "summary" : {
+      "fail" : 0,
+      "failedIDs" : [
+
+      ],
+      "pass" : 3,
+      "record" : 1
+    },
+    "wallSecondsTotal" : 16.161799999999999,
+    "workloadEnd" : {
+      "loadAvg" : [
+        3.3837999999999999,
+        3.9291999999999998,
+        4.0058999999999996
+      ],
+      "power" : "Now drawing from 'AC Power'",
+      "thermalState" : 1,
+      "topCPU" : [
+        "100.0 Python",
+        "41.3 e3",
+        "23.3 WindowServer",
+        "11.4 trustd",
+        "10.4 iTerm2"
+      ]
+    }
+  }
+}

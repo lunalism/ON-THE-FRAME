@@ -11,14 +11,20 @@ public struct E2Metrics: Codable, Sendable, Equatable {
     public let sourceID: Int
     public let sourceFrame: Int
     public let boxX: Int             // 이동 상자 왼쪽 x(없으면 −1)
+    /// 이동 상자 가운데 x(왼쪽·오른쪽 가장자리의 중점, 없으면 −1). 압축으로 가장자리가 깎여도 중점은 덜 흔들린다(2026-10-10, E3).
+    public let boxCenterX: Int
     public let captionPixels: [Int]  // 왼쪽·가운데·오른쪽 영역의 흰 픽셀 수(2픽셀 간격 표본)
     public let barHeights: [Int]
     public let background: [Int]     // 배경 측정 위치의 평균 R, G, B
+    /// 플래시 측정 위치의 평균 밝기(0~255). 플래시가 있는 소스(E3)에서 > 200이면 플래시 프레임.
+    public let flash: Int
+    public var flashOn: Bool { flash > 200 }
 
     public static let sourceKeyByID: [Int: String] = Dictionary(uniqueKeysWithValues: SourceVideoSpec.all.map { ($0.idCode, $0.key) })
     public var sourceKey: String { Self.sourceKeyByID[sourceID] ?? "?\(sourceID)" }
     /// 자막 표시 판정용 실험 문턱(흰 픽셀 표본 수). 제품 기준 아님.
-    public static let captionThreshold = 1_000
+    /// 4K 기준 1000. 표본 수가 면적에 비례하므로 배치 divisor의 제곱으로 나눈다(FHD 250).
+    public static var captionThreshold: Int { 1_000 / (Spec4K.layout.divisor * Spec4K.layout.divisor) }
     public var captionShown: [Bool] { captionPixels.map { $0 > Self.captionThreshold } }
 
     public static func measure(_ pb: CVPixelBuffer) -> E2Metrics? {
@@ -41,14 +47,20 @@ public struct E2Metrics: Codable, Sendable, Equatable {
         func code(rowY: Int, bits: Int) -> Int {
             var v = 0
             for b in 0..<bits {
-                let x = Spec4K.cellLeft + b * Spec4K.cellPitch + (Spec4K.cellSize - 24) / 2
-                let c = mean(x, rowY + (Spec4K.cellSize - 24) / 2, 24, 24)
+                let k = Spec4K.codeSample
+                let x = Spec4K.cellLeft + b * Spec4K.cellPitch + (Spec4K.cellSize - k) / 2
+                let c = mean(x, rowY + (Spec4K.cellSize - k) / 2, k, k)
                 v = (v << 1) | ((c.0 + c.1 + c.2) / 3 > 128 ? 1 : 0)
             }
             return v
         }
-        var boxX = -1
+        var boxX = -1, boxRight = -1
         for x in 0..<Spec4K.width { let c = px(x, Spec4K.boxScanY); if min(c.0, c.1, c.2) > 200 { boxX = x; break } }
+        if boxX >= 0 {
+            var x = boxX
+            while x + 1 < Spec4K.width, min(px(x + 1, Spec4K.boxScanY).0, px(x + 1, Spec4K.boxScanY).1, px(x + 1, Spec4K.boxScanY).2) > 200 { x += 1 }
+            boxRight = x
+        }
         var caps: [Int] = []
         for a in [CaptionAlignment.left, .center, .right] {
             let r = Spec4K.captionRect(a)
@@ -67,11 +79,11 @@ public struct E2Metrics: Codable, Sendable, Equatable {
             let xc = Spec4K.barLeft(k) + Spec4K.barWidth / 2
             func barRow(_ y: Int) -> Bool {
                 var n = 0
-                for x in [xc - 16, xc, xc + 16] { let c = px(x, y); if c.1 > 120 && c.2 > 150 && c.0 < 160 { n += 1 } }
+                for x in [xc - Spec4K.barSideOffset, xc, xc + Spec4K.barSideOffset] { let c = px(x, y); if c.1 > 120 && c.2 > 150 && c.0 < 160 { n += 1 } }
                 return n >= 2
             }
             var start = -1
-            for y in stride(from: Spec4K.barBaselineY - 1, through: Spec4K.barBaselineY - 6, by: -1) where barRow(y) { start = y; break }
+            for y in stride(from: Spec4K.barBaselineY - 1, through: Spec4K.barBaselineY - Spec4K.barBaseTolerance, by: -1) where barRow(y) { start = y; break }
             var h = 0
             if start >= 0 {
                 var y = start
@@ -81,10 +93,13 @@ public struct E2Metrics: Codable, Sendable, Equatable {
             heights.append(h)
         }
         let bg = mean(Int(Spec4K.bgPatch.minX), Int(Spec4K.bgPatch.minY), Int(Spec4K.bgPatch.width), Int(Spec4K.bgPatch.height))
+        let fp = Spec4K.flashPatch
+        let fl = mean(Int(fp.minX), Int(fp.minY), Int(fp.width), Int(fp.height))
         return E2Metrics(timelineCode: code(rowY: Spec4K.timelineCodeRowY, bits: Spec4K.codeBits),
                          sourceID: code(rowY: Spec4K.sourceIDRowY, bits: Spec4K.sourceIDBits),
                          sourceFrame: code(rowY: Spec4K.sourceFrameRowY, bits: Spec4K.codeBits),
-                         boxX: boxX, captionPixels: caps, barHeights: heights, background: [bg.0, bg.1, bg.2])
+                         boxX: boxX, boxCenterX: boxX >= 0 ? (boxX + boxRight) / 2 : -1, captionPixels: caps, barHeights: heights, background: [bg.0, bg.1, bg.2],
+                         flash: (fl.0 + fl.1 + fl.2) / 3)
     }
 }
 
@@ -187,11 +202,12 @@ public enum E2Decoder {
 // MARK: - 실험 소유 산출물 예산
 
 public enum OwnedBudget {
-    public static let limitBytes: UInt64 = 2 << 30
+    /// 실험 소유 산출물 상한: E1+E2+E3 합계 4 GiB(2026-10-10 소유자 채택, A-004. 이전 2 GiB).
+    public static let limitBytes: UInt64 = 4 << 30
     /// 두 실험(E1, E2)의 artifacts/와 .build/ 합계
     public static func usage(experimentsDir: URL) -> [String: UInt64] {
         var d: [String: UInt64] = [:]
-        for e in ["e1-fhd", "e2-4k"] { for s in ["artifacts", ".build"] {
+        for e in ["e1-fhd", "e2-4k", "e3-fhd-10min"] { for s in ["artifacts", ".build"] {
             d["\(e)/\(s)"] = DiskUsage.allocatedBytes(experimentsDir.appendingPathComponent(e).appendingPathComponent(s))
         } }
         return d

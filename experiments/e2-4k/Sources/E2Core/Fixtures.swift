@@ -4,6 +4,7 @@ import CoreMedia
 import CoreText
 import CoreVideo
 import E1Core
+import CryptoKit
 import Foundation
 
 // MARK: - 합성 오디오(48 kHz, 모든 시각은 샘플 인덱스)
@@ -54,6 +55,50 @@ public struct AudioSynth: Codable, Sendable {
         return out
     }
 
+    /// 샘플 i(모노). samples()와 같은 식을 한 샘플씩 계산한다(긴 파일을 스트리밍으로 쓰기 위함).
+    public func sample(_ i: Int, burst b: [Double]) -> Float {
+        var x = 0.0
+        for t in tones where i >= t.startSample && i < t.endSample {
+            let k = i - t.startSample, edge = min(k, t.endSample - 1 - i)
+            let g = edge < Self.fadeSamples ? 0.5 * (1 - cos(Double.pi * Double(edge) / Double(Self.fadeSamples))) : 1
+            x += t.amplitude * g * sin(2 * Double.pi * t.hz * Double(k) / 48_000)
+        }
+        for c in clickStartSamples where i >= c && i < c + Self.clickLength { x += b[i - c] }
+        return Float(max(-1, min(1, x)))
+    }
+    public func clickBurst() -> [Double] { burst() }
+
+    /// WAV를 1초 단위로 스트리밍해 쓴다(전체 샘플을 메모리에 두지 않음). 쓴 바이트의 SHA-256을 돌려준다.
+    /// wavData()와 같은 바이트를 만든다.
+    public func writeWAVStreaming(to url: URL) throws -> String {
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        let h = try FileHandle(forWritingTo: url)
+        defer { try? h.close() }
+        var hasher = SHA256()
+        func put(_ d: Data) throws { hasher.update(data: d); try h.write(contentsOf: d) }
+        let dataBytes = lengthSamples * 4
+        var head = Data()
+        func u32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { head.append(contentsOf: $0) } }
+        func u16(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { head.append(contentsOf: $0) } }
+        head.append(contentsOf: Array("RIFF".utf8)); u32(UInt32(36 + dataBytes)); head.append(contentsOf: Array("WAVE".utf8))
+        head.append(contentsOf: Array("fmt ".utf8)); u32(16); u16(1); u16(2); u32(48_000); u32(48_000 * 4); u16(4); u16(16)
+        head.append(contentsOf: Array("data".utf8)); u32(UInt32(dataBytes))
+        try put(head)
+        let b = burst()
+        var i = 0
+        while i < lengthSamples {
+            let n = min(48_000, lengthSamples - i)
+            var chunk = Data(capacity: n * 4)
+            for j in i..<(i + n) {
+                let v = Int16((Double(sample(j, burst: b)) * 32767).rounded()).littleEndian
+                withUnsafeBytes(of: v) { chunk.append(contentsOf: $0); chunk.append(contentsOf: $0) }
+            }
+            try put(chunk)
+            i += n
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
     /// WAV(LPCM s16le 48 kHz 스테레오, L=R) 바이트. 변환기·디더 개입 없음.
     public func wavData() -> Data {
         let s = samples()
@@ -94,14 +139,28 @@ public struct SourceVideoSpec: Codable, Sendable {
     public let background: [UInt8]   // R, G, B
     public let frames: Int
     public let clipAudio: AudioSynth  // 이 소스 영상에 들어 있는 오디오(무관 클립 오디오)
+    /// E3: 파일 이름 줄기(nil이면 E2 이름). 플래시: 소스 프레임 f % flashPeriod == flashPhase에 흰 띠(nil이면 없음, E2).
+    public let fileStem: String?
+    public let flashPeriod: Int?
+    public let flashPhase: Int
+
+    public init(key: String, idCode: Int, background: [UInt8], frames: Int, clipAudio: AudioSynth,
+                fileStem: String? = nil, flashPeriod: Int? = nil, flashPhase: Int = 0) {
+        self.key = key; self.idCode = idCode; self.background = background; self.frames = frames; self.clipAudio = clipAudio
+        self.fileStem = fileStem; self.flashPeriod = flashPeriod; self.flashPhase = flashPhase
+    }
+    public func isFlash(_ f: Int) -> Bool { flashPeriod.map { f % $0 == flashPhase } ?? false }
 
     /// v2: 질감 영역 추가(2026-10-10). 단색만 있던 첫 버전은 4K 30 Mbps 설정에서도 약 0.45 MiB로 압축되어
     /// 디코딩·인코딩 측정이 비현실적으로 쉬웠다. 첫 버전 파일은 지우지 않고 다른 이름으로 남는다.
-    public var fileName: String { "src-\(key)-3840x2160-30p-v2.mp4" }
+    public var fileName: String { fileStem.map { "\($0).mp4" } ?? "src-\(key)-3840x2160-30p-v2.mp4" }
     /// 진단용 비교 fixture(같은 화면·오디오, 프레임 재정렬 끔). 원래 v2 파일은 바꾸지 않는다.
     public var noReorderFileName: String { "src-\(key)-3840x2160-30p-v2-noreorder.mp4" }
     /// 질감 영역(위쪽-왼쪽 원점): 측정 위치(코드 행, 이동 상자 행, 배경 측정 위치, 자막 띠)를 피한다.
-    public static let textureRect = CGRect(x: 400, y: 900, width: 3400, height: 900)
+    public static var textureRect: CGRect {
+        let d = CGFloat(Spec4K.layout.divisor)
+        return CGRect(x: 400 / d, y: 900 / d, width: 3400 / d, height: 900 / d)
+    }
     public var gridColor: [UInt8] { background.map { UInt8(min(255, Int($0) + 40)) } }
 
     public static let a = SourceVideoSpec(key: "A", idCode: 0x2D, background: [110, 40, 40], frames: 240,
@@ -137,11 +196,13 @@ public struct SourceVideoSpec: Codable, Sendable {
                 fill(Spec4K.cellLeft + b * Spec4K.cellPitch, Spec4K.sourceFrameRowY, Spec4K.cellSize, Spec4K.cellSize, bit ? on : off)
             }
             fill(Spec4K.boxX(f), Spec4K.boxY, Spec4K.boxSize, Spec4K.boxSize, on)
+            if isFlash(f) { fill(0, Spec4K.flashBandY, Spec4K.width, Spec4K.flashBandHeight, [250, 250, 250]) }
             drawTexture(ctx, frame: f)
             // 사람이 보는 표시(측정에는 쓰지 않음): 큰 소스 글자와 "A  f=123"
             ctx.setShouldAntialias(true)
-            drawText(ctx, key, size: 480, x: 3200, baselineFromTop: 780)
-            drawText(ctx, "\(key)  f=\(f)", size: 120, x: 2000, baselineFromTop: 320)
+            let d = Spec4K.layout.divisor
+            drawText(ctx, key, size: CGFloat(480 / d), x: 3200 / d, baselineFromTop: 780 / d)
+            drawText(ctx, "\(key)  f=\(f)", size: CGFloat(120 / d), x: 2000 / d, baselineFromTop: 320 / d)
         }
     }
 

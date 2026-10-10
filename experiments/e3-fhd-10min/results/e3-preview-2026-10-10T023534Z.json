@@ -1,0 +1,870 @@
+{
+  "checks" : [
+    {
+      "compositorRequests" : 18000,
+      "copyMs" : {
+        "max" : 117.6343,
+        "mean" : 0.79390000000000005,
+        "n" : 18000,
+        "p50" : 0.77080000000000004,
+        "p95" : 1.1738999999999999
+      },
+      "delivered" : 17999,
+      "deliveredUnique" : 17998,
+      "deliveredWrong" : 0,
+      "deliveredWrongSample" : [
+
+      ],
+      "firstRequests" : [
+        "seq 3 t0 mt 0/30",
+        "seq 4 t1 mt 20/600",
+        "seq 5 t2 mt 40/600",
+        "seq 6 t3 mt 60/600",
+        "seq 7 t4 mt 80/600",
+        "seq 8 t5 mt 100/600"
+      ],
+      "id" : "V1",
+      "loadAvgAfter" : [
+        2.7261000000000002,
+        3.0669,
+        3.5640000000000001
+      ],
+      "mismatchEvidence" : [
+
+      ],
+      "name" : "10분 재생(새 프로세스 첫 재생, 창 부착, volume 0): 전달 프레임마다 기대값, 합성기가 받은 소스의 시각·픽셀 불일치 0, 끝까지 도달. 누락 개수는 기록",
+      "notRequested" : 0,
+      "notRequestedSample" : [
+
+      ],
+      "overlayMs" : {
+        "max" : 19.434799999999999,
+        "mean" : 0.35759999999999997,
+        "n" : 18000,
+        "p50" : 0.28210000000000002,
+        "p95" : 0.80600000000000005
+      },
+      "pollGapMaxMs" : 121.8323,
+      "pollGapsOver20ms" : 5,
+      "reachedEnd" : true,
+      "requestedButNotDelivered" : 2,
+      "requestedButNotDeliveredSample" : [
+        2563,
+        2564
+      ],
+      "requestedUnique" : 18000,
+      "result" : "PASS",
+      "sourceMismatch" : [
+
+      ],
+      "stoppedOnSourceMismatch" : false,
+      "wallSeconds" : 600.64440000000002
+    },
+    {
+      "flash" : {
+        "expectedFlashes" : 49,
+        "extra" : [
+
+        ],
+        "missing" : [
+
+        ],
+        "observedFlashes" : 49,
+        "perMinute" : [
+          {
+            "deltaFramesMax" : 0,
+            "deltaFramesMin" : 0,
+            "expected" : 5,
+            "minute" : 0,
+            "observed" : 5
+          },
+          {
+            "deltaFramesMax" : 0,
+            "deltaFramesMin" : 0,
+            "expected" : 5,
+            "minute" : 1,
+            "observed" : 5
+          },
+          {
+            "deltaFramesMax" : 0,
+            "deltaFramesMin" : 0,
+            "expected" : 5,
+            "minute" : 2,
+            "observed" : 5
+          },
+          {
+            "deltaFramesMax" : 0,
+            "deltaFramesMin" : 0,
+            "expected" : 5,
+            "minute" : 3,
+            "observed" : 5
+          },
+          {
+            "deltaFramesMax" : 0,
+            "deltaFramesMin" : 0,
+            "expected" : 4,
+            "minute" : 4,
+            "observed" : 4
+          },
+          {
+            "deltaFramesMax" : 0,
+            "deltaFramesMin" : 0,
+            "expected" : 5,
+            "minute" : 5,
+            "observed" : 5
+          },
+          {
+            "deltaFramesMax" : 0,
+            "deltaFramesMin" : 0,
+            "expected" : 5,
+            "minute" : 6,
+            "observed" : 5
+          },
+          {
+            "deltaFramesMax" : 0,
+            "deltaFramesMin" : 0,
+            "expected" : 5,
+            "minute" : 7,
+            "observed" : 5
+          },
+          {
+            "deltaFramesMax" : 0,
+            "deltaFramesMin" : 0,
+            "expected" : 5,
+            "minute" : 8,
+            "observed" : 5
+          },
+          {
+            "deltaFramesMax" : 0,
+            "deltaFramesMin" : 0,
+            "expected" : 5,
+            "minute" : 9,
+            "observed" : 5
+          }
+        ]
+      },
+      "id" : "V2",
+      "name" : "재생 중 전달 프레임의 스펙트럼·플래시 위치(전달된 프레임만 판정)",
+      "result" : "PASS",
+      "spectrum" : {
+        "clicks" : [
+          {
+            "responseFrame" : 1201,
+            "status" : "pass",
+            "t" : 40.0167
+          },
+          {
+            "responseFrame" : 3001,
+            "status" : "pass",
+            "t" : 100.0167
+          },
+          {
+            "responseFrame" : 4801,
+            "status" : "pass",
+            "t" : 160.01669999999999
+          },
+          {
+            "responseFrame" : 6601,
+            "status" : "pass",
+            "t" : 220.01669999999999
+          },
+          {
+            "responseFrame" : 8401,
+            "status" : "pass",
+            "t" : 280.01670000000001
+          },
+          {
+            "responseFrame" : 10201,
+            "status" : "pass",
+            "t" : 340.01670000000001
+          },
+          {
+            "responseFrame" : 12001,
+            "status" : "pass",
+            "t" : 400.01670000000001
+          },
+          {
+            "responseFrame" : 13801,
+            "status" : "pass",
+            "t" : 460.01670000000001
+          },
+          {
+            "responseFrame" : 15601,
+            "status" : "pass",
+            "t" : 520.01670000000001
+          },
+          {
+            "responseFrame" : 17401,
+            "status" : "pass",
+            "t" : 580.01670000000001
+          },
+          {
+            "responseFrame" : 17965,
+            "status" : "pass",
+            "t" : 598.81669999999997
+          }
+        ],
+        "clipBandNonZero" : [
+
+        ],
+        "isolationFramesChecked" : 17894,
+        "perMinute" : [
+          {
+            "band" : 6,
+            "framesChecked" : 1427,
+            "minute" : 0,
+            "mismatch" : 0
+          },
+          {
+            "band" : 8,
+            "framesChecked" : 1425,
+            "minute" : 1,
+            "mismatch" : 0
+          },
+          {
+            "band" : 10,
+            "framesChecked" : 1427,
+            "minute" : 2,
+            "mismatch" : 0
+          },
+          {
+            "band" : 12,
+            "framesChecked" : 1427,
+            "minute" : 3,
+            "mismatch" : 0
+          },
+          {
+            "band" : 14,
+            "framesChecked" : 1427,
+            "minute" : 4,
+            "mismatch" : 0
+          },
+          {
+            "band" : 16,
+            "framesChecked" : 1427,
+            "minute" : 5,
+            "mismatch" : 0
+          },
+          {
+            "band" : 18,
+            "framesChecked" : 1427,
+            "minute" : 6,
+            "mismatch" : 0
+          },
+          {
+            "band" : 20,
+            "framesChecked" : 1427,
+            "minute" : 7,
+            "mismatch" : 0
+          },
+          {
+            "band" : 22,
+            "framesChecked" : 1427,
+            "minute" : 8,
+            "mismatch" : 0
+          },
+          {
+            "band" : 15,
+            "framesChecked" : 1426,
+            "minute" : 9,
+            "mismatch" : 0
+          }
+        ],
+        "quietFramesChecked" : 3532,
+        "quietNonZero" : [
+
+        ],
+        "toneFramesChecked" : 14267,
+        "toneMismatch" : [
+
+        ]
+      }
+    },
+    {
+      "id" : "O1",
+      "name" : "같은 타임라인 해석(지문 비교)",
+      "note" : "같은 E3 소스 트리의 e3 all 오프라인 지문이 없어 비교하지 못함",
+      "result" : "RECORD"
+    },
+    {
+      "delivered" : 1807,
+      "deliveredWrong" : 0,
+      "deliveredWrongSample" : [
+
+      ],
+      "id" : "R1",
+      "name" : "1분 구간(120~180 s) 재생 1회째: 전달 프레임 기대값, 소스 불일치 0(메모리 평탄 여부는 기록)",
+      "result" : "PASS",
+      "sourceMismatch" : [
+
+      ],
+      "stoppedOnSourceMismatch" : false
+    },
+    {
+      "delivered" : 1808,
+      "deliveredWrong" : 0,
+      "deliveredWrongSample" : [
+
+      ],
+      "id" : "R2",
+      "name" : "1분 구간(120~180 s) 재생 2회째: 전달 프레임 기대값, 소스 불일치 0(메모리 평탄 여부는 기록)",
+      "result" : "PASS",
+      "sourceMismatch" : [
+
+      ],
+      "stoppedOnSourceMismatch" : false
+    },
+    {
+      "id" : "S1",
+      "moves" : [
+        {
+          "finished" : true,
+          "layer" : "4065 A135",
+          "layerAfterOutputMs" : 2003.1249,
+          "layerIssues" : [
+            "timeout; last 4065 A135"
+          ],
+          "move" : "cut 8999",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 74.221699999999998,
+          "playerTimeIndex" : 8999,
+          "seekMs" : 67.9696,
+          "target" : 8999
+        },
+        {
+          "finished" : true,
+          "layer" : "4065 A135",
+          "layerAfterOutputMs" : 2003.2141999999999,
+          "layerIssues" : [
+            "timeout; last 4065 A135"
+          ],
+          "move" : "cut 9000",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 25.871600000000001,
+          "playerTimeIndex" : 9000,
+          "seekMs" : 13.354200000000001,
+          "target" : 9000
+        },
+        {
+          "finished" : true,
+          "layer" : "4065 A135",
+          "layerAfterOutputMs" : 2001.6967,
+          "layerIssues" : [
+            "timeout; last 4065 A135"
+          ],
+          "move" : "last cut 17939",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 21.515000000000001,
+          "playerTimeIndex" : 17939,
+          "seekMs" : 15.362,
+          "target" : 17939
+        },
+        {
+          "finished" : true,
+          "layer" : "4065 A135",
+          "layerAfterOutputMs" : 2000.2088000000001,
+          "layerIssues" : [
+            "timeout; last 4065 A135"
+          ],
+          "move" : "last cut 17940",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 22.340199999999999,
+          "playerTimeIndex" : 17940,
+          "seekMs" : 16.1816,
+          "target" : 17940
+        },
+        {
+          "finished" : true,
+          "layer" : "4065 A135",
+          "layerAfterOutputMs" : 2004.0650000000001,
+          "layerIssues" : [
+            "timeout; last 4065 A135"
+          ],
+          "move" : "end-1s 17970",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 24.746099999999998,
+          "playerTimeIndex" : 17970,
+          "seekMs" : 18.5702,
+          "target" : 17970
+        },
+        {
+          "finished" : true,
+          "layer" : "4065 A135",
+          "layerAfterOutputMs" : 2003.8032000000001,
+          "layerIssues" : [
+            "timeout; last 4065 A135"
+          ],
+          "move" : "last 17999",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 25.252400000000002,
+          "playerTimeIndex" : 17999,
+          "seekMs" : 19.100100000000001,
+          "target" : 17999
+        },
+        {
+          "finished" : true,
+          "layer" : "4065 A135",
+          "layerAfterOutputMs" : 2005.0875000000001,
+          "layerIssues" : [
+            "timeout; last 4065 A135"
+          ],
+          "move" : "end 18000",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 13.1494,
+          "playerTimeIndex" : 18000,
+          "seekMs" : 12.662599999999999,
+          "target" : 18000
+        },
+        {
+          "finished" : true,
+          "layer" : "4065 A135",
+          "layerAfterOutputMs" : 2003.0406,
+          "layerIssues" : [
+            "timeout; last 4065 A135"
+          ],
+          "move" : "step back",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 34.472200000000001,
+          "playerTimeIndex" : 17999,
+          "seekMs" : 34.322099999999999,
+          "target" : 17999
+        },
+        {
+          "finished" : true,
+          "layer" : "4065 A135",
+          "layerAfterOutputMs" : 2002.2348,
+          "layerIssues" : [
+            "timeout; last 4065 A135"
+          ],
+          "move" : "step back",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 31.712900000000001,
+          "playerTimeIndex" : 17998,
+          "seekMs" : 31.447700000000001,
+          "target" : 17998
+        },
+        {
+          "finished" : true,
+          "layer" : "4065 A135",
+          "layerAfterOutputMs" : 2004.4793999999999,
+          "layerIssues" : [
+            "timeout; last 4065 A135"
+          ],
+          "move" : "back to 0",
+          "outputIssues" : [
+
+          ],
+          "outputReadyMs" : 18.217099999999999,
+          "playerTimeIndex" : 0,
+          "seekMs" : 12.062200000000001,
+          "target" : 0
+        }
+      ],
+      "name" : "일시정지 탐색(가운데 컷, 끝 직전 컷, 끝 1 s 전, 17 999, 18 000, 끝에서 ← 두 번, 0): 비디오 출력과 AVPlayerLayer 표시 버퍼가 기대값(끝은 17 999 유지)",
+      "outputReadyMs" : {
+        "max" : 74.221699999999998,
+        "mean" : 29.149799999999999,
+        "n" : 10,
+        "p50" : 24.746099999999998,
+        "p95" : 34.472200000000001
+      },
+      "playerLayerFound" : true,
+      "result" : "FAIL",
+      "seekMs" : {
+        "max" : 67.9696,
+        "mean" : 24.103200000000001,
+        "n" : 10,
+        "p50" : 16.1816,
+        "p95" : 34.322099999999999
+      }
+    },
+    {
+      "endIssues" : [
+        "timeout; last 4065 A135"
+      ],
+      "endLayer" : "4065 A135",
+      "endTimeIndex" : 18000,
+      "firstAfterSeek1" : "17931 +128 ms",
+      "firstAfterSeek2" : "17991 +131 ms",
+      "id" : "E1",
+      "name" : "끝 근처 재생 중 탐색(17 930, 17 990, 이전 위치 프레임 없음) → 끝까지 재생 후 레이어 = 17 999 유지 → 처음부터 다시 재생(첫 전달 0, 정지 화면 = 그 시각)",
+      "replayFirstDelivered" : 0,
+      "replayIssues" : [
+        "layer 4065 vs paused 26"
+      ],
+      "replayLayer" : "4065 A135",
+      "replayPausedAt" : 26,
+      "replayWrong" : 0,
+      "result" : "FAIL",
+      "seekWhilePlayingMs" : [
+        119.547,
+        104.74379999999999
+      ],
+      "sourceMismatch" : [
+        "seq 21640 t17999: time movie 359980/600 request 599966666667/1000000000",
+        "seq 21641 t17998: time movie 359960/600 request 599933333333/1000000000"
+      ],
+      "staleAfterSeek1" : 0,
+      "staleAfterSeek2" : 0
+    }
+  ],
+  "sections" : {
+    "build" : {
+      "e1SourceTree" : {
+        "fileCount" : 20,
+        "files" : {
+          "Package.swift" : "a5add313ff07bf95bfbe01e1eff67dff933fa54cbec7d2c0f356f2638946ada2",
+          "Sources/e1/main.swift" : "643e08c9bd8936d56a3a8e20c5d9f49383ee9ce69f10622672d613ecc23b4702",
+          "Sources/E1Core/Carrier.swift" : "2e7acdc6acca83fc35a87a291718bd0780f7e5da603411ea5ad5b9e2dcfd9cf9",
+          "Sources/E1Core/Compositor.swift" : "8b00047fc90320c8e3dc5d9c93dc7d68bad6b88b2fb51a4ff889d5b962dd5ec7",
+          "Sources/E1Core/Decode.swift" : "262d9298b79da39d1ceda378ba38cea1a31c69406cbb65af6849d310a81711bd",
+          "Sources/E1Core/Exporter.swift" : "8fdbc90b670a3e919c2086d55fc6523a06189ad7934d71af00fe221f58fff46e",
+          "Sources/E1Core/Fixtures.swift" : "149137c948c66e5cc2b68414d3bb6bd30b1e0a9a7c77709852cf1fc30e2611c5",
+          "Sources/E1Core/OutputGuard.swift" : "3ac18cb101f730e6d3b47fa3c70091b03fd9dcb56a32a14dbff5a1a8170671bb",
+          "Sources/E1Core/Preview.swift" : "0f4e74f55b1ad9154158cdfb6c3ceb56d933310d4648b91997ab373f5b50cf85",
+          "Sources/E1Core/Renderer.swift" : "c5a889a85fd6a8b4620eaae68092ee4bb55260d0db7128ae50b624a7bffd0fae",
+          "Sources/E1Core/Spec.swift" : "a4c04f924ebe97b7b9a216c20a951221641941ca14d9064db35548b50f6c223c",
+          "Sources/E1Core/Spectrum.swift" : "f645bc3c11820e0d9936b8eadf909baed84e79645d9cd52a711dcdc1fbe25c28",
+          "Sources/E1Core/Timeline.swift" : "1f39b9381fdf1a98a8a9eefd6ce97fdb3d32539a4ec7dfcdb43b9fecabea4e0b",
+          "Sources/E1Core/Util.swift" : "03a3b1508805077d5183d337647ae4d6fb8a66a7b617a79b3eb633de53e0c950",
+          "Sources/E1Expect/Expectations.swift" : "2c663e58795999a9d8b74e1f96dd61f5ce921ef800036a06386be7e61fd4b9fc",
+          "Sources/e1preview/Diagnose.swift" : "0defc72c0ebd504663acb13c0572eaa45b21c2a9906a269ff2128156cf6433fe",
+          "Sources/e1preview/Frames.swift" : "a8305d3ddc809df96bbaeee7d5acb5197ac9149f27935226d3dffaab86360d51",
+          "Sources/e1preview/main.swift" : "22bc65218f4711b84de0695e28ec6720e9c481a890a7da0a7ba879090f1d0b53",
+          "Sources/e1preview/Present.swift" : "abae15ca346d28778c65f0cddafdbabcffd9fb0d5831d4b4d8e8360a02e2d0ce",
+          "Tests/E1CoreTests/CoreTests.swift" : "323d1552b31c24c1a6524bc6d5a78b0217ea7e499c878816da32b1069592e9de"
+        },
+        "treeSha256" : "27e635772ce3b1acea7236690f85f41e8704d1dd3040636402de4687d26438f6"
+      },
+      "e2SourceTree" : {
+        "fileCount" : 14,
+        "files" : {
+          "Package.swift" : "4cf5bba0902b23ccecce1e06ef5327ab152c2c0e4bf1e81532ad9ea4e72dd6f0",
+          "Sources/e2/main.swift" : "3fe1b641da603376a56c82aab971e4d1b265cc86d1485fe24aae310f182f794c",
+          "Sources/E2Core/Compositor.swift" : "c483760e083b4ab6bb474ceecda61937bb66c3d1eeb5012a08372fb5c322a666",
+          "Sources/E2Core/EditTimeline.swift" : "d9f1ff892dc3aaabd6829c53c7ad879bc6d34444301dedbe7d445157e7db9104",
+          "Sources/E2Core/Exporter.swift" : "a3e1ae538c0c89f507b2bfd7819b70f3a520550cf745f1709e07babbb781a292",
+          "Sources/E2Core/Fixtures.swift" : "ec65b853296bb29f058011d7db3cee4e3d08b9cec0ac08d4f220ffbaf49a9657",
+          "Sources/E2Core/Inspect.swift" : "b9a10e153018d4d20a9cf1c466de699bf9a376102dd889ed59bf9f50770b847c",
+          "Sources/E2Core/Metrics.swift" : "f539a6ed8703dafc3ffb44195d05454ca2a7016735a0d8676583c631950927f2",
+          "Sources/E2Core/Spec4K.swift" : "54e69c02fbb101007cc462aadbe2f0e794a74b6713371d11e1df3da147a35739",
+          "Sources/E2Expect/Expectations.swift" : "d33c148dac033ca319aa4ac20300e133e40065ab9345d58d70dacbac880c0ec8",
+          "Sources/E2Judge/Env.swift" : "cefedc1242dc53ddb9d753299db6c60c6c79fbd9a9e3baf05884805067307955",
+          "Sources/E2Judge/Judge.swift" : "1fa309af61801a8b51c20383479f5b381ac6573ae915fd549a5c4a16d4b6d5c0",
+          "Sources/e2preview/main.swift" : "cdf969be9a8302a570952d884940c0856a94c1fdf87cb3d089a967e1a6795961",
+          "Tests/E2CoreTests/EditTests.swift" : "bdadb18a7d793fdd1f3e99af9ae73b3ecf06a2d68550db9f51e6aa0974eaea29"
+        },
+        "treeSha256" : "9001b9a8df6d38df2ea51594ff84d1ed01efe9ca2cb2976c3b1dd67e8a400cfb"
+      },
+      "e3SourceTree" : {
+        "fileCount" : 6,
+        "files" : {
+          "Package.swift" : "b894ed3847f7f7f07e1bfa2f26c67d230ecf538759fcafe780e5c6dd4aee3349",
+          "Sources/e3/main.swift" : "caa608d90ccc2f9458b315fdf958125b8627898d753a75d5370933572aab652f",
+          "Sources/E3Core/E3Core.swift" : "9d9256698544fa5635d742c3cc5738f6e750378c09daa7fca3d3034cd9d91cb3",
+          "Sources/E3Expect/Expectations.swift" : "67e141e9d631f24a392150f2d0ac34655ddcd88feaacde8456216b65e67b0fe1",
+          "Sources/E3Judge/Judge3.swift" : "90688bf2417057960a778acf3e90fa68f1c339beae9b6eccc4e2d52b3943e64e",
+          "Sources/e3preview/main.swift" : "025335c462d0c07a549eb353978522edd7c59b78de530e5a72c4834945d322b0"
+        },
+        "treeSha256" : "e2fafd9329a08f07c9992183e0d3ce11bd9711b784d586c4cb28e98a8133d79c"
+      },
+      "executable" : {
+        "bytes" : 2160456,
+        "configuration" : "release",
+        "modified" : "2026-10-10T02:33:04Z",
+        "name" : "e3preview",
+        "sha256" : "afa61358a88fd462a0fcceeb3db67fa7ca0ef87cb41380641a9a9b0638508bde"
+      }
+    },
+    "compositorErrors" : [
+      "stale source frame: request 599966666667/1000000000 got movie time 359980/600",
+      "stale source frame: request 599933333333/1000000000 got movie time 359960/600"
+    ],
+    "compositorEvents" : [
+      "179220642 ms: cancelAllPendingVideoCompositionRequests",
+      "179220646 ms: cancelAllPendingVideoCompositionRequests",
+      "179220658 ms: cancelAllPendingVideoCompositionRequests",
+      "179220662 ms: cancelAllPendingVideoCompositionRequests",
+      "179220669 ms: renderContextChanged 1920.0x1080.0",
+      "179221152 ms: cancelAllPendingVideoCompositionRequests",
+      "179822109 ms: cancelAllPendingVideoCompositionRequests",
+      "179822116 ms: cancelAllPendingVideoCompositionRequests",
+      "179882501 ms: cancelAllPendingVideoCompositionRequests",
+      "179882515 ms: cancelAllPendingVideoCompositionRequests",
+      "179942906 ms: cancelAllPendingVideoCompositionRequests",
+      "179944926 ms: cancelAllPendingVideoCompositionRequests",
+      "179946955 ms: cancelAllPendingVideoCompositionRequests",
+      "179948979 ms: cancelAllPendingVideoCompositionRequests",
+      "179951001 ms: cancelAllPendingVideoCompositionRequests",
+      "179953030 ms: cancelAllPendingVideoCompositionRequests",
+      "179955059 ms: cancelAllPendingVideoCompositionRequests",
+      "179957081 ms: cancelAllPendingVideoCompositionRequests",
+      "179959117 ms: cancelAllPendingVideoCompositionRequests",
+      "179961149 ms: cancelAllPendingVideoCompositionRequests",
+      "179963173 ms: cancelAllPendingVideoCompositionRequests",
+      "179963190 ms: cancelAllPendingVideoCompositionRequests",
+      "179964195 ms: cancelAllPendingVideoCompositionRequests",
+      "179965315 ms: cancelAllPendingVideoCompositionRequests",
+      "179967925 ms: cancelAllPendingVideoCompositionRequests",
+      "179967943 ms: cancelAllPendingVideoCompositionRequests",
+      "179967943 ms: cancelled seq 21719 t 0/1"
+    ],
+    "fixtures" : {
+      "e3-M-music-610s.wav" : "9afa09e00e3372c6df5ebb6d2592706c6709239e1a02efd24a4c17e0a7575270",
+      "e3-src-A-1920x1080-30p.mp4" : "171f4cebafed9c96072a862e41a08f9d96de1513f53e3a64c35998b7fa598e76",
+      "e3-src-B-1920x1080-30p.mp4" : "5014c7b3f4589a0d987bc6c81fd17056f4057cc02bf50c78bf08c3586a494ec3",
+      "e3-src-C-1920x1080-30p.mp4" : "0f790bd0a1ecd1b149ff0abe5ba324c8c25b56856f5e602bf91131ab0a2decfe"
+    },
+    "memory" : {
+      "limits" : {
+        "footprintMiB" : 8192,
+        "freeFloorMiB" : 6144,
+        "ownedLimitMiB" : 4096
+      },
+      "maxOwnedMiB" : 2758,
+      "minFreeMiB" : 271471,
+      "phases" : [
+        {
+          "footprintMiB" : {
+            "end" : 81.5,
+            "max" : 81.5,
+            "median" : 81.5,
+            "min" : 8,
+            "start" : 8
+          },
+          "freeMiBMin" : 271472.20000000001,
+          "phase" : "load",
+          "rssMiB" : {
+            "end" : 120.3,
+            "max" : 120.3,
+            "start" : 46.600000000000001
+          },
+          "samples" : 3,
+          "seconds" : 3,
+          "thermalMax" : 1
+        },
+        {
+          "footprintMiB" : {
+            "end" : 165.09999999999999,
+            "max" : 345.30000000000001,
+            "median" : 338.39999999999998,
+            "min" : 162.59999999999999,
+            "start" : 338.39999999999998
+          },
+          "freeMiBMin" : 271472.20000000001,
+          "phase" : "playback-warmup",
+          "rssMiB" : {
+            "end" : 539.20000000000005,
+            "max" : 547.20000000000005,
+            "start" : 480.39999999999998
+          },
+          "samples" : 31,
+          "seconds" : 30,
+          "thermalMax" : 1
+        },
+        {
+          "footprintFirst2MinMedian" : 167.5,
+          "footprintLast2MinMedian" : 192.40000000000001,
+          "footprintMiB" : {
+            "end" : 191,
+            "max" : 193.5,
+            "median" : 188.69999999999999,
+            "min" : 164.80000000000001,
+            "start" : 164.80000000000001
+          },
+          "footprintSlopeMiBPerMin" : 2.7799999999999998,
+          "freeMiBMin" : 271471,
+          "phase" : "playback-steady",
+          "rssMiB" : {
+            "end" : 347.69999999999999,
+            "max" : 582,
+            "start" : 538.89999999999998
+          },
+          "samples" : 570,
+          "seconds" : 571,
+          "thermalMax" : 1
+        },
+        {
+          "footprintFirst2MinMedian" : 219.90000000000001,
+          "footprintLast2MinMedian" : 219.90000000000001,
+          "footprintMiB" : {
+            "end" : 223.19999999999999,
+            "max" : 223.30000000000001,
+            "median" : 219.90000000000001,
+            "min" : 211.19999999999999,
+            "start" : 212.19999999999999
+          },
+          "footprintSlopeMiBPerMin" : 9.6400000000000006,
+          "freeMiBMin" : 271471.29999999999,
+          "phase" : "repeat-minute-1",
+          "rssMiB" : {
+            "end" : 360.5,
+            "max" : 365.30000000000001,
+            "start" : 301.69999999999999
+          },
+          "samples" : 61,
+          "seconds" : 60,
+          "thermalMax" : 0
+        },
+        {
+          "footprintFirst2MinMedian" : 224.5,
+          "footprintLast2MinMedian" : 224.5,
+          "footprintMiB" : {
+            "end" : 227.90000000000001,
+            "max" : 228.09999999999999,
+            "median" : 224.5,
+            "min" : 223.5,
+            "start" : 224.09999999999999
+          },
+          "footprintSlopeMiBPerMin" : 1.79,
+          "freeMiBMin" : 271471.29999999999,
+          "phase" : "repeat-minute-2",
+          "rssMiB" : {
+            "end" : 357.30000000000001,
+            "max" : 370.10000000000002,
+            "start" : 353.5
+          },
+          "samples" : 60,
+          "seconds" : 60,
+          "thermalMax" : 0
+        },
+        {
+          "footprintMiB" : {
+            "end" : 204.59999999999999,
+            "max" : 238.09999999999999,
+            "median" : 204.90000000000001,
+            "min" : 204.5,
+            "start" : 236.30000000000001
+          },
+          "freeMiBMin" : 271471.29999999999,
+          "phase" : "seeks",
+          "rssMiB" : {
+            "end" : 197.30000000000001,
+            "max" : 380.19999999999999,
+            "start" : 369.89999999999998
+          },
+          "samples" : 20,
+          "seconds" : 20,
+          "thermalMax" : 0
+        },
+        {
+          "footprintMiB" : {
+            "end" : 286.30000000000001,
+            "max" : 293.69999999999999,
+            "median" : 286.30000000000001,
+            "min" : 270.69999999999999,
+            "start" : 270.69999999999999
+          },
+          "freeMiBMin" : 271471.29999999999,
+          "phase" : "end-and-replay",
+          "rssMiB" : {
+            "end" : 334.5,
+            "max" : 389.39999999999998,
+            "start" : 303
+          },
+          "samples" : 6,
+          "seconds" : 6,
+          "thermalMax" : 0
+        },
+        {
+          "footprintMiB" : {
+            "end" : 179.09999999999999,
+            "max" : 251.5,
+            "median" : 179.30000000000001,
+            "min" : 179.09999999999999,
+            "start" : 251.5
+          },
+          "freeMiBMin" : 271471.29999999999,
+          "phase" : "cleanup",
+          "rssMiB" : {
+            "end" : 137.30000000000001,
+            "max" : 213.90000000000001,
+            "start" : 213.90000000000001
+          },
+          "samples" : 11,
+          "seconds" : 10,
+          "thermalMax" : 0
+        }
+      ],
+      "stopReason" : "none"
+    },
+    "memoryCSV" : "artifacts/runs/preview-2026-10-10T023534Z/memory-e3preview.csv",
+    "run" : {
+      "id" : "2026-10-10T023534Z",
+      "os" : "Version 26.6.2 (Build 25G83)",
+      "sourcePixelDiagnosis" : "every compositor request",
+      "volume" : 0,
+      "window" : "AVPlayerView 1280×760",
+      "workloadStart" : {
+        "loadAvg" : [
+          4.4355000000000002,
+          4.0728,
+          4.0312999999999999
+        ],
+        "power" : "Now drawing from 'AC Power'",
+        "thermalState" : 1,
+        "topCPU" : [
+          "98.2 Python",
+          "31.6 e3preview",
+          "27.8 WindowServer",
+          "22.5 XprotectService",
+          "12.2 claude"
+        ]
+      }
+    },
+    "status" : {
+      "correctnessChecks" : 6,
+      "correctnessFailed" : [
+        "E1",
+        "S1"
+      ],
+      "correctnessPassed" : false,
+      "execution" : "complete",
+      "note" : "실행 완료와 정확도 통과는 별개다. 성능 값은 기준 없는 기록이다."
+    },
+    "summary" : {
+      "fail" : 2,
+      "failedIDs" : [
+        "S1",
+        "E1"
+      ],
+      "pass" : 4,
+      "record" : 1
+    },
+    "wallSecondsTotal" : 761.02890000000002,
+    "workloadEnd" : {
+      "loadAvg" : [
+        2.5253999999999999,
+        2.9390000000000001,
+        3.4277000000000002
+      ],
+      "power" : "Now drawing from 'AC Power'",
+      "thermalState" : 0,
+      "topCPU" : [
+        "100.0 Python",
+        "9.0 trustd",
+        "8.2 ecosystemanalyticsd",
+        "6.9 ecosystemd",
+        "3.8 launchd"
+      ]
+    }
+  }
+}

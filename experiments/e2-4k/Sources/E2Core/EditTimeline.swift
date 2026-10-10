@@ -147,14 +147,18 @@ public struct TimedCaption: Codable, Sendable {
 }
 
 /// 선택 오디오(음악) 배치: 원본 [sourceIn, sourceIn + duration)을 타임라인 timelineStart부터 놓는다.
+/// 2026-10-10(A-004): E3의 0.5 s 배치를 위해 초 단위 정수에서 밀리초 단위 정수로 바꿨다. E2 값은 같다.
 public struct MusicPlacement: Codable, Sendable {
-    public let sourceInSeconds: Int, durationSeconds: Int, timelineStartSeconds: Int
-    public static let e2 = MusicPlacement(sourceInSeconds: 2, durationSeconds: 9, timelineStartSeconds: 1)
+    public let sourceInMs: Int, durationMs: Int, timelineStartMs: Int
+    public init(sourceInMs: Int, durationMs: Int, timelineStartMs: Int) {
+        self.sourceInMs = sourceInMs; self.durationMs = durationMs; self.timelineStartMs = timelineStartMs
+    }
+    public static let e2 = MusicPlacement(sourceInMs: 2_000, durationMs: 9_000, timelineStartMs: 1_000)
     /// 타임라인 프레임 n → 음악 원본 시각(배치 밖이면 nil). 정수 유리수 연산.
     public func sourceTime(frame n: Int) -> CMTime? {
         let t = Spec4K.frameTime(n)
-        let a = CMTime(value: CMTimeValue(timelineStartSeconds), timescale: 1)
-        guard t >= a, t < a + CMTime(value: CMTimeValue(durationSeconds), timescale: 1) else { return nil }
-        return t - a + CMTime(value: CMTimeValue(sourceInSeconds), timescale: 1)
+        let a = CMTime(value: CMTimeValue(timelineStartMs), timescale: 1000)
+        guard t >= a, t < a + CMTime(value: CMTimeValue(durationMs), timescale: 1000) else { return nil }
+        return t - a + CMTime(value: CMTimeValue(sourceInMs), timescale: 1000)
     }
 }

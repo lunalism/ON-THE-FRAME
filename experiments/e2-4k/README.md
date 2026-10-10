@@ -49,6 +49,18 @@ E1의 렌더러·내보내기 파이프라인·디코더는 FHD 상수(`Spec`)�
 | `results/` | 결과 JSON(증거) |
 | `artifacts/`, `.build/` (Git 무시) | fixture, 캐시, 출력, 로그, 빌드 산출물 |
 
+**E3-1을 위한 공유 코드 변경(2026-10-10, A-004):**
+- `Spec4K` 해상도 일반화(4K 기본, FHD = ½)
+- `E2Metrics` 플래시·상자 가운데 추가
+- `SourceVideoSpec` 공개 생성자·플래시
+- `MusicPlacement` 밀리초
+- `OwnedBudget` 상한 4 GiB(E1+E2+E3)
+- 소스 시각 검사 허용 0.1 ms
+- 다시 재생 뒤 레이어를 최대 2 s 기다려 읽음
+- `E2Core`·`E2Judge` product 선언
+
+E2 기본 동작은 그대로다. 회귀 결과는 [../e3-fhd-10min/README.md](../e3-fhd-10min/README.md) §6에 있다(최종 E2 트리 `23230941…`: `e2-preview-2026-10-10T025514Z` 8/8, `e2-run-2026-10-10T025017Z` 19/19는 e2preview만 다른 직전 트리). E2의 해결되지 않은 소스 프레임 실패(§5.4)는 그대로다.
+
 ## 2. 재현 명령
 
 `experiments/e2-4k` 디렉터리에서 실행한다.

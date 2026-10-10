@@ -319,8 +319,16 @@ func endAndReplay(_ r: Report, _ h: Harness, layer: AVPlayerLayer?) async {
     // n/30 사이에서 멈춘 경우 레이어는 그 시각의 프레임 또는 다음 프레임을 보여 줄 수 있다(기록 …004002Z: 시각 내림 24, 표시 25).
     // 판정: 표시 프레임의 타임라인 코드가 정지 시각 ±1 프레임 안이고, 그 코드에 대해 내용이 기대값과 같다(끝 화면 잔상이 아님).
     let reN = floorIndex(h.now)
-    await sleepMs(200)
-    let rm = layer.displayedPixelBuffer().flatMap { E2Metrics.measure($0) }
+    // 정지 뒤 레이어 표시 버퍼가 새 프레임으로 바뀔 때까지 최대 2 s 기다린다(2026-10-10 수정: 200 ms 뒤 한 번만 읽던 방식은
+    // …025328Z에서 끝 화면 299를 읽었다. 같은 재생의 비디오 출력은 0부터 정상이었다). 2 s 뒤에도 정지 시각 ±1이 아니면 실패다.
+    var rm: E2Metrics?
+    let w0 = CACurrentMediaTime()
+    while CACurrentMediaTime() - w0 < 2 {
+        rm = layer.displayedPixelBuffer().flatMap { E2Metrics.measure($0) }
+        if let m = rm, abs(m.timelineCode - reN) <= 1 { break }
+        await sleepMs(20)
+    }
+    let layerWaitMs = (CACurrentMediaTime() - w0) * 1000
     var ri: [String] = []
     if let m = rm {
         if abs(m.timelineCode - reN) > 1 { ri.append("layer timeline \(m.timelineCode) not within ±1 of paused \(reN)") }
@@ -332,7 +340,7 @@ func endAndReplay(_ r: Report, _ h: Harness, layer: AVPlayerLayer?) async {
             pass: endIdx == 300 && ei.isEmpty && ri.isEmpty && reN > 0 && firstAfter?.timeIndex == 0
                 && replayDel.allSatisfy { Judge.frameIssues(timeIndex: $0.timeIndex, $0.metrics).isEmpty },
             ["endTimeIndex": endIdx, "endLayer": em.map { "\($0.timelineCode) \($0.sourceKey)\($0.sourceFrame)" } ?? "nil", "endIssues": ei,
-             "replayPausedAt": reN, "replayLayer": rm.map { "\($0.timelineCode) \($0.sourceKey)\($0.sourceFrame)" } ?? "nil", "replayIssues": ri,
+             "replayLayerWaitMs": layerWaitMs, "replayPausedAt": reN, "replayLayer": rm.map { "\($0.timelineCode) \($0.sourceKey)\($0.sourceFrame)" } ?? "nil", "replayIssues": ri,
              "replayFirstDelivered": firstAfter?.timeIndex ?? -1, "replayDelivered": replayDel.count])
 }
 

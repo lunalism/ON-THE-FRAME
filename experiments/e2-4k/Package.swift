@@ -9,6 +9,8 @@ let package = Package(
     name: "E24K",
     // 실험용 배포 대상. 제품의 최소 macOS 결정(O-01)이 아니다.
     platforms: [.macOS(.v15)],
+    // E3(experiments/e3-fhd-10min)가 경로 의존성으로 재사용한다(2026-10-10, A-004). 동작 변경 없음.
+    products: [.library(name: "E2Core", targets: ["E2Core"]), .library(name: "E2Judge", targets: ["E2Judge"])],
     dependencies: [.package(path: "../e1-fhd")],
     targets: [
         .target(name: "E2Core", dependencies: [.product(name: "E1Core", package: "e1-fhd")], swiftSettings: strict),

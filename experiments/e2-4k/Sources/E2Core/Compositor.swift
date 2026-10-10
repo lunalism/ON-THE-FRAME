@@ -60,7 +60,8 @@ public final class Overlay: Sendable {
             case .center: x = (Spec4K.width - w) / 2
             case .right: x = Spec4K.width - Spec4K.captionMarginX - w
             }
-            fill(x - 24, Spec4K.captionTop + 12, w + 48, Spec4K.captionBottom - Spec4K.captionTop - 24, (0, 0, 0), alpha: 0.6)
+            let pad = 24 / Spec4K.layout.divisor, vpad = 12 / Spec4K.layout.divisor
+            fill(x - pad, Spec4K.captionTop + vpad, w + 2 * pad, Spec4K.captionBottom - Spec4K.captionTop - 2 * vpad, (0, 0, 0), alpha: 0.6)
             ctx.setShouldAntialias(true)
             ctx.setShouldSmoothFonts(false)
             ctx.textMatrix = .identity
@@ -232,8 +233,12 @@ public final class E2Compositor: NSObject, AVVideoCompositing, @unchecked Sendab
                 // 소스 프레임 시각 검사(항상): 결함을 덮지 않고 기록한다. 받은 이미지를 바꾸거나 버리지 않는다.
                 if !useHeld, let mt = SourceMovieTime.read(image) {
                     e.sourceMovieTime = "\(mt.value)/\(mt.timescale)"
-                    e.sourceTimeMatches = mt == r.compositionTime
-                    if mt != r.compositionTime { ins.log.error("stale source frame: request \(r.compositionTime.value)/\(r.compositionTime.timescale) got movie time \(mt.value)/\(mt.timescale)") }
+                    // 허용 0.1 ms(2026-10-10, E3): 서로 다른 시간 단위 사이의 반올림 차이(예: 359980/600과 599966666667/1e9,
+                    // 둘 다 599.9667 s)를 불일치로 잘못 세지 않게 한다. 프레임 간격(33.3 ms)보다 훨씬 작다.
+                    let diff = CMTimeAbsoluteValue(CMTimeSubtract(mt, r.compositionTime))
+                    let matches = diff <= CMTime(value: 1, timescale: 10_000)
+                    e.sourceTimeMatches = matches
+                    if !matches { ins.log.error("stale source frame: request \(r.compositionTime.value)/\(r.compositionTime.timescale) got movie time \(mt.value)/\(mt.timescale)") }
                 }
                 r.finish(withComposedVideoFrame: out)
                 ins.log.record(E2Log.Entry(timeValue: e.timeValue, timescale: e.timescale, frame: e.frame, content: e.content, exact: e.exact,
@@ -344,10 +349,10 @@ public enum E2CompositionBuilder {
         let ma = AVURLAsset(url: music)
         assets.append(ma)
         guard let m = try await ma.loadTracks(withMediaType: .audio).first else { throw E1Error.invalidSource("music track") }
-        let mStart = CMTime(value: CMTimeValue(placement.timelineStartSeconds), timescale: 1)
+        let mStart = CMTime(value: CMTimeValue(placement.timelineStartMs), timescale: 1000)
         if mStart > .zero { mt.insertEmptyTimeRange(CMTimeRange(start: .zero, duration: mStart)) }
-        try mt.insertTimeRange(CMTimeRange(start: CMTime(value: CMTimeValue(placement.sourceInSeconds), timescale: 1),
-                                           duration: CMTime(value: CMTimeValue(placement.durationSeconds), timescale: 1)), of: m, at: mStart)
+        try mt.insertTimeRange(CMTimeRange(start: CMTime(value: CMTimeValue(placement.sourceInMs), timescale: 1000),
+                                           duration: CMTime(value: CMTimeValue(placement.durationMs), timescale: 1000)), of: m, at: mStart)
         let frozen = comp.copy() as! AVComposition
         withExtendedLifetime(assets) {}
         let held: HeldFrame

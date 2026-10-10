@@ -1,0 +1,136 @@
+{
+  "checks" : [
+    {
+      "error" : "budgetExceeded: owned 2696 MiB + planned 1600 MiB > 4096 MiB",
+      "id" : "ABORT",
+      "name" : "실행 중단",
+      "result" : "FAIL"
+    }
+  ],
+  "sections" : {
+    "budgetAfter" : {
+      "e1-fhd/.build" : 590.89999999999998,
+      "e1-fhd/artifacts" : 73.299999999999997,
+      "e2-4k/.build" : 361.69999999999999,
+      "e2-4k/artifacts" : 549.5,
+      "e3-fhd-10min/.build" : 188.80000000000001,
+      "e3-fhd-10min/artifacts" : 932.79999999999995
+    },
+    "budgetBefore" : {
+      "e1-fhd/.build" : 590.89999999999998,
+      "e1-fhd/artifacts" : 73.299999999999997,
+      "e2-4k/.build" : 361.69999999999999,
+      "e2-4k/artifacts" : 549.5,
+      "e3-fhd-10min/.build" : 188.80000000000001,
+      "e3-fhd-10min/artifacts" : 932.70000000000005
+    },
+    "budgetTotalMiB" : 2697,
+    "memory" : {
+      "limits" : {
+        "footprintMiB" : 8192,
+        "freeFloorMiB" : 6144,
+        "ownedLimitMiB" : 4096
+      },
+      "maxOwnedMiB" : 2697,
+      "minFreeMiB" : 271533.90000000002,
+      "phases" : [
+        {
+          "footprintMiB" : {
+            "end" : 3.3999999999999999,
+            "max" : 3.3999999999999999,
+            "median" : 3.3999999999999999,
+            "min" : 3.3999999999999999,
+            "start" : 3.3999999999999999
+          },
+          "freeMiBMin" : 271533.90000000002,
+          "phase" : "load",
+          "rssMiB" : {
+            "end" : 11.699999999999999,
+            "max" : 11.699999999999999,
+            "start" : 11.699999999999999
+          },
+          "samples" : 1,
+          "seconds" : 0,
+          "thermalMax" : 1
+        },
+        {
+          "footprintMiB" : {
+            "end" : 4.7000000000000002,
+            "max" : 4.7000000000000002,
+            "median" : 4.7000000000000002,
+            "min" : 4.7000000000000002,
+            "start" : 4.7000000000000002
+          },
+          "freeMiBMin" : 271533.90000000002,
+          "phase" : "cleanup",
+          "rssMiB" : {
+            "end" : 13.199999999999999,
+            "max" : 13.199999999999999,
+            "start" : 13.199999999999999
+          },
+          "samples" : 10,
+          "seconds" : 10,
+          "thermalMax" : 1
+        }
+      ],
+      "stopReason" : "none"
+    },
+    "memoryCSV" : "artifacts/runs/2026-10-10T023109Z/memory-e3.csv",
+    "run" : {
+      "id" : "2026-10-10T023109Z",
+      "mode" : "diag-iso",
+      "os" : "Version 26.6.2 (Build 25G83)",
+      "settings" : "1920x1080 30p SDR H.264/AAC, timeline 600 s, generated short sources repeated (experimental, not product limits)",
+      "workloadStart" : {
+        "loadAvg" : [
+          3.7509999999999999,
+          4.0693000000000001,
+          4.0575999999999999
+        ],
+        "power" : "Now drawing from 'AC Power'",
+        "thermalState" : 1,
+        "topCPU" : [
+          "100.0 Python",
+          "37.0 e3",
+          "25.5 WindowServer",
+          "12.1 claude",
+          "6.4 trustd"
+        ]
+      }
+    },
+    "status" : {
+      "correctnessChecks" : 0,
+      "correctnessFailed" : [
+
+      ],
+      "correctnessPassed" : false,
+      "execution" : "stopped (error: budgetExceeded: owned 2696 MiB + planned 1600 MiB > 4096 MiB)",
+      "note" : "실행 완료와 정확도 통과는 별개다. 성능 값은 기준 없는 기록이다."
+    },
+    "summary" : {
+      "fail" : 1,
+      "failedIDs" : [
+        "ABORT"
+      ],
+      "pass" : 0,
+      "record" : 0
+    },
+    "wallSecondsTotal" : 11.273400000000001,
+    "workloadEnd" : {
+      "loadAvg" : [
+        3.7886000000000002,
+        4.0663999999999998,
+        4.0566000000000004
+      ],
+      "power" : "Now drawing from 'AC Power'",
+      "thermalState" : 1,
+      "topCPU" : [
+        "98.8 Python",
+        "46.5 e3",
+        "23.8 WindowServer",
+        "13.8 iTerm2",
+        "6.7 trustd"
+      ]
+    }
+  }
+}
