@@ -286,10 +286,15 @@ public enum ExportJudge {
         return out.sorted()
     }
 
-    public static func judge(_ url: URL, clips: [ClipRef], durationFrames: Int? = nil, toneCheck: Bool = false) async throws -> Verdict {
+    /// audioClips: 원본 소리 레인 클립(A-012). nil이면 영상 클립과 같은 위치(연결된 쌍, 이전 판정과 같음).
+    public static func judge(_ url: URL, clips: [ClipRef], audioClips: [ClipRef]? = nil, durationFrames: Int? = nil, toneCheck: Bool = false) async throws -> Verdict {
         Spec4K.configure(.fhd)
         let d = try await E2Decoder.decode(url)
-        let (expected, placed) = try expectations(clips, durationFrames: durationFrames)
+        let (expected, videoPlaced) = try expectations(clips, durationFrames: durationFrames)
+        // 소리 판정은 소리 레인 배치로(기본: 영상과 같은 배치)
+        let placed = try audioClips.map { try expectations($0, durationFrames: durationFrames).placed } ?? videoPlaced
+        var audioCovered = [Bool](repeating: false, count: expected.count)
+        for (c, st, _) in placed { for k in st..<min(st + c.length, audioCovered.count) { audioCovered[k] = true } }
         var onsets: [Int] = [], notes: [String] = []
         // 클릭: 원본 시각(샘플) s가 클립의 원본 구간 [sourceIn, sourceIn + length)/30 s 안이면 타임라인 st/30 + (s − sourceIn/30)에 있어야 한다
         let spf = DevFixtures.samplesPerFrame
@@ -322,9 +327,9 @@ public enum ExportJudge {
                 for i in lo..<hi { acc += Double(d.mono[i]) * Double(d.mono[i]) }
                 return (acc / Double(hi - lo)).squareRoot()
             }
-            var runs: [(gap: Bool, a: Int, b: Int)] = []   // 프레임 구간
-            for (n, e) in expected.enumerated() {
-                let g = e == .gap
+            var runs: [(gap: Bool, a: Int, b: Int)] = []   // 프레임 구간(소리 레인 기준)
+            for n in expected.indices {
+                let g = !audioCovered[n]
                 if let l = runs.last, l.gap == g, l.b == n { runs[runs.count - 1].b = n + 1 } else { runs.append((g, n, n + 1)) }
             }
             for r in runs {

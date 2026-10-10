@@ -12,7 +12,7 @@ for MODE in window quit-export; do
   mkdir -p $RUN/sources
   cp -c .build/test-work/fixtures/otf-A.mp4 .build/test-work/fixtures/otf-B.mp4 $RUN/sources/
   T0=$(date +%s)
-  open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFCloseTest $MODE &
+  open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout -OTFCloseTest $MODE &
   OPENPID=$!
   EXITED=0
   for i in {1..240}; do if ! kill -0 $OPENPID 2>/dev/null; then EXITED=1; break; fi; sleep 1; done

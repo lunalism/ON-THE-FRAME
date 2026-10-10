@@ -83,6 +83,24 @@ case "verify-layer":
     let enc2 = JSONEncoder(); enc2.outputFormatting = [.prettyPrinted, .sortedKeys]
     try enc2.encode(rows).write(to: dir.appendingPathComponent("layer-result.json"))
     print(mismatch ? "MISMATCH SEEN" : "ALL EXPECTED")
+case "verify-lanes":
+    // A-012 레인 자체 검사의 내보내기: 영상 레인 배치 → 원본 프레임, 소리 레인 배치 → 클릭 위치·빈틈 무음(독립 기대값)
+    struct LRef: Codable { let file: String; let start: Int; let sourceIn: Int; let length: Int }
+    struct LaneManifest: Codable { let exportFile: String; let clips: [LRef]; let audioClips: [LRef]; let durationFrames: Int }
+    struct LCheck: Codable { let name: String; let pass: Bool; let detail: String }
+    let checks = try JSONDecoder().decode([LCheck].self, from: Data(contentsOf: dir.appendingPathComponent("lane-result.json")))
+    for c in checks { print(c.pass ? "PASS" : "FAIL", c.name, c.detail.isEmpty ? "" : "— \(c.detail)") }
+    var ok = checks.allSatisfy(\.pass) && !checks.isEmpty
+    if let md = try? Data(contentsOf: dir.appendingPathComponent("lane-manifest.json")) {
+        let m = try JSONDecoder().decode(LaneManifest.self, from: md)
+        let ref = { (r: LRef) in ExportJudge.ClipRef(file: r.file, start: r.start, sourceIn: r.sourceIn, length: r.length) }
+        let v = try await ExportJudge.judge(dir.appendingPathComponent(m.exportFile), clips: m.clips.map(ref), audioClips: m.audioClips.map(ref),
+                                            durationFrames: m.durationFrames, toneCheck: true)
+        report("lane export", v)
+        ok = ok && v.pass
+    } else { print("lane export: no manifest"); ok = false }
+    print(ok ? "OVERALL PASS" : "OVERALL FAIL")
+    exit(ok ? 0 : 1)
 case "fixtures":
     let names = try await DevFixtures.ensureAll(in: dir)
     print("fixtures:", names.joined(separator: ", "))

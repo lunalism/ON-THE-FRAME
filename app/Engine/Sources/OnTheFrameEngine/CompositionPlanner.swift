@@ -29,6 +29,7 @@ public enum PlanError: Error, CustomStringConvertible {
 /// 원본 구간은 정확한 유리수 시각(트랙 시작 + sourceIn/30 s, 길이 length/30 s)으로 넣는다. 원본 프레임레이트(29.97·25·가변)와
 /// 무관하게 영상·소리가 같은 시각 구간을 쓰므로 소리 동기가 유지되고, 출력 프레임 시각은 videoComposition의 1/30 s다(A-010).
 /// 빈틈(D-020): 영상·소리 트랙 모두 빈 구간을 넣고, 그 구간의 영상 지시는 레이어 없이 검정 배경이다(소리 없음).
+/// A-012: 영상 트랙은 영상 레인, 소리 트랙은 원본 소리 레인에서 따로 만든다(레인마다 빈틈이 다를 수 있음).
 /// composition 길이는 타임라인 길이(durationFrames)와 같다(앞·중간·끝 빈틈 포함). 클립이 하나도 없으면 만들지 않는다.
 /// 끝 빈틈: AVComposition은 트랙 끝의 빈 구간을 길이에 넣지 않는다(검사로 확인: 360프레임 타임라인이 270프레임이 됨).
 /// 그래서 끝 빈틈만 영상 트랙을 이미 불러온 원본 구간(프레임 단위 샘플)으로 빈틈 길이만큼 채운다. 그 구간 지시에는 레이어가
@@ -46,39 +47,76 @@ public enum CompositionPlanner {
         }
         var loaded: [UUID: (AVURLAsset, AVAssetTrack, AVAssetTrack?, CMTimeRange, CMTimeRange?)] = [:]
         var keep: [AVURLAsset] = []
-        var instructions: [AVVideoCompositionInstruction] = []
-        var anyAudio = false
-        var cursor = 0
-        func gap(_ from: Int, _ to: Int) {
-            guard to > from else { return }
-            let r = CMTimeRange(start: settings.time(from), duration: settings.time(to - from))
-            vt.insertEmptyTimeRange(r)
-            at.insertEmptyTimeRange(r)
+        func load(_ id: UUID) async throws -> (AVURLAsset, AVAssetTrack, AVAssetTrack?, CMTimeRange, CMTimeRange?) {
+            if let l = loaded[id] { return l }
+            guard let m = media[id] else { throw PlanError.missingMedia(id) }
+            let a = AVURLAsset(url: m.url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+            keep.append(a)
+            guard let v = try await a.loadTracks(withMediaType: .video).first else { throw PlanError.insertFailed("no video in \(m.name)") }
+            let au = try await a.loadTracks(withMediaType: .audio).first
+            let vr = try await v.load(.timeRange)
+            let ar = try await au?.load(.timeRange)
+            let l = (a, v, au, vr, ar)
+            loaded[id] = l
+            return l
+        }
+        func blackInstruction(_ r: CMTimeRange) -> AVMutableVideoCompositionInstruction {
             let ins = AVMutableVideoCompositionInstruction()
             ins.timeRange = r
             ins.backgroundColor = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
             ins.layerInstructions = []
-            instructions.append(ins)
+            return ins
         }
+        var instructions: [AVVideoCompositionInstruction] = []
+
+        // 영상 레인
+        var cursor = 0
         for c in t.clips {
-            gap(cursor, c.start)
+            if c.start > cursor {   // 앞·중간 빈틈: 빈 구간 + 검정
+                let r = CMTimeRange(start: settings.time(cursor), duration: settings.time(c.start - cursor))
+                vt.insertEmptyTimeRange(r)
+                instructions.append(blackInstruction(r))
+            }
             cursor = c.end
             guard let m = media[c.mediaID] else { throw PlanError.missingMedia(c.mediaID) }
-            if loaded[c.mediaID] == nil {
-                let a = AVURLAsset(url: m.url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
-                keep.append(a)
-                guard let v = try await a.loadTracks(withMediaType: .video).first else { throw PlanError.insertFailed("no video in \(m.name)") }
-                let au = try await a.loadTracks(withMediaType: .audio).first
-                let vr = try await v.load(.timeRange)
-                let ar = try await au?.load(.timeRange)
-                loaded[c.mediaID] = (a, v, au, vr, ar)
-            }
-            let (_, v, au, vr, ar) = loaded[c.mediaID]!
+            let (_, v, _, vr, _) = try await load(c.mediaID)
             let at0 = settings.time(c.start)
             let src = CMTimeRange(start: vr.start + settings.time(c.sourceIn), duration: settings.time(c.length))
             do { try vt.insertTimeRange(src, of: v, at: at0) } catch { throw PlanError.insertFailed("video \(m.name): \(error.localizedDescription)") }
-            // 연결된 소리: 원본 오디오가 덮는 부분만 넣고 나머지는 빈 구간
+            let ins = AVMutableVideoCompositionInstruction()
+            ins.timeRange = CMTimeRange(start: at0, duration: src.duration)
+            ins.backgroundColor = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
+            let li = AVMutableVideoCompositionLayerInstruction(assetTrack: vt)
+            li.setTransform(fitTransform(natural: m.naturalSize, preferred: m.preferredTransform, render: settings.renderSize), at: at0)
+            ins.layerInstructions = [li]
+            instructions.append(ins)
+        }
+        // 끝 빈틈(영상 클립이 하나도 없으면 전체): 이미 쓰는 원본의 프레임 단위 구간으로 채우고 레이어 없는 검정 지시로 가린다
+        if t.durationFrames > cursor, let first = t.clips.first ?? t.audioClips.first, let n = media[first.mediaID]?.frameCount {
+            let (_, v, _, vr, _) = try await load(first.mediaID)
+            var pos = cursor
+            while pos < t.durationFrames {
+                let k = min(n, t.durationFrames - pos)
+                do { try vt.insertTimeRange(CMTimeRange(start: vr.start, duration: settings.time(k)), of: v, at: settings.time(pos)) }
+                catch { throw PlanError.insertFailed("trailing gap: \(error.localizedDescription)") }
+                pos += k
+            }
+            instructions.append(blackInstruction(CMTimeRange(start: settings.time(cursor), duration: settings.time(t.durationFrames - cursor))))
+        }
+
+        // 원본 소리 레인(A-012): 레인 위치대로. 원본 시각은 영상과 같은 규칙(영상 트랙 시작 + sourceIn/30 s)이라
+        // 연결된 쌍은 영상과 같은 원본 시각을 듣고, 연결을 해제해 옮긴 소리는 옮긴 만큼 어긋난다. 빈틈은 빈 구간(무음).
+        var anyAudio = false
+        var aCursor = 0
+        for c in t.audioClips {
+            if c.start > aCursor { at.insertEmptyTimeRange(CMTimeRange(start: settings.time(aCursor), duration: settings.time(c.start - aCursor))) }
+            aCursor = c.end
+            guard let m = media[c.mediaID] else { throw PlanError.missingMedia(c.mediaID) }
+            let (_, _, au, vr, ar) = try await load(c.mediaID)
+            let at0 = settings.time(c.start)
+            let src = CMTimeRange(start: vr.start + settings.time(c.sourceIn), duration: settings.time(c.length))
             let target = CMTimeRange(start: at0, duration: src.duration)
+            // 원본 소리가 덮는 부분만 넣고 나머지는 빈 구간
             if let au, let ar {
                 let inter = src.intersection(ar)
                 if inter.duration > .zero {
@@ -90,28 +128,6 @@ public enum CompositionPlanner {
                     anyAudio = true
                 } else { at.insertEmptyTimeRange(target) }
             } else { at.insertEmptyTimeRange(target) }
-            let ins = AVMutableVideoCompositionInstruction()
-            ins.timeRange = target
-            ins.backgroundColor = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
-            let li = AVMutableVideoCompositionLayerInstruction(assetTrack: vt)
-            li.setTransform(fitTransform(natural: m.naturalSize, preferred: m.preferredTransform, render: settings.renderSize), at: at0)
-            ins.layerInstructions = [li]
-            instructions.append(ins)
-        }
-        if t.durationFrames > cursor, let first = t.clips.first, let (_, v, _, vr, _) = loaded[first.mediaID], let n = media[first.mediaID]?.frameCount {
-            let r = CMTimeRange(start: settings.time(cursor), duration: settings.time(t.durationFrames - cursor))
-            var at = cursor
-            while at < t.durationFrames {
-                let k = min(n, t.durationFrames - at)
-                do { try vt.insertTimeRange(CMTimeRange(start: vr.start, duration: settings.time(k)), of: v, at: settings.time(at)) }
-                catch { throw PlanError.insertFailed("trailing gap: \(error.localizedDescription)") }
-                at += k
-            }
-            let ins = AVMutableVideoCompositionInstruction()
-            ins.timeRange = r
-            ins.backgroundColor = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
-            ins.layerInstructions = []
-            instructions.append(ins)
         }
         if !anyAudio { comp.removeTrack(at) }
         let vc = AVMutableVideoComposition()

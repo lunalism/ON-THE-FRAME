@@ -9,8 +9,11 @@ struct OnTheFrameApp: App {
     var body: some Scene {
         Window("ON THE FRAME", id: "main") {
             ContentView(store: store)
-                .frame(minWidth: 1100, minHeight: 680)
+                // 최소 크기는 패널 최소 크기에서 정한다(EditorLayout). 작은 화면에서는 EditorLayout이 창 최소 크기를 쓸 수 있는 영역에 맞춰 줄인다.
+                .frame(minWidth: EditorLayout.minContent.width, minHeight: EditorLayout.minContent.height)
         }
+        // 창 위치·크기는 EditorLayout이 처음 70% 가운데 / 마지막 보통 창 되살리기로 직접 관리한다(SwiftUI 창 복원과 겹치지 않게 끔)
+        .restorationBehavior(.disabled)
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(after: .newItem) {
@@ -31,6 +34,17 @@ struct OnTheFrameApp: App {
                     .disabled(store.selection == nil || !store.editorFocused || store.gestureBase != nil)
                 Button("선택한 클립 리플 삭제  ⇧Delete") { store.deleteSelection(ripple: true) }
                     .disabled(store.selection == nil || !store.editorFocused || store.gestureBase != nil)
+                Divider()
+                // 연결(A-012): 연결된 영상·소리는 함께 선택·편집된다. 연결 해제 뒤 따로 옮기거나 다듬을 수 있다.
+                Button("연결 해제(영상·소리 따로 편집)") { store.unlinkSelection() }.disabled(!store.canUnlink || store.gestureBase != nil)
+                Button("연결(⌘-클릭한 클립과)") { store.linkSelection() }.disabled(!store.canLink || store.gestureBase != nil)
+            }
+            // 보기: 패널 접기·펼치기와 기본 배치(창 위치·크기는 바꾸지 않음)
+            CommandGroup(before: .toolbar) {
+                Button(EditorLayout.shared.mediaCollapsed ? "영상 목록 펼치기" : "영상 목록 접기") { EditorLayout.shared.toggleMedia() }
+                Button(EditorLayout.shared.inspectorCollapsed ? "클립 정보 펼치기" : "클립 정보 접기") { EditorLayout.shared.toggleInspector() }
+                Button("기본 배치로 재설정") { EditorLayout.shared.resetToDefault() }
+                Divider()
             }
             CommandMenu("재생") {
                 Button(store.isPlaying ? "일시정지  Space" : "재생  Space") { store.togglePlay() }.disabled(!store.canPlay)
@@ -46,10 +60,31 @@ struct OnTheFrameApp: App {
 /// Finder·`open -a`로 열린 파일 처리. Debug 빌드에서는 숨은 자체 검사(-OTFSelfTest, 개발 검증용) 진입점도 둔다.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    #if DEBUG
+    /// 배치 자체 검사 준비(창이 붙기 전): 따로 둔 저장소를 비우거나(-OTFLayoutReset) 화면 밖 저장값을 넣는다(-OTFLayoutInject x,y,w,h)
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-OTFLayoutSuite"), i + 1 < args.count, let d = UserDefaults(suiteName: args[i + 1]) else { return }
+        if args.contains("-OTFLayoutReset") { d.removePersistentDomain(forName: args[i + 1]) }
+        if let j = args.firstIndex(of: "-OTFLayoutInject"), j + 1 < args.count {
+            let n = args[j + 1].split(separator: ",").compactMap { Double($0) }
+            if n.count == 4 { d.set(NSStringFromRect(NSRect(x: n[0], y: n[1], width: n[2], height: n[3])), forKey: EditorLayout.frameKey) }
+        }
+    }
+    #endif
     func application(_ application: NSApplication, open urls: [URL]) {
         ProjectStore.shared.ensureEditorVisible()
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
+        if args.contains("-OTFLaneTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await LaneSelfTest.run(folder: folder) }
+            return
+        }
+        if let i = args.firstIndex(of: "-OTFLayoutTest"), i + 1 < args.count, let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            let phase = args[i + 1]
+            Task { await LayoutSelfTest.run(folder: folder, phase: phase) }
+            return
+        }
         if args.contains("-OTFPreviewTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await PreviewSelfTest.run(folder: folder) }
             return

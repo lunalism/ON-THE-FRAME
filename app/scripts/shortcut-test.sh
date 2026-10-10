@@ -10,7 +10,7 @@ APP=.build/DerivedData/Build/Products/Debug/OnTheFrame.app
 RUN=selftest-work/keys-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p $RUN/sources
 cp -c .build/test-work/fixtures/otf-A.mp4 .build/test-work/fixtures/otf-B.mp4 $RUN/sources/
-( open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFShortcutTest ${TRACE:+-OTFKeyTrace} ) &
+( open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout -OTFShortcutTest ${TRACE:+-OTFKeyTrace} ) &
 OPENPID=$!
 for i in {1..120}; do [[ -f $RUN/shortcut-result.json ]] && break; sleep 1; done
 wait $OPENPID || true

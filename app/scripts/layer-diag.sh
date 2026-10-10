@@ -11,7 +11,7 @@ DEV=Engine/.build/debug/otf-dev
 RUN=selftest-work/layerdiag-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p $RUN/sources
 for f in otf-N2997.mp4 otf-P25.mp4 otf-VFR.mp4 otf-F23976.mp4 otf-H5994.mov; do cp -c .build/test-work/fixtures/$f $RUN/sources/; done
-( open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFLayerDiag ) &
+( open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout -OTFLayerDiag ) &
 OPENPID=$!
 for i in {1..180}; do [[ -f $RUN/layer-manifest.json ]] && break; sleep 1; done
 wait $OPENPID || true

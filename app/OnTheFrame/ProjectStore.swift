@@ -18,7 +18,16 @@ final class ProjectStore {
     private(set) var assets: [MediaAsset] = []
     private(set) var history = EditHistory()
     var timeline: Timeline { history.timeline }
-    var selection: UUID?
+    /// 선택한 클립(주 선택). 연결된 짝도 함께 선택된 것으로 보인다(selectedIDs).
+    var selection: UUID? { didSet { if selection == nil || selection == linkCandidate { linkCandidate = nil } } }
+    /// ⌘-클릭으로 더한 둘째 클립(연결 후보, 다른 레인). 편집 동작은 주 선택의 묶음에만 적용된다.
+    var linkCandidate: UUID?
+    /// 화면에 선택으로 보이는 클립: 주 선택의 묶음 + 연결 후보
+    var selectedIDs: Set<UUID> {
+        var s = Set(selection.map { timeline.group(of: $0).map(\.id) } ?? [])
+        if let c = linkCandidate { s.insert(c) }
+        return s
+    }
     private(set) var playhead = 0              // 0…durationFrames(끝 위치 포함)
     private(set) var isPlaying = false
     var statusMessage: String?
@@ -81,6 +90,8 @@ final class ProjectStore {
     private var sleepAssertion: IOPMAssertionID = 0
     /// 드래그 시작 시점의 타임라인(트림·이동 미리 보기 계산 기준)
     private(set) var gestureBase: Timeline?
+    /// 끼워 넣기 이동이 거부된 이유(놓을 때 상태 줄에 보인다)
+    @ObservationIgnored private var moveRejection: EditError?
     /// 이동 드래그 중 끼워 넣을 자리(표시용)
     private(set) var moveInsertionIndex: Int?
 
@@ -107,6 +118,7 @@ final class ProjectStore {
     func attachEditorWindow(_ w: NSWindow) {
         guard editorWindow !== w else { return }
         editorWindow = w
+        EditorLayout.shared.attach(w)   // 처음 70% 가운데 또는 마지막 보통 창 되살리기(A-012)
         alerts.windowProvider = { [weak self] in self?.editorWindow }
         if wantsEditorVisible { w.makeKeyAndOrderFront(nil) }
         // 창 닫기 보호: SwiftUI의 창 대리자를 감싸 windowShouldClose만 가로채고 나머지는 원래 대리자에 넘긴다
@@ -285,6 +297,7 @@ final class ProjectStore {
             let t = try make(timeline)
             history.apply(t, focus: focus)
             selection = select ?? focus
+            linkCandidate = nil
             statusMessage = nil
             timelineChanged()
         } catch let e as EditError {
@@ -292,14 +305,16 @@ final class ProjectStore {
         } catch { statusMessage = error.localizedDescription }
     }
 
+    /// 영상(+원본에 소리가 있으면 연결된 원본 소리)을 넣는다(A-012)
     func addToTimeline(_ mediaID: UUID, at index: Int? = nil) {
         let cid = UUID()
         commit({ try $0.inserting(media: mediaID, at: index, clipID: cid) }, focus: cid)
     }
 
-    /// 분할: 선택한 클립(없으면 재생 헤드 아래 클립)을 재생 헤드에서 나눈다. 클립 내부에서만.
+    /// 분할: 선택한 클립(없으면 재생 헤드 아래 영상, 없으면 소리 클립)을 재생 헤드에서 나눈다. 연결된 짝도 함께.
     func splitAtPlayhead() {
         let target = selection ?? timeline.clipIndex(atFrame: playhead).map { timeline.clips[$0].id }
+            ?? timeline.audioClipIndex(atFrame: playhead).map { timeline.audioClips[$0].id }
         guard let id = target else { statusMessage = "나눌 클립이 없습니다."; return }
         let right = UUID()
         commit({ try $0.splitting(clip: id, atFrame: playhead, newIDs: (UUID(), right)) }, focus: right)
@@ -315,15 +330,51 @@ final class ProjectStore {
         guard history.canUndo else { return }
         pauseForEdit()
         let f = history.undo()
-        selection = f.flatMap { timeline.index(of: $0) != nil ? $0 : nil }
+        selection = f.flatMap { timeline.clip($0) != nil ? $0 : nil }
         timelineChanged()
     }
     func redo() {
         guard history.canRedo else { return }
         pauseForEdit()
         let f = history.redo()
-        selection = f.flatMap { timeline.index(of: $0) != nil ? $0 : nil }
+        selection = f.flatMap { timeline.clip($0) != nil ? $0 : nil }
         timelineChanged()
+    }
+
+    // MARK: 연결·레인 이름(A-012)
+
+    /// 클릭 선택. extend(⌘-클릭)이면 다른 레인의 클립을 연결 후보로 더하거나 뺀다.
+    func select(_ id: UUID?, extend: Bool = false) {
+        guard extend, let id, let sel = selection, sel != id else { selection = id; return }
+        if timeline.group(of: sel).contains(where: { $0.id == id }) { return }
+        linkCandidate = linkCandidate == id ? nil : id
+    }
+    /// 연결 가능: 주 선택과 후보가 연결되지 않은 같은 원본의 영상·소리 클립
+    var canLink: Bool {
+        guard let a = selection, let b = linkCandidate else { return false }
+        return (try? timeline.linking(a, b)) != nil
+    }
+    var canUnlink: Bool { selection.flatMap { timeline.partner(of: $0) } != nil }
+    func linkSelection() {
+        guard let a = selection else { return }
+        guard let b = linkCandidate else { statusMessage = EditError.linkNeedsPair.description; return }
+        commit({ try $0.linking(a, b) }, focus: a)
+    }
+    func unlinkSelection() {
+        guard let a = selection else { return }
+        commit({ try $0.unlinking(clip: a) }, focus: a)
+    }
+    /// 레인 이름 바꾸기(실행 취소 한 단계). 비었거나 같으면 바꾸지 않는다(이전 이름 유지). 바꿨으면 true.
+    @discardableResult
+    func renameLane(_ id: UUID, to name: String) -> Bool {
+        let old = timeline.lanes.first { $0.id == id }?.name
+        do {
+            let t = try timeline.renamingLane(id, to: name)
+            guard t.lanes.first(where: { $0.id == id })?.name != old else { return false }
+            history.apply(t, focus: selection)
+            statusMessage = nil
+            return true
+        } catch let e as EditError { statusMessage = e.description; return false } catch { return false }
     }
 
     // MARK: 드래그 제스처(완료한 드래그 하나 = 한 단계, 취소하면 원래 상태)
@@ -337,22 +388,38 @@ final class ProjectStore {
     }
     func updateTrim(_ id: UUID, edge: TrimEdge, delta: Int) {
         guard let base = gestureBase else { return }
-        let t = (try? (edge == .start ? base.trimmingStart(clip: id, by: delta) : base.trimmingEnd(clip: id, by: delta))) ?? base
-        history.updateGesture(t, focus: id)
+        do { history.updateGesture(try edge == .start ? base.trimmingStart(clip: id, by: delta) : base.trimmingEnd(clip: id, by: delta), focus: id); moveRejection = nil }
+        catch let e as EditError { history.updateGesture(base, focus: id); moveRejection = delta == 0 ? nil : e } catch {}
     }
+    /// 자유 이동 미리 보기(연결되지 않은 클립): 드래그 시작 위치 + delta. 겹치면 원래 자리에 두고 제안 위치를 빨갛게 보인다.
+    func updateFreeMove(_ id: UUID, delta: Int) {
+        guard let base = gestureBase, let c = base.clip(id) else { return }
+        let s = max(0, c.start + delta)
+        if let t = try? base.movingFree(clip: id, toStart: s) {
+            freeMoveProposal = (id, s, true); history.updateGesture(t, focus: id)
+        } else {
+            freeMoveProposal = (id, s, false); history.updateGesture(base, focus: id)
+        }
+    }
+    /// 자유 이동 중 제안 위치(표시용): (클립, 시작, 놓을 수 있음)
+    private(set) var freeMoveProposal: (id: UUID, start: Int, ok: Bool)?
     func updateMove(_ id: UUID, toIndex: Int) {
         guard let base = gestureBase else { return }
         moveInsertionIndex = toIndex
-        history.updateGesture((try? base.moving(clip: id, toIndex: toIndex)) ?? base, focus: id)
+        // 걸친 클립 때문에 거부되면 원래 자리에 둔다(놓을 때 이유를 보인다)
+        do { history.updateGesture(try base.moving(clip: id, toIndex: toIndex), focus: id); moveRejection = nil }
+        catch let e as EditError { history.updateGesture(base, focus: id); moveRejection = e } catch {}
     }
     func commitGesture() {
         guard gestureBase != nil else { return }
-        history.commitGesture(); gestureBase = nil; moveInsertionIndex = nil
+        if let p = freeMoveProposal, !p.ok { statusMessage = EditError.overlap.description }
+        if let r = moveRejection { statusMessage = r.description; moveRejection = nil }
+        history.commitGesture(); gestureBase = nil; moveInsertionIndex = nil; freeMoveProposal = nil
         timelineChanged()
     }
     func cancelGesture() {
         guard gestureBase != nil else { return }
-        history.cancelGesture(); gestureBase = nil; moveInsertionIndex = nil
+        history.cancelGesture(); gestureBase = nil; moveInsertionIndex = nil; freeMoveProposal = nil
         timelineChanged()
     }
 

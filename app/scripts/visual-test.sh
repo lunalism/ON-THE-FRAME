@@ -11,7 +11,7 @@ DEV=Engine/.build/debug/otf-dev
 RUN=selftest-work/visual-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p $RUN/sources
 cp -c .build/test-work/fixtures/otf-A.mp4 .build/test-work/fixtures/otf-B.mp4 $RUN/sources/
-( open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFVisualTest ) &
+( open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout -OTFVisualTest ) &
 OPENPID=$!
 for i in {1..240}; do [[ -f $RUN/visual-result.json ]] && break; sleep 1; done
 wait $OPENPID || true

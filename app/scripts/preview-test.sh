@@ -11,7 +11,7 @@ DEV=Engine/.build/debug/otf-dev
 RUN=selftest-work/preview-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p $RUN/sources
 cp -c .build/test-work/fixtures/otf-A.mp4 .build/test-work/fixtures/otf-B.mp4 $RUN/sources/
-( open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFPreviewTest ) &
+( open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout -OTFPreviewTest ) &
 OPENPID=$!
 for i in {1..180}; do [[ -f $RUN/preview-manifest.json ]] && break; sleep 1; done
 wait $OPENPID || true

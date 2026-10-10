@@ -6,20 +6,52 @@ import UniformTypeIdentifiers
 /// 화면 배치(M1): 위 툴바(프로젝트 이름·가져오기·내보내기), 왼쪽 영상 목록, 가운데 프리뷰·재생 제어, 오른쪽 선택한 클립 정보, 아래 타임라인.
 struct ContentView: View {
     @Bindable var store: ProjectStore
+    @Bindable var layout = EditorLayout.shared
 
     var body: some View {
-        VSplitView {
-            HSplitView {
-                MediaListView(store: store).frame(minWidth: 220, idealWidth: 260, maxWidth: 360)
-                PreviewPane(store: store).frame(minWidth: 480)
-                InspectorView(store: store).frame(minWidth: 220, idealWidth: 260, maxWidth: 340)
+        // 편집기 배치(A-012): 위 패널 70% · 타임라인 30%, 위는 목록 20% · 프리뷰 60% · 정보 20%(나눔선 두께 제외).
+        // 나눔선을 끌면 비율을 바꾸고 기억한다(EditorLayout). 패널은 최소 크기를 지키고 안에서 스크롤한다.
+        GeometryReader { g in
+            let sp = layout.split(for: g.size)
+            let availW = max(1, g.size.width - 2 * EditorLayout.divider), availH = max(1, g.size.height - EditorLayout.divider)
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    if !layout.mediaCollapsed {
+                        MediaListView(store: store).frame(width: sp.media)
+                        SplitDivider(axis: .vertical, help: "목록 너비") { start, d in
+                            let w = min(max(start * availW + d, EditorLayout.minMedia), availW - sp.inspector - EditorLayout.minPreview)
+                            layout.mediaFraction = Double(w / availW)
+                        } begin: { layout.mediaFraction } end: { layout.saveFractions() }
+                    }
+                    PreviewPane(store: store).frame(width: sp.preview)
+                    if !layout.inspectorCollapsed {
+                        SplitDivider(axis: .vertical, help: "정보 너비") { start, d in
+                            let w = min(max(start * availW - d, EditorLayout.minInspector), availW - sp.media - EditorLayout.minPreview)
+                            layout.inspectorFraction = Double(w / availW)
+                        } begin: { layout.inspectorFraction } end: { layout.saveFractions() }
+                        InspectorView(store: store).frame(width: sp.inspector)
+                    }
+                }
+                .frame(height: sp.upper)
+                SplitDivider(axis: .horizontal, help: "타임라인 높이") { start, d in
+                    let h = min(max(start * availH + d, EditorLayout.minUpper), availH - EditorLayout.minTimeline)
+                    layout.upperFraction = Double(h / availH)
+                } begin: { layout.upperFraction } end: { layout.saveFractions() }
+                TimelinePane(store: store).frame(height: sp.timeline)
             }
-            .frame(minHeight: 360)
-            TimelinePane(store: store).frame(minHeight: 180, idealHeight: 220)
+            .onAppear { layout.lastContentSize = g.size; layout.lastSplit = sp }
+            .onChange(of: sp) { _, v in layout.lastContentSize = g.size; layout.lastSplit = v }
         }
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Text(store.projectName).font(.headline).padding(.horizontal, 6)
+            }
+            // 목록·정보 패널 접기/펼치기(펼치면 이전 너비, 남는 폭은 프리뷰가 쓴다)
+            ToolbarItemGroup(placement: .navigation) {
+                Button { layout.toggleMedia() } label: { Label(layout.mediaCollapsed ? "목록 펼치기" : "목록 접기", systemImage: "sidebar.left") }
+                    .help(layout.mediaCollapsed ? "영상 목록 펼치기" : "영상 목록 접기")
+                Button { layout.toggleInspector() } label: { Label(layout.inspectorCollapsed ? "정보 펼치기" : "정보 접기", systemImage: "sidebar.right") }
+                    .help(layout.inspectorCollapsed ? "클립 정보 펼치기" : "클립 정보 접기")
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { store.presentImportPanel() } label: { Label("가져오기", systemImage: "square.and.arrow.down") }
@@ -68,6 +100,41 @@ struct WindowAccessor: NSViewRepresentable {
             if event.modifierFlags.contains(.command), KeyRouting.route(event, layer: "performKeyEquivalent", store: ProjectStore.shared) { return true }
             return super.performKeyEquivalent(with: event)
         }
+    }
+}
+
+/// 끌 수 있는 나눔선(1 pt 선 + 넓은 잡는 영역, 크기 조절 커서). change(시작 비율, 끈 거리).
+struct SplitDivider: View {
+    enum Axis { case vertical, horizontal }
+    let axis: Axis
+    let help: String
+    let change: (CGFloat, CGFloat) -> Void
+    let begin: () -> Double
+    let end: () -> Void
+    @State private var start: CGFloat?
+    init(axis: Axis, help: String, change: @escaping (CGFloat, CGFloat) -> Void, begin: @escaping () -> Double, end: @escaping () -> Void) {
+        self.axis = axis; self.help = help; self.change = change; self.begin = begin; self.end = end
+    }
+    var body: some View {
+        Rectangle().fill(Color(nsColor: .separatorColor))
+            .frame(width: axis == .vertical ? EditorLayout.divider : nil, height: axis == .horizontal ? EditorLayout.divider : nil)
+            .overlay {
+                Color.clear
+                    .frame(width: axis == .vertical ? 9 : nil, height: axis == .horizontal ? 9 : nil)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { (axis == .vertical ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push() } else { NSCursor.pop() }
+                    }
+                    .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                        .onChanged { v in
+                            if start == nil { start = CGFloat(begin()) }
+                            change(start!, axis == .vertical ? v.translation.width : v.translation.height)
+                        }
+                        .onEnded { _ in start = nil; end() })
+                    .help(help)
+            }
+            .zIndex(1)
+            .accessibilityLabel(help)
     }
 }
 
@@ -162,25 +229,41 @@ final class PlayerNSView: NSView {
 struct InspectorView: View {
     @Bindable var store: ProjectStore
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("클립 정보").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-            if let id = store.selection, let i = store.timeline.index(of: id), let m = store.mediaByID[store.timeline.clips[i].mediaID] {
-                let c = store.timeline.clips[i], s = store.timeline.starts[i], tc = store.settings.timecode
-                Group {
-                    row("원본", m.name)
-                    row("원본 구간", "\(tc(c.sourceIn)) – \(tc(c.sourceOut))")
-                    row("타임라인", "\(tc(s)) – \(tc(s + c.length))")
-                    row("길이", tc(c.length))
-                    row("원본 크기", "\(Int(m.displaySize.width))×\(Int(m.displaySize.height))")
-                    row("원본 프레임레이트", m.timing.label)   // 원본 구간은 원본 시작에서 잰 시각(타임라인 30 fps 단위)
-                    row("소리", m.hasAudio ? "있음(영상에 연결)" : "없음")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("클립 정보").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                if let id = store.selection, let c = store.timeline.clip(id), let m = store.mediaByID[c.mediaID], let lane = store.timeline.lane(of: id) {
+                    let tc = store.settings.timecode
+                    Group {
+                        row("원본", m.name)
+                        row("레인", store.timeline.laneName(lane) + (lane == .video ? " (영상)" : " (원본 소리)"))
+                        row("원본 구간", "\(tc(c.sourceIn)) – \(tc(c.sourceOut))")
+                        row("타임라인", "\(tc(c.start)) – \(tc(c.end))")
+                        row("길이", tc(c.length))
+                        row("원본 크기", "\(Int(m.displaySize.width))×\(Int(m.displaySize.height))")
+                        row("원본 프레임레이트", m.timing.label)   // 원본 구간은 원본 시작에서 잰 시각(타임라인 30 fps 단위)
+                        row("연결", linkText(id))
+                    }
+                    if store.linkCandidate != nil {
+                        Text(store.canLink ? "⌘-클릭한 클립과 연결할 수 있습니다(타임라인 > 연결)." : "⌘-클릭한 클립과는 연결할 수 없습니다(같은 원본의 연결되지 않은 영상·소리 한 쌍만).")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("타임라인에서 클립을 선택하면 정보가 표시됩니다.").foregroundStyle(.secondary).font(.callout)
                 }
-            } else {
-                Text("타임라인에서 클립을 선택하면 정보가 표시됩니다.").foregroundStyle(.secondary).font(.callout)
             }
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
         }
-        .padding(12)
+    }
+    /// 연결 상태·어긋남(프레임과 초)
+    func linkText(_ id: UUID) -> String {
+        guard store.timeline.partner(of: id) != nil else {
+            return store.timeline.movesFreely(id) ? "연결 안 됨(따로 이동)" : "연결 안 됨(원본에 소리 없음)"
+        }
+        guard let o = store.timeline.syncOffset(of: id) else { return "연결됨" }
+        if o == 0 { return "연결됨 · 동기 맞음" }
+        return String(format: "연결됨 · 소리 어긋남 %@%d프레임(%@%.2f초)", o > 0 ? "+" : "−", abs(o), o > 0 ? "+" : "−", Double(abs(o)) / 30)
     }
     func row(_ k: String, _ v: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {

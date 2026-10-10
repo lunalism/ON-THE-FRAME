@@ -17,7 +17,7 @@ mkdir -p $RUN/sources
 for f in .build/test-work/fixtures/*(.); do cp -c $f $RUN/sources/; done
 echo "launching sandboxed app on $RUN"
 # -n: 새 인스턴스, -W: 끝날 때까지 기다림. 앱은 검사 뒤 스스로 종료한다(제한 시간 300초).
-( open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFSelfTest ) &
+( open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout -OTFSelfTest ) &
 OPENPID=$!
 for i in {1..300}; do [[ -f $RUN/selftest-result.json ]] && break; sleep 1; done
 wait $OPENPID || true

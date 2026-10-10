@@ -79,7 +79,7 @@ enum VisualSelfTest {
             check("sheet.centeredInContent", dx <= 3 && dy <= 3, String(format: "sheet %.0f×%.0f dx %.1f dy %.1f", f.width, f.height, dx, dy))
             check("sheet.buttons", b.map(\.title) == ["Finder에서 보기", "닫기"] && b[1].keyEquivalent == "\r" && b[0].keyEquivalent.isEmpty
                   && cs.panel.defaultButtonCell === b[1].cell && cs.panel.initialFirstResponder === b[1],
-                  "titles \(b.map(\.title)) keys \(b.map { $0.keyEquivalent.unicodeScalars.map { String($0.value, radix: 16) } })")
+                  "titles \(b.map(\.title)) keys \(b.map { $0.keyEquivalent.unicodeScalars.map { String($0.value, radix: 16) } }) active \(NSApp.isActive) keyWindow \(NSApp.keyWindow === cs.panel ? "sheet" : (NSApp.keyWindow == nil ? "nil" : "other"))")
             check("sheet.detail", (s.alert?.message ?? "").contains("걸린 시간 ") , s.alert?.message ?? "")
             for (ap, an) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
                 NSApp.appearance = NSAppearance(named: ap)
