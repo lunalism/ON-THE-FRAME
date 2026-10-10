@@ -1,7 +1,9 @@
 import Foundation
 
-/// 타임라인의 클립. 타임라인 구간 [start, start + length), 원본 구간 [sourceIn, sourceIn + length) 원본 프레임
-/// (원본은 30 fps 고정, MediaProbe가 보장). 클립의 소리는 영상에 연결되어 같은 구간으로 움직인다.
+/// 타임라인의 클립. 타임라인 구간 [start, start + length) 타임라인 프레임(30 fps), 원본 구간 [sourceIn, sourceIn + length)는
+/// 원본 트랙 시작에서 잰 시각을 같은 1/30 s 단위로 나타낸다(A-010: 원본 프레임레이트와 무관, 29.97·25·가변 원본 포함).
+/// 타임라인 프레임 k의 원본 시각은 정확히 (sourceIn + k − start)/30 s이고, 그 시각에 표시 중인 원본 프레임이 나온다.
+/// 클립의 소리는 영상에 연결되어 같은 시각 구간으로 움직인다.
 public struct Clip: Sendable, Equatable, Identifiable, Codable {
     public let id: UUID
     public let mediaID: UUID
@@ -83,7 +85,7 @@ public struct Timeline: Sendable, Equatable {
     public func start(of id: UUID) -> Int? { index(of: id).map { clips[$0].start } }
     /// 타임라인 프레임 n을 포함하는 클립의 위치(빈틈이면 nil)
     public func clipIndex(atFrame n: Int) -> Int? { clips.firstIndex { n >= $0.start && n < $0.end } }
-    /// 타임라인 프레임 n → (미디어, 원본 프레임). 빈틈이면 nil.
+    /// 타임라인 프레임 n → (미디어, 원본 위치(1/30 s 단위 원본 시각)). 빈틈이면 nil.
     public func source(atFrame n: Int) -> (mediaID: UUID, frame: Int)? {
         guard let i = clipIndex(atFrame: n) else { return nil }
         return (clips[i].mediaID, clips[i].sourceIn + n - clips[i].start)

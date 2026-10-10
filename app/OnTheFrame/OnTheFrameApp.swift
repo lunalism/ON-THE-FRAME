@@ -59,6 +59,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await CloseSelfTest.run(folder: folder, mode: mode) }
             return
         }
+        if ProcessInfo.processInfo.arguments.contains("-OTFLayerDiag"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await LayerDiagSelfTest.run(folder: folder) }
+            return
+        }
+        if ProcessInfo.processInfo.arguments.contains("-OTFVisualTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await VisualSelfTest.run(folder: folder) }
+            return
+        }
         if ProcessInfo.processInfo.arguments.contains("-OTFShortcutTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await ShortcutSelfTest.run(folder: folder) }
             return

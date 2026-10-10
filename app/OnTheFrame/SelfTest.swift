@@ -12,7 +12,8 @@ import os
 enum SelfTest {
     struct Check: Codable { let name: String; let pass: Bool; let detail: String }
     struct ManifestClip: Codable { let file: String; let start: Int; let sourceIn: Int; let length: Int }
-    struct Manifest: Codable { let fps: Int32; let exportFile: String; let clips: [ManifestClip]; let durationFrames: Int }
+    struct ManifestExport: Codable { let exportFile: String; let clips: [ManifestClip]; let durationFrames: Int }
+    struct Manifest: Codable { let fps: Int32; let exportFile: String; let clips: [ManifestClip]; let durationFrames: Int; var timedExport: ManifestExport? }
     struct Result: Codable { let sandboxContainer: Bool; let checks: [Check]; let tempLocations: [String] }
 
     final class Recorder: @unchecked Sendable {   // 안전성: 잠금으로만 접근
@@ -41,21 +42,42 @@ enum SelfTest {
         do { try fm.createDirectory(at: out, withIntermediateDirectories: false); check("sandbox.grantedFolderWritable", true) }
         catch { check("sandbox.grantedFolderWritable", false, error.localizedDescription) }
 
-        let names = ["otf-A.mp4", "otf-B.mp4", "otf-rot90.mp4", "reject-25fps.mp4", "reject-vfr.mp4", "reject-audio-only.m4a", "reject-2video.mov",
-                     "otf-hevc.mp4", "reject-uhd.mp4"]
+        let names = ["otf-A.mp4", "otf-B.mp4", "otf-rot90.mp4", "reject-prores.mov", "reject-500fps.mp4", "reject-audio-only.m4a", "reject-2video.mov",
+                     "otf-hevc.mp4", "reject-uhd.mp4", "otf-N2997.mp4", "otf-P25.mp4", "otf-VFR.mp4"]
         let hashesBefore = Dictionary(uniqueKeysWithValues: names.map { ($0, sha(src.appendingPathComponent($0))) })
         check("fixtures.present", hashesBefore.values.allSatisfy { $0 != nil })
 
         // 2. 가져오기(실제 앱 경로). 거부 이유를 직접 판정으로도 분류한다.
         store.importFiles(names.map { src.appendingPathComponent($0) })
-        _ = await waitUntil(60) { store.importing == 0 }
+        // A-011: 묶음 진행 표시(현재 파일, 끝난 수/전체 수)를 관찰한다. 묶음이 끝나기 전에는 목록에 들어가지 않는다(묶음 반영).
+        var seenTotal = 0, seenCompleted: [Int] = [], seenNames = Set<String>(), addedEarly = false
+        let importDeadline = Date().addingTimeInterval(60)
+        while store.importing > 0 || store.importProgress != nil, Date() < importDeadline {
+            if let ip = store.importProgress {
+                seenTotal = max(seenTotal, ip.total)
+                if seenCompleted.last != ip.completed { seenCompleted.append(ip.completed) }
+                if let n = ip.currentName { seenNames.insert(n) }
+                if !store.assets.isEmpty { addedEarly = true }
+            }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        check("import.batchProgress", seenTotal == names.count && zip(seenCompleted, seenCompleted.dropFirst()).allSatisfy { $0 < $1 }
+              && (seenCompleted.last ?? 0) <= names.count && seenNames.isSubset(of: Set(names)) && !seenNames.isEmpty && !addedEarly && store.importProgress == nil,
+              "total \(seenTotal) completed \(seenCompleted) names \(seenNames.count) addedEarly \(addedEarly)")
         let imported = Set(store.assets.map(\.name))
-        check("import.accepted", imported == ["otf-A.mp4", "otf-B.mp4", "otf-hevc.mp4", "otf-rot90.mp4"], imported.sorted().joined(separator: ","))
+        check("import.accepted", imported == ["otf-A.mp4", "otf-B.mp4", "otf-hevc.mp4", "otf-rot90.mp4", "otf-N2997.mp4", "otf-P25.mp4", "otf-VFR.mp4"],
+              imported.sorted().joined(separator: ","))
+        // A-010: 30 fps가 아닌 원본의 표시 시각 분석(손으로 계산한 타임라인 프레임 수: 4.004 s → 120, 4 s → 120, 2405/600 s → 120)
+        let timedInfo = ["otf-N2997.mp4": ("30000/1001 fps CFR", 120), "otf-P25.mp4": ("25/1 fps CFR", 120), "otf-VFR.mp4": ("VFR", 120)]
+        for (n, (detail, frames)) in timedInfo.sorted(by: { $0.key < $1.key }) {
+            let m = store.assets.first { $0.name == n }
+            check("probe.timing.\(n)", m.map { $0.timing.detail.hasPrefix(detail) && $0.frameCount == frames } ?? false, m.map { "\($0.timing.detail) frames \($0.frameCount)" } ?? "missing")
+        }
         _ = await waitUntil(5) { store.alert != nil }   // 묶음 처리가 끝난 뒤 알림 하나
         let msg = store.alert?.message ?? ""
-        check("import.rejectionsReported", ["reject-25fps.mp4", "reject-vfr.mp4", "reject-audio-only.m4a", "reject-2video.mov", "reject-uhd.mp4"].allSatisfy { msg.contains($0) })
+        check("import.rejectionsReported", ["reject-prores.mov", "reject-500fps.mp4", "reject-audio-only.m4a", "reject-2video.mov", "reject-uhd.mp4"].allSatisfy { msg.contains($0) })
         await dismissAlert()
-        for (n, want) in [("reject-25fps.mp4", "frameRate"), ("reject-vfr.mp4", "variableTiming"), ("reject-audio-only.m4a", "noVideo"), ("reject-2video.mov", "multipleVideoTracks"), ("reject-uhd.mp4", "dimensions")] {
+        for (n, want) in [("reject-prores.mov", "unsupportedCodec"), ("reject-500fps.mp4", "frameRate"), ("reject-audio-only.m4a", "noVideo"), ("reject-2video.mov", "multipleVideoTracks"), ("reject-uhd.mp4", "dimensions")] {
             do { _ = try await MediaProbe.inspect(src.appendingPathComponent(n)); check("probe.\(n)", false, "accepted") }
             catch let e as ProbeError { check("probe.\(n)", e.kind == want, "\(e.kind): \(e)") }
             catch { check("probe.\(n)", false, "\(error)") }
@@ -117,7 +139,7 @@ enum SelfTest {
 
         let snapshot = store.timeline
         let mediaName = Dictionary(uniqueKeysWithValues: store.assets.map { ($0.id, $0.name) })
-        let manifest = Manifest(fps: store.settings.fps, exportFile: "out/export.mp4",
+        var manifest = Manifest(fps: store.settings.fps, exportFile: "out/export.mp4",
                                 clips: snapshot.clips.map { ManifestClip(file: mediaName[$0.mediaID] ?? "?", start: $0.start, sourceIn: $0.sourceIn, length: $0.length) },
                                 durationFrames: snapshot.durationFrames)
 
@@ -126,9 +148,23 @@ enum SelfTest {
         // 4a. 새 대상 + 내보내는 동안 편집(결과는 시작 시점 스냅샷이어야 함)
         let e1 = out.appendingPathComponent("export.mp4")
         store.startExport(.fromSavePanel(e1))
+        let resetOK = store.exportEstimator.samples.count == 1 && store.lastExportElapsed == nil && store.exportEstimator.stage == .preparing
+        var remainLabels: [String] = []
+        func noteRemaining() {
+            let l = ClockText.remaining(store.exportEstimator.remaining(at: store.monoSeconds()))
+            if remainLabels.last != l { remainLabels.append(l) }
+        }
+        noteRemaining()
         _ = await waitUntil(5) { if case .running(let p) = store.exportPhase { return p > 0 } else { return false } }
         store.selection = snapshot.clips[0].id; store.deleteSelection()
-        _ = await waitUntil(120) { store.exportPhase == .idle }
+        let end4a = Date().addingTimeInterval(120)
+        while store.exportPhase != .idle, Date() < end4a { noteRemaining(); try? await Task.sleep(nanoseconds: 20_000_000) }
+        // 경과 시간: 시작 때 초기화, 단계 준비 → 인코딩 → 마무리, 성공 알림에 걸린 시간, 끝난 뒤 멈춤
+        let el1 = store.lastExportElapsed ?? -1
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        check("exportTime.success", resetOK && el1 > 0 && store.lastExportElapsed == el1 && store.exportStageLog == [.preparing, .encoding, .finalizing]
+              && (store.alert?.message ?? "").contains("걸린 시간 \(ClockText.format(el1))") && remainLabels.first == "남은 시간 계산 중…",
+              String(format: "elapsed %.2f stages %@ labels %@", el1, "\(store.exportStageLog)", remainLabels.joined(separator: " | ")))
         check("export.new", store.alert?.title == "내보내기 완료" && fm.fileExists(atPath: e1.path), store.alert?.message ?? "")
         func progressOK(_ v: [Double]) -> Bool { v.allSatisfy { $0.isFinite && $0 >= 0 && $0 <= 1 } && zip(v, v.dropFirst()).allSatisfy { $0 <= $1 } }
         let pNew = store.exportProgressLog
@@ -143,6 +179,8 @@ enum SelfTest {
         store.cancelExport()
         _ = await waitUntil(30) { store.exportPhase == .idle }
         check("export.cancel", !fm.fileExists(atPath: e2.path) && (store.statusMessage ?? "").contains("취소"), store.statusMessage ?? "")
+        check("exportTime.cancelNotCompleted", !store.exportStageLog.contains(.finalizing) && (store.statusMessage ?? "").contains("경과")
+              && (store.lastExportElapsed ?? 0) > 0 && store.alert?.title != "내보내기 완료", "\(store.exportStageLog) \(store.statusMessage ?? "")")
         check("progress.cancelNeverOne", progressOK(store.exportProgressLog) && (store.exportProgressLog.max() ?? 0) < 1, "max \(store.exportProgressLog.max() ?? -1)")
 
         // 4c. 실패(주입)
@@ -151,6 +189,7 @@ enum SelfTest {
         store.startExport(.fromSavePanel(e3))
         _ = await waitUntil(60) { store.exportPhase == .idle }
         check("export.failureReported", store.alert?.title == "내보내기 실패" && !fm.fileExists(atPath: e3.path), store.alert?.message ?? "")
+        check("exportTime.failureNotCompleted", !store.exportStageLog.contains(.finalizing) && (store.alert?.message ?? "").contains("경과"), "\(store.exportStageLog)")
         check("progress.failureNeverOne", progressOK(store.exportProgressLog) && (store.exportProgressLog.max() ?? 0) < 1, "max \(store.exportProgressLog.max() ?? -1)")
         await dismissAlert(); store.exportOptions.failAfterFraction = nil
 
@@ -202,7 +241,7 @@ enum SelfTest {
         var shown: [String] = []
         for k in 0..<8 {
             store.startExport(.fromSavePanel(src.appendingPathComponent("otf-B.mp4")))    // 원본 대상 → 즉시 실패 알림
-            store.importFiles([src.appendingPathComponent("reject-25fps.mp4"), src.appendingPathComponent("reject-vfr.mp4")])
+            store.importFiles([src.appendingPathComponent("reject-prores.mov"), src.appendingPathComponent("reject-500fps.mp4")])
             store.seek(to: k * 7)                                                          // 같은 시점의 다른 화면 갱신
             _ = await waitUntil(10) { store.exportPhase == .idle && store.importing == 0 }
         }
@@ -227,14 +266,67 @@ enum SelfTest {
         }
         check("export.cancelRepeated", cancelOK == 4, "\(cancelOK)/4")
 
+        // 4k. A-010: 30 fps가 아닌 원본(29.97·가변)을 같은 앱 경로로 붙이고 자르기·앞 트림 뒤 내보낸다. 판정은 otf-dev verify(독립 기대값).
+        if let nt = store.assets.first(where: { $0.name == "otf-N2997.mp4" }), let vf = store.assets.first(where: { $0.name == "otf-VFR.mp4" }) {
+            store.addToTimeline(nt.id); store.addToTimeline(vf.id)
+            let nClip = store.timeline.clips[store.timeline.clips.count - 2]
+            store.selection = nClip.id; store.seek(to: nClip.start + 45); store.splitAtPlayhead()
+            let right = store.timeline.clips[store.timeline.clips.count - 2].id
+            store.beginGesture(select: right); store.updateTrim(right, edge: .start, delta: 7); store.commitGesture()
+            let tl = store.timeline
+            let e7 = out.appendingPathComponent("timed.mp4")
+            store.startExport(.fromSavePanel(e7))
+            _ = await waitUntil(180) { store.exportPhase == .idle }
+            check("export.timedSources", store.alert?.title == "내보내기 완료" && fm.fileExists(atPath: e7.path), store.alert?.message ?? "")
+            await dismissAlert()
+            manifest.timedExport = ManifestExport(exportFile: "out/timed.mp4",
+                                                  clips: tl.clips.map { ManifestClip(file: mediaName[$0.mediaID] ?? "?", start: $0.start, sourceIn: $0.sourceIn, length: $0.length) },
+                                                  durationFrames: tl.durationFrames)
+        } else { check("export.timedSources", false, "timed fixtures not imported") }
+
+        // 4l. A-011 가져오기 취소: 첫 파일 검사가 끝난 뒤 취소하면 이번 묶음은 아무것도 추가하지 않고, 늦은 결과도 버린다
+        let before = store.assets.map(\.id)
+        store.importFiles(["otf-TA.mp4", "otf-TB.mp4", "otf-F23976.mp4"].map { src.appendingPathComponent($0) })
+        _ = await waitUntil(30) { (store.importProgress?.completed ?? 0) >= 1 }
+        let completedAtCancel = store.importProgress?.completed ?? -1
+        store.cancelImport()
+        let cancellingShown = store.importProgress?.cancelling == true
+        _ = await waitUntil(30) { store.importProgress == nil }
+        try? await Task.sleep(nanoseconds: 1_000_000_000)   // 늦게 끝난 검사가 있어도 추가되지 않아야 한다
+        check("import.cancel", completedAtCancel >= 1 && cancellingShown && store.assets.map(\.id) == before && store.importing == 0
+              && (store.statusMessage ?? "").contains("가져오기를 취소"), "completed at cancel \(completedAtCancel), \(store.statusMessage ?? "")")
+        // 4m. 차례 실행: 내보내는 동안 고른 가져오기는 대기열에 들어가고 카드는 하나다. 대기 중 가져오기 취소, 내보내기 취소.
+        let e8 = out.appendingPathComponent("queued.mp4")
+        store.startExport(.fromSavePanel(e8))
+        store.importFiles([src.appendingPathComponent("otf-TA.mp4")])
+        let queued = store.pendingOps.count == 1 && store.importProgress == nil && store.exportPhase != .idle && !store.canExport && store.importing == 1
+        store.cancelImport()
+        let dropped = store.pendingOps.isEmpty && store.importing == 0
+        store.cancelExport()
+        _ = await waitUntil(30) { store.exportPhase == .idle }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        check("ops.serializedNoOverlap", queued && dropped && store.importProgress == nil && store.assets.map(\.id) == before && !fm.fileExists(atPath: e8.path),
+              "queued \(queued) dropped \(dropped)")
+
         // 5. 원본 불변, 대상 폴더에 형제 임시 파일 없음, 임시 디렉터리 정리
         let hashesAfter = Dictionary(uniqueKeysWithValues: names.map { ($0, sha(src.appendingPathComponent($0))) })
         check("sources.unchanged", hashesAfter == hashesBefore)
         let left2 = (try? fm.contentsOfDirectory(atPath: out.path).sorted()) ?? []
-        let expected = (["a-link.mp4", "appeared.mp4", "changed.mp4", "existing.mp4", "export.mp4"]).filter { linked || $0 != "a-link.mp4" }
+        let expected = (["a-link.mp4", "appeared.mp4", "changed.mp4", "existing.mp4", "export.mp4", "timed.mp4"]).filter { linked || $0 != "a-link.mp4" }
         check("export.noSiblingTempFiles", left2 == expected, left2.joined(separator: ","))
         let tempDirs = temps.all
         check("export.tempDirsRemoved", !tempDirs.isEmpty && tempDirs.allSatisfy { !fm.fileExists(atPath: $0.path) }, "count \(tempDirs.count)")
+        // 6. A-011 버리기(닫기·종료 확인에서 "버리기"를 고른 것과 같은 처리) 뒤 진행 중 가져오기 결과는 들어오지 않는다. 마지막 검사다(앱은 곧 끝남).
+        let beforeDiscard = store.assets.map(\.id)
+        store.importFiles(["otf-TA.mp4", "otf-TB.mp4"].map { src.appendingPathComponent($0) })
+        _ = await waitUntil(10) { store.importProgress != nil }
+        var discarded = false
+        store.discardWithoutPromptForTest { discarded = true }
+        _ = await waitUntil(30) { discarded }
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        store.importFiles([src.appendingPathComponent("otf-TB.mp4")])   // 버린 뒤 요청은 시작하지 않는다
+        check("import.ignoredAfterDiscard", discarded && store.assets.map(\.id) == beforeDiscard && store.importProgress == nil && store.importing == 0,
+              "discarded \(discarded) assets \(store.assets.count)")
         finish(folder, inSandbox, checks, temps, manifest: manifest)
     }
 

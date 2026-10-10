@@ -26,16 +26,40 @@ final class ProjectStore {
     /// 표시 중인 알림은 바꾸거나 코드로 닫지 않는다(2026-10-10 충돌 대응, app/README.md 충돌 기록).
     private(set) var alert: AlertInfo?
     let alerts = AlertPresenter()
-    private(set) var importing = 0
+    /// 가져오기 진행(표시용). nil이면 진행 중인 가져오기 묶음이 없다.
+    struct ImportProgress: Equatable { let total: Int; var completed: Int; var currentName: String?; var cancelling = false }
+    private(set) var importProgress: ImportProgress?
+    /// 아직 결과가 나지 않은 파일 수(진행 중 묶음의 남은 파일 + 대기 중 묶음). 검사·자체 검사용.
+    var importing: Int { (importProgress.map { $0.total - $0.completed } ?? 0) + pendingOps.reduce(0) { if case .importFiles(let u) = $1 { return $0 + u.count }; return $0 } }
+    /// 가져오기·내보내기는 겹치지 않게 차례로 한다(카드 하나, 같은 미디어 목록을 동시에 바꾸지 않음). 진행 중이면 대기열에 넣는다.
+    enum PendingOp { case importFiles([URL]), export(ExportDestination) }
+    private(set) var pendingOps: [PendingOp] = []
+    @ObservationIgnored private var importTask: Task<Void, Never>?
+    /// 가져오기 회차. 취소·버리기마다 1 늘고, 이전 회차의 늦은 결과는 버린다.
+    @ObservationIgnored private var importEpoch = 0
 
     struct AlertInfo: Identifiable {
         let id = UUID(); let title: String; let message: String; var revealURL: URL? = nil
         /// 지정하면 이 단추들과 처리기를 쓴다(buttons[0]이 기본 단추)
         var buttons: [String]? = nil; var destructiveIndex: Int? = nil; var bringToFront = false; var onButton: (@MainActor (Int) -> Void)? = nil
+        /// 내보내기 완료(검증·승격 성공 뒤에만): 완료 시트로 보인다(파일 이름, "걸린 시간 MM:SS")
+        var completion: (fileName: String, detail: String)? = nil
     }
 
     enum ExportPhase: Equatable { case idle, running(Double) }
     private(set) var exportPhase: ExportPhase = .idle
+    /// 내보내기 시간 표시(단조 시계 ContinuousClock 기준 초). 시스템 시계 변경과 무관하다.
+    @ObservationIgnored private let monoClock = ContinuousClock()
+    @ObservationIgnored private lazy var monoBase = monoClock.now
+    func monoSeconds() -> Double {
+        let c = (monoClock.now - monoBase).components
+        return Double(c.seconds) + Double(c.attoseconds) / 1e18
+    }
+    /// 현재 내보내기의 경과·남은 시간 추정(내보내기마다 새로 시작)
+    private(set) var exportEstimator = ExportTimeEstimator()
+    private(set) var exportCancelling = false
+    /// 마지막으로 끝난 내보내기의 경과 시간(성공·실패·취소 모두, 끝난 시점에 멈춤)
+    private(set) var lastExportElapsed: Double?
     private var exportTask: Task<Void, Never>?
     /// 시험용 내보내기 선택 사항(Debug 자체 검사만 바꾼다)
     var exportOptions = ExportService.Options()
@@ -137,47 +161,93 @@ final class ProjectStore {
 
     var mediaByID: [UUID: MediaAsset] { Dictionary(uniqueKeysWithValues: assets.map { ($0.id, $0) }) }
     var durationFrames: Int { timeline.durationFrames }
-    var canExport: Bool { !timeline.isEmpty && exportPhase == .idle }
+    var canExport: Bool { !timeline.isEmpty && exportPhase == .idle && importProgress == nil && pendingOps.isEmpty }
 
     // MARK: 가져오기
 
-    /// 한 번에 고른 파일 묶음을 검사한다(파일별 병렬). 거부 이유는 묶음이 끝난 뒤 알림 하나로 보인다.
+    /// 한 번에 고른 파일 묶음을 가져온다(A-011).
+    /// - 파일을 고른 순서대로 하나씩 검사하고, 카드에 현재 파일 이름과 끝난 수/전체 수를 보인다. 파일 안의 진행률은 알 수 없어
+    ///   막대는 진행률 없는 형태다. 검사가 끝난 파일만 "끝남"으로 센다.
+    /// - 묶음 반영: 받은 파일은 묶음이 모두 끝난 뒤 고른 순서대로 한꺼번에 목록에 들어간다. 거부 이유는 알림 하나로 모은다.
+    /// - 취소: 남은 파일은 검사하지 않고, 검사 중인 파일은 읽기를 멈춘다. 이번 묶음에서 이미 검사를 마친 파일도 목록에 넣지 않는다
+    ///   (묶음 반영 전이므로). 앞서 가져온 영상과 편집은 그대로다. 대기 중인 가져오기 묶음도 함께 버린다.
+    /// - 취소·버리기·창 닫기 뒤에 도착한 결과는 회차 번호로 버린다.
+    /// - 내보내는 중이면 끝난 뒤 시작한다(대기열).
     func importFiles(_ urls: [URL]) {
-        guard !urls.isEmpty else { return }
-        importing += urls.count
-        let s = settings
-        Task {
-            var rejected: [String] = []
-            await withTaskGroup(of: (Int, URL, Result<MediaAsset, Error>).self) { g in
-                for (i, url) in urls.enumerated() {
-                    g.addTask { do { return (i, url, .success(try await MediaProbe.inspect(url, settings: s))) } catch { return (i, url, .failure(error)) } }
-                }
-                var results: [(Int, URL, Result<MediaAsset, Error>)] = []
-                for await r in g { results.append(r); importing -= 1 }
-                for (_, url, r) in results.sorted(by: { $0.0 < $1.0 }) {   // 고른 순서대로 목록에 넣는다
-                    switch r {
-                    case .success(let a):
-                        if assets.contains(where: { $0.identity.sameFile(as: a.identity) }) {
-                            statusMessage = "이미 가져온 파일입니다: \(url.lastPathComponent)"; continue
-                        }
-                        assets.append(a)
-                        history.replaceWithoutUndo(timeline.registering(a))
-                        Self.log.info("imported media frames=\(a.frameCount)")
-                    case .failure(let e):
-                        rejected.append("\(url.lastPathComponent): \((e as? ProbeError)?.description ?? e.localizedDescription)")
-                    }
-                }
-            }
-            if !rejected.isEmpty { presentAlert(AlertInfo(title: Self.rejectTitle, message: rejected.joined(separator: "\n\n"))) }
+        guard !urls.isEmpty, !discardConfirmed, !editorClosedByUser else { return }
+        pendingOps.append(.importFiles(urls))
+        runNextOp()
+    }
+
+    /// 대기열에서 다음 작업을 시작한다(가져오기·내보내기 중 하나만 진행).
+    private func runNextOp() {
+        guard importProgress == nil, importTask == nil, exportPhase == .idle, exportTask == nil, !pendingOps.isEmpty else { return }
+        switch pendingOps.removeFirst() {
+        case .importFiles(let urls): runImport(urls)
+        case .export(let d): beginExport(d)
         }
+    }
+
+    private func runImport(_ urls: [URL]) {
+        let epoch = importEpoch, s = settings
+        importProgress = ImportProgress(total: urls.count, completed: 0, currentName: urls.first?.lastPathComponent)
+        importTask = Task { [weak self] in
+            var results: [(URL, Result<MediaAsset, Error>)] = []
+            for url in urls {
+                guard let self, self.importEpoch == epoch, !Task.isCancelled else { break }
+                self.importProgress?.currentName = url.lastPathComponent
+                let r: Result<MediaAsset, Error>
+                do { r = .success(try await MediaProbe.inspect(url, settings: s)) } catch { r = .failure(error) }
+                guard self.importEpoch == epoch, !Task.isCancelled else { break }   // 취소 뒤 늦게 끝난 검사 결과는 버린다
+                results.append((url, r))
+                self.importProgress?.completed += 1
+            }
+            self?.finishImport(epoch: epoch, total: urls.count, results: results)
+        }
+    }
+
+    private func finishImport(epoch: Int, total: Int, results: [(URL, Result<MediaAsset, Error>)]) {
+        importTask = nil
+        importProgress = nil
+        defer { runNextOp() }
+        // 취소·버리기·창 닫기 뒤: 아무것도 반영하지 않는다
+        guard epoch == importEpoch, results.count == total, !discardConfirmed, !editorClosedByUser else {
+            if !discardConfirmed && !editorClosedByUser { statusMessage = "가져오기를 취소했습니다. 이번에 고른 파일은 추가하지 않았습니다." }
+            return
+        }
+        var rejected: [String] = []
+        for (url, r) in results {   // 고른 순서대로 목록에 넣는다
+            switch r {
+            case .success(let a):
+                if assets.contains(where: { $0.identity.sameFile(as: a.identity) }) {
+                    statusMessage = "이미 가져온 파일입니다: \(url.lastPathComponent)"; continue
+                }
+                assets.append(a)
+                history.replaceWithoutUndo(timeline.registering(a))
+                Self.log.info("imported media frames=\(a.frameCount) timing=\(a.timing.detail, privacy: .public)")
+            case .failure(let e):
+                rejected.append("\(url.lastPathComponent): \((e as? ProbeError)?.description ?? e.localizedDescription)")
+            }
+        }
+        if !rejected.isEmpty { presentAlert(AlertInfo(title: Self.rejectTitle, message: rejected.joined(separator: "\n\n"))) }
+    }
+
+    /// 가져오기 취소(진행 중 묶음과 대기 중 가져오기 묶음). 결과는 버리고, 카드는 검사가 멈출 때까지 "취소하는 중"을 보인다.
+    func cancelImport() {
+        pendingOps.removeAll { if case .importFiles = $0 { return true }; return false }
+        guard importTask != nil else { return }
+        importEpoch += 1
+        importProgress?.cancelling = true
+        importTask?.cancel()
     }
     static let rejectTitle = "가져올 수 없는 파일"
 
     /// 알림 표시: 떠 있는 알림이 있으면 대기열에 넣고, 사용자가 닫은 뒤 차례로 띄운다.
     func presentAlert(_ a: AlertInfo) {
         let buttons = a.buttons ?? (a.revealURL == nil ? ["확인"] : ["Finder에서 보기", "닫기"])
-        let req = AlertPresenter.Request(title: a.title, message: a.message, buttons: buttons, destructiveIndex: a.destructiveIndex, bringToFront: a.bringToFront) { [weak self] i in
-            if a.buttons == nil, i == 0, let u = a.revealURL { NSWorkspace.shared.activateFileViewerSelecting([u]) }
+        let req = AlertPresenter.Request(title: a.title, message: a.message, buttons: buttons, destructiveIndex: a.destructiveIndex, bringToFront: a.bringToFront,
+                                         completion: a.completion) { [weak self] i in
+            if a.buttons == nil, i == 0, let u = a.revealURL { self?.reveal(u) }
             self?.shownAlerts.removeFirst()
             self?.alert = self?.shownAlerts.first
             a.onButton?(i)
@@ -186,6 +256,15 @@ final class ProjectStore {
         if alert == nil { alert = a }
         alerts.enqueue(req)
     }
+    private func reveal(_ u: URL) {
+        #if DEBUG
+        if let h = revealOverrideForTest { h(u); return }   // 자체 검사: Finder 창을 실제로 열지 않고 기록
+        #endif
+        NSWorkspace.shared.activateFileViewerSelecting([u])
+    }
+    #if DEBUG
+    @ObservationIgnored var revealOverrideForTest: ((URL) -> Void)?
+    #endif
     /// 표시 중·대기 중 알림 사본(순서대로). 첫 항목이 화면에 떠 있는 알림이다.
     private var shownAlerts: [AlertInfo] = []
 
@@ -194,7 +273,7 @@ final class ProjectStore {
         p.allowsMultipleSelection = true
         p.canChooseDirectories = false
         p.allowedContentTypes = [.movie]
-        p.message = "가져올 영상 파일을 고르세요(M1: 30 fps H.264·HEVC, 10분 이하)."
+        p.message = "가져올 영상 파일을 고르세요(H.264·HEVC MP4·MOV·M4V, 1920×1080 이하, 10분 이하)."
         if p.runModal() == .OK { importFiles(p.urls) }
     }
 
@@ -306,6 +385,9 @@ final class ProjectStore {
                 self.currentPlan = plan
                 let item = AVPlayerItem(asset: plan.composition)
                 item.videoComposition = plan.videoComposition
+                #if DEBUG
+                self.itemCreatedHookForTest?(item, g)   // 진단 전용: 새 항목에 비디오 출력을 붙인다(일반 실행에서는 nil)
+                #endif
                 self.player.replaceCurrentItem(with: item)
                 self.observeEnd(item)
                 await self.player.seek(to: s.time(self.playhead), toleranceBefore: .zero, toleranceAfter: .zero)
@@ -372,30 +454,67 @@ final class ProjectStore {
         startExport(ExportDestination.fromSavePanel(url))
     }
 
+    /// 내보내기 시작. 가져오는 중이면 끝난 뒤 시작한다(대기열, 일반 화면에서는 가져오는 동안 내보내기 단추가 꺼져 있다).
     func startExport(_ d: ExportDestination) {
+        guard !discardConfirmed, !editorClosedByUser else { return }
+        pendingOps.append(.export(d))
+        runNextOp()
+    }
+
+    /// 실제 내보내기 작업 시작. 경과 시간은 여기서(저장 패널을 닫은 뒤) 재기 시작해 준비·인코딩·검증·승격을 모두 포함하고,
+    /// 성공·실패·취소가 끝난 시점에 멈춘다. 내보내기마다 추정을 새로 시작한다.
+    private func beginExport(_ d: ExportDestination) {
         let snap = timeline, media = mediaByID, s = settings, sources = assets, options = exportOptions
+        exportEstimator.reset(at: monoSeconds())
+        exportCancelling = false
+        lastExportElapsed = nil
         exportPhase = .running(0)
         #if DEBUG
         exportProgressLog = []
+        exportStageLog = [.preparing]
         #endif
         exportTask = Task {
             let outcome: ExportOutcome
             do {
                 let plan = try await CompositionPlanner.plan(snap, media: media, settings: s)   // 시작 시점 스냅샷
-                outcome = await ExportService.export(plan, to: d, sources: sources, options: options) { p in
-                    await MainActor.run { ProjectStore.shared.reportExportProgress(p) }   // 순서대로 전달
+                if Task.isCancelled { outcome = .cancelled } else {
+                    outcome = await ExportService.export(plan, to: d, sources: sources, options: options,
+                                                         stage: { st in await MainActor.run { ProjectStore.shared.reportExportStage(st) } }) { p in
+                        await MainActor.run { ProjectStore.shared.reportExportProgress(p) }   // 순서대로 전달
+                    }
                 }
-            } catch { outcome = .failed(.export("\(error)")) }
+            } catch { outcome = Task.isCancelled ? .cancelled : .failed(.export("\(error)")) }
+            let elapsed = exportEstimator.elapsed(at: monoSeconds())
+            lastExportElapsed = elapsed
             exportPhase = .idle
+            exportCancelling = false
             exportTask = nil
+            let took = ClockText.format(elapsed)
             switch outcome {
-            case .completed(let u): presentAlert(AlertInfo(title: "내보내기 완료", message: u.lastPathComponent, revealURL: u))
-            case .cancelled: statusMessage = "내보내기를 취소했습니다. 대상 파일은 만들지 않았습니다."
-            case .failed(let f): presentAlert(AlertInfo(title: "내보내기 실패", message: f.description))
+            case .completed(let u):   // 검증·승격 성공 뒤에만(ExportService). 취소·실패는 완료 시트를 쓰지 않는다.
+                presentAlert(AlertInfo(title: "내보내기 완료", message: "\(u.lastPathComponent)\n\n걸린 시간 \(took)", revealURL: u,
+                                       completion: (u.lastPathComponent, "걸린 시간 \(took)")))
+            case .cancelled: statusMessage = "내보내기를 취소했습니다(경과 \(took)). 대상 파일은 만들지 않았습니다."
+            case .failed(let f): presentAlert(AlertInfo(title: "내보내기 실패", message: "\(f.description)\n\n경과 \(took)"))
             }
+            runNextOp()
         }
     }
-    func cancelExport() { exportTask?.cancel() }
+    func cancelExport() {
+        pendingOps.removeAll { if case .export = $0 { return true }; return false }
+        guard exportTask != nil else { return }
+        exportCancelling = true
+        exportTask?.cancel()
+    }
+
+    /// 단계 반영(ExportService가 순서대로 부른다). 추정 표시용이며 진행률은 바꾸지 않는다.
+    private func reportExportStage(_ st: ExportStage) {
+        guard case .running = exportPhase else { return }
+        exportEstimator.setStage(st)
+        #if DEBUG
+        exportStageLog.append(st)
+        #endif
+    }
 
     // MARK: 닫기·종료 보호(저장 기능은 M1 범위 밖)
 
@@ -420,6 +539,7 @@ final class ProjectStore {
         pauseForEdit()
         var msg = "ON THE FRAME은 아직 프로젝트를 저장할 수 없습니다. \(intent == .quit ? "종료하면" : "창을 닫으면") 가져온 영상 목록과 타임라인 편집 내용이 사라지고 되돌릴 수 없습니다.\n\n내보낸 영상 파일은 편집할 수 있는 프로젝트가 아니므로, 나중에 다시 열어 편집을 이어 갈 수 없습니다. 원본 파일과 이미 내보낸 파일은 그대로 남습니다."
         if exportPhase != .idle { msg += "\n\n진행 중인 내보내기는 취소되고 임시 파일은 정리됩니다. 대상 파일은 만들어지지 않습니다." }
+        if importProgress != nil || !pendingOps.isEmpty { msg += "\n\n진행 중인 가져오기는 취소되고, 이번에 고른 파일은 추가되지 않습니다." }
         presentAlert(AlertInfo(title: intent == .quit ? "편집 내용을 버리고 종료할까요?" : "편집 내용을 버리고 창을 닫을까요?",
                                message: msg, buttons: ["취소", intent == .quit ? "버리고 종료" : "버리고 닫기"], destructiveIndex: 1, bringToFront: true,
                                onButton: { [weak self] i in
@@ -429,13 +549,20 @@ final class ProjectStore {
         }))
     }
     /// 진행 중인 내보내기가 있으면 취소하고 정리(임시 디렉터리 삭제)가 끝난 뒤 proceed
+    /// 진행 중인 가져오기도 취소하고(늦은 결과는 버림) 검사가 멈춘 뒤 proceed.
     private func finishDiscard(_ proceed: @escaping @MainActor () -> Void) {
-        guard exportPhase != .idle else { proceed(); return }
-        cancelExport()
+        abandonBackgroundWork()
+        guard exportPhase != .idle || importTask != nil else { proceed(); return }
         Task { @MainActor in
-            while self.exportPhase != .idle { try? await Task.sleep(nanoseconds: 20_000_000) }
+            while self.exportPhase != .idle || self.importTask != nil { try? await Task.sleep(nanoseconds: 20_000_000) }
             proceed()
         }
+    }
+    /// 대기 중 작업을 버리고 진행 중인 가져오기·내보내기를 취소한다(버리기·창 닫기)
+    private func abandonBackgroundWork() {
+        pendingOps.removeAll()
+        cancelImport()
+        cancelExport()
     }
     /// 창 닫기(닫기 단추, ⌘W, 모두 닫기 — 모두 windowShouldClose를 거친다)
     /// 편집기 창을 화면 앞으로(파일을 열며 실행했거나 Dock 아이콘을 눌렀는데 보이는 창이 없을 때).
@@ -455,7 +582,7 @@ final class ProjectStore {
     func windowShouldClose(_ w: NSWindow, original: NSWindowDelegate?) -> Bool {
         if canCloseWithoutPrompt, exportPhase == .idle {
             let ok = original?.windowShouldClose?(w) ?? true
-            if ok { editorClosedByUser = true }
+            if ok { editorClosedByUser = true; abandonBackgroundWork() }   // 닫힌 창에 가져오기 결과를 넣지 않는다
             return ok
         }
         requestDiscard(.window, proceed: { [weak w] in w?.performClose(nil) }, cancel: {})
@@ -464,6 +591,8 @@ final class ProjectStore {
     #if DEBUG
     /// 자체 검사 전용: 검사 끝에 앱을 끝낼 때 확인 없이 끝낸다
     func discardConfirmedForTest() { discardConfirmed = true }
+    /// 자체 검사 전용: 확인 알림 없이 실제 버리기 처리(진행 중 작업 취소·정리 대기)만 한다. 앱을 끝내지 않는다.
+    func discardWithoutPromptForTest(_ done: @escaping @MainActor () -> Void) { discardConfirmed = true; finishDiscard(done) }
     var closeGuardInstalled: Bool { editorWindow?.delegate === closeGuard && closeGuard != nil }
     #endif
 
@@ -471,6 +600,7 @@ final class ProjectStore {
     private func reportExportProgress(_ p: Double) {
         guard case .running = exportPhase else { return }
         exportPhase = .running(p)
+        exportEstimator.record(progress: p, at: monoSeconds())
         #if DEBUG
         exportProgressLog.append(p)
         #endif
@@ -478,6 +608,15 @@ final class ProjectStore {
     #if DEBUG
     /// 자체 검사 전용: 현재 내보내기에서 받은 진행률 순서
     var exportProgressLog: [Double] = []
+    /// 자체 검사 전용: 현재 내보내기의 단계 순서
+    var exportStageLog: [ExportStage] = []
+    /// 진단 전용(A-010 프레임 0 조사): 새 프리뷰 항목이 만들어진 직후(교체 전) 불린다
+    @ObservationIgnored var itemCreatedHookForTest: ((AVPlayerItem, Int) -> Void)?
+    /// 진단 전용: 타임라인을 통째로 바꾼다(편집 기록 없이). 프리뷰 재구성은 일반 경로(timelineChanged)를 그대로 쓴다.
+    func loadTimelineForTest(_ t: Timeline) { history.replaceWithoutUndo(t); timelineChanged() }
+    /// 자체 검사 전용: 진행 카드 테두리와 편집기 루트 크기(가운데 배치 확인)
+    @ObservationIgnored var progressCardFrame: CGRect = .zero   // 화면 갱신을 일으키지 않게 관찰 제외
+    @ObservationIgnored var editorRootSize: CGSize = .zero
     #endif
 }
 
@@ -496,5 +635,10 @@ final class WindowCloseGuard: NSObject, NSWindowDelegate {
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         MainActor.assumeIsolated { ProjectStore.shared.windowShouldClose(sender, original: original) }
+    }
+    /// 내보내기 완료 시트를 내용 영역 가운데에(다른 시트는 원래 대리자·기본 위치)
+    func window(_ window: NSWindow, willPositionSheet sheet: NSWindow, using rect: NSRect) -> NSRect {
+        if let r = MainActor.assumeIsolated({ ProjectStore.shared.alerts.sheetPosition(for: window, sheet: sheet) }) { return r }
+        return original?.window?(window, willPositionSheet: sheet, using: rect) ?? rect
     }
 }

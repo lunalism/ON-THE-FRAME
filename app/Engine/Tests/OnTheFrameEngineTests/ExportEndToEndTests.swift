@@ -1,6 +1,7 @@
 import AVFoundation
 import E2Core
 import Foundation
+import IOSurface
 import OnTheFrameEngine
 import OTFDevSupport
 import XCTest
@@ -295,8 +296,50 @@ struct ProbeFailure: Error { let message: String; init(_ m: String) { message = 
 
 @MainActor
 enum PreviewProbe {
-    struct Frame: @unchecked Sendable { let pb: CVPixelBuffer }   // 안전성: 읽기 전용으로만 쓴다
+    /// 프레임 하나를 받을 때의 진단 기록(A-010 프레임 0 불일치 조사). 받는 순간 화면 코드와 화소 지문을 재 두고,
+    /// 나중에 비교할 때 다시 재서 버퍼 내용이 받은 뒤 바뀌었는지(관찰자 오류) 가른다.
+    struct Record: Codable, Sendable {
+        let frame: Int
+        let requested: String            // 요청 시각 value/timescale
+        let itemID: String               // 플레이어 항목 식별(같은 composition의 어느 항목인가)
+        let seekFinished: Bool           // seek 완료 처리기 결과(false = 다른 탐색에 끊김)
+        let currentAfterSeek: String     // 탐색 직후 player.currentTime()
+        let polls: Int                   // 버퍼를 기다린 횟수(10 ms 간격)
+        let hadNewBuffer: Bool
+        let displayTime: String          // copyPixelBuffer가 알린 표시 시각
+        let surfaceID: UInt32            // IOSurface ID(버퍼 재사용 추적)
+        let labelAtAcquire: String       // 받는 순간 화면 코드
+        let hashAtAcquire: UInt64        // 받는 순간 화소 지문(표본)
+        /// 탐색 전(요청 직전) 이미 그 시각의 새 버퍼가 있었는가
+        var newBufferBeforeSeek: Bool? = nil
+        /// 진단 전용: 받은 뒤 같은 시각의 새 버퍼가 또 왔는가와 그 내용(판정에는 쓰지 않음)
+        var followUp: [String]? = nil
+    }
+    struct Frame: @unchecked Sendable { let pb: CVPixelBuffer; let record: Record }   // 안전성: 읽기 전용으로만 쓴다
+
+    /// 표본 화소 지문(FNV-1a, 16화소 간격)
+    nonisolated static func fingerprint(_ pb: CVPixelBuffer) -> UInt64 {
+        CVPixelBufferLockBaseAddress(pb, .readOnly); defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(pb)?.assumingMemoryBound(to: UInt8.self) else { return 0 }
+        let w = CVPixelBufferGetWidth(pb), h = CVPixelBufferGetHeight(pb), bpr = CVPixelBufferGetBytesPerRow(pb)
+        var x: UInt64 = 0xcbf29ce484222325
+        for y in stride(from: 0, to: h, by: 16) { for c in stride(from: 0, to: w * 4, by: 64) { x = (x ^ UInt64(base[y * bpr + c])) &* 0x100000001b3 } }
+        return x
+    }
+    nonisolated static func t(_ c: CMTime) -> String { c.isNumeric ? "\(c.value)/\(c.timescale)" : "invalid" }
+
     static func frames(_ p: PlannedComposition, at frames: [Int]) async throws -> [Int: Frame] {
+        let seq = try await framesSequence(p, at: frames)
+        var out: [Int: Frame] = [:]
+        for (i, n) in frames.enumerated() { if let f = seq[i] { out[n] = f } }
+        return out
+    }
+
+    /// 요청 순서대로(같은 프레임을 여러 번 요청해도 따로) 받는다. 못 받은 자리는 nil.
+    /// followUpSeconds가 0이면 환경 변수 OTF_DIAG_FOLLOWUP(초)을 쓴다(진단 실행 때만 설정). 뒤따르는 버퍼는 기록만 하고,
+    /// 판정에는 언제나 처음 받은 버퍼를 쓴다(처음 버퍼를 버리거나 기대 프레임이 올 때까지 기다리지 않음).
+    static func framesSequence(_ p: PlannedComposition, at frames: [Int], followUpSeconds: Double = 0) async throws -> [Frame?] {
+        let followUpSeconds = followUpSeconds > 0 ? followUpSeconds : min(2, Double(ProcessInfo.processInfo.environment["OTF_DIAG_FOLLOWUP"] ?? "") ?? 0)
         let item = AVPlayerItem(asset: p.composition)
         item.videoComposition = p.videoComposition
         let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
@@ -306,17 +349,44 @@ enum PreviewProbe {
         let deadline = Date().addingTimeInterval(10)
         while item.status != .readyToPlay, Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
         guard item.status == .readyToPlay else { throw ProbeFailure("preview item not ready: \(String(describing: item.error))") }
-        var out: [Int: Frame] = [:]
+        let itemID = String(UInt(bitPattern: ObjectIdentifier(item).hashValue), radix: 16)
+        var out: [Frame?] = []
         for n in frames {
+            out.append(nil)
             let t = p.settings.time(n)
-            await player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
+            let before = output.hasNewPixelBuffer(forItemTime: t)
+            let finished = await player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
+            let current = player.currentTime()
             let end = Date().addingTimeInterval(3)
+            var polls = 0
             // 탐색 뒤 그 시각의 새 버퍼만 받는다(이전 탐색의 버퍼를 받지 않도록 표시 시각을 확인)
             while Date() < end {
+                polls += 1
                 if output.hasNewPixelBuffer(forItemTime: t) {
                     var shown = CMTime.invalid
                     if let pb = output.copyPixelBuffer(forItemTime: t, itemTimeForDisplay: &shown),
-                       shown.isNumeric, abs((shown - t).seconds) < 0.0005 { out[n] = Frame(pb: pb); break }
+                       shown.isNumeric, abs((shown - t).seconds) < 0.0005 {
+                        let sid = CVPixelBufferGetIOSurface(pb).map { IOSurfaceGetID($0.takeUnretainedValue()) } ?? 0
+                        var rec = Record(frame: n, requested: Self.t(t), itemID: itemID, seekFinished: finished, currentAfterSeek: Self.t(current), polls: polls,
+                                         hadNewBuffer: true, displayTime: Self.t(shown), surfaceID: sid,
+                                         labelAtAcquire: ExportJudge.label(E2Metrics.measure(pb)), hashAtAcquire: fingerprint(pb))
+                        rec.newBufferBeforeSeek = before
+                        if followUpSeconds > 0 {
+                            var more: [String] = []
+                            let fEnd = Date().addingTimeInterval(followUpSeconds)
+                            while Date() < fEnd {
+                                if output.hasNewPixelBuffer(forItemTime: t) {
+                                    var sh = CMTime.invalid
+                                    if let pb2 = output.copyPixelBuffer(forItemTime: t, itemTimeForDisplay: &sh) {
+                                        more.append("\(ExportJudge.label(E2Metrics.measure(pb2)))@\(Self.t(sh))")
+                                    }
+                                }
+                                try await Task.sleep(nanoseconds: 10_000_000)
+                            }
+                            rec.followUp = more
+                        }
+                        out[out.count - 1] = Frame(pb: pb, record: rec); break
+                    }
                 }
                 try await Task.sleep(nanoseconds: 10_000_000)
             }
@@ -353,7 +423,12 @@ enum PreviewExportCompare {
             guard let p = preview[n], let e = export[n] else { r.failures.append("missing \(n)"); continue }
             let pf = FrameCompare.copy(p.pb)
             let pm = E2Metrics.measure(p.pb)
-            if !ExportJudge.matches(pm, expected[n]) { r.failures.append("preview \(n) \(ExportJudge.label(pm)) != \(expected[n].label)") }
+            // 받은 순간과 지금의 내용이 다르면 관찰자 쪽 문제(버퍼가 받은 뒤 바뀜)로 따로 보고한다(불일치를 숨기지 않음)
+            let laterLabel = ExportJudge.label(pm), laterHash = PreviewProbe.fingerprint(p.pb)
+            if laterLabel != p.record.labelAtAcquire || laterHash != p.record.hashAtAcquire {
+                r.failures.append("preview \(n) buffer changed after acquisition: acquired \(p.record.labelAtAcquire) now \(laterLabel)")
+            }
+            if !ExportJudge.matches(pm, expected[n]) { r.failures.append("preview \(n) \(laterLabel) != \(expected[n].label) record \(p.record)") }
             let block = FrameCompare.blockPSNR(pf, e), full = FrameCompare.psnr(pf, e)
             if !(block >= minBlockPSNR) { r.failures.append(String(format: "block psnr %d = %.1f < %.0f", n, block, minBlockPSNR)) }
             parts.append(String(format: "%d:%.1f/%.1f", n, block, full))

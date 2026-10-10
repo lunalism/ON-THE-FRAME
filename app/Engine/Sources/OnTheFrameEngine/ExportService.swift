@@ -93,8 +93,10 @@ public enum ExportService {
     /// progress: 한 내보내기 안에서 순서대로(await) 불린다. 값은 유한하고 [0, 1] 안이며 줄어들지 않는다.
     /// 인코딩 중에는 [0, 0.99], 1.0은 검증·승격 성공 뒤 한 번. 취소·실패에서는 1.0을 보고하지 않는다.
     /// 작업(Task) 취소 = 내보내기 취소.
+    /// stage: 인코딩 시작(.encoding)과 인코딩이 끝나 검증·승격에 들어감(.finalizing)을 순서대로 알린다(표시용, 진행률은 바꾸지 않음).
     public static func export(_ p: PlannedComposition, to d: ExportDestination, sources: [MediaAsset],
-                              options: Options = Options(), progress: @escaping @Sendable (Double) async -> Void) async -> ExportOutcome {
+                              options: Options = Options(), stage: @escaping @Sendable (ExportStage) async -> Void = { _ in },
+                              progress: @escaping @Sendable (Double) async -> Void) async -> ExportOutcome {
         if let f = validate(d, sources: sources) { return .failed(f) }
         let tempDir: URL
         do {
@@ -112,6 +114,7 @@ public enum ExportService {
         session.shouldOptimizeForNetworkUse = false
         let injected = OSAllocatedUnfairLock(initialState: false)
         let box = SessionBox(session: session)
+        await stage(.encoding)
         let exportTask = Task { try await box.session.export(to: tempFile, as: .mp4) }
         let watcher = Task {
             var last = 0.0
@@ -143,6 +146,7 @@ public enum ExportService {
             break
         }
         if Task.isCancelled { return .cancelled }
+        await stage(.finalizing)
         // 승격 전 검증
         do {
             let a = AVURLAsset(url: tempFile)
