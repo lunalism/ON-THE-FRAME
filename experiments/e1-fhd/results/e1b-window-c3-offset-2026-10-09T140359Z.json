@@ -1,0 +1,29 @@
+{
+  "build" : {
+    "executable" : {
+      "bytes" : 1034056,
+      "configuration" : "release",
+      "modified" : "2026-10-09T13:56:36Z",
+      "name" : "e1preview",
+      "sha256" : "5cf81494dd7a2e93cf136db567f09657b833496da023ed443c63ad34629bfaae"
+    },
+    "sourceTree" : "a2b281ef35bb3401443bbf1bc19fd04c0fb7fbd3b0b972d7801931b14201ee88"
+  },
+  "case" : "c3-offset",
+  "compositorErrors" : [
+
+  ],
+  "compositorHashMismatch" : 0,
+  "compositorRequests" : 87,
+  "delivered" : 78,
+  "deliveredCodeMismatch" : 0,
+  "deliveredHashMismatch" : 0,
+  "muted" : true,
+  "note" : "AVPlayerItemVideoOutput로 받은 프레임 기록. AVPlayerLayer가 화면에 그린 모습은 소유자 관찰로만 확인한다.",
+  "sessionSeconds" : 5.3865999999999996,
+  "smokeSeconds" : 3,
+  "tapOnsets" : [
+
+  ],
+  "uniqueFrames" : 77
+}

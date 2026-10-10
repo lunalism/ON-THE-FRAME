@@ -1,0 +1,35 @@
+{
+  "build" : {
+    "executable" : {
+      "bytes" : 1278696,
+      "configuration" : "release",
+      "modified" : "2026-10-10T00:04:18Z",
+      "name" : "e1preview",
+      "sha256" : "2e3b2e490c92fd0c3965aae28900aa90e4dc6c6a295c002c0119a8ba51bcc662"
+    },
+    "sourceTree" : "7e5638cd5680492f076b4188e10e16c408d6ceb4c7dcb23c40dcb501af80a12e"
+  },
+  "case" : "c3-offset",
+  "compositorErrors" : [
+
+  ],
+  "compositorHashMismatch" : 0,
+  "compositorRequests" : 676,
+  "delivered" : 672,
+  "deliveredCodeMismatch" : 0,
+  "deliveredHashMismatch" : 0,
+  "endTimeDelivered" : 2,
+  "endTimeShowsLastValid" : true,
+  "layerReadyForDisplayAtQuit" : true,
+  "muted" : false,
+  "note" : "delivered\/compositor 값은 AVPlayerItemVideoOutput 경로 기록이며 화면 표시의 증거가 아니다. layerReadyForDisplayAtQuit는 AVPlayerView 안 AVPlayerLayer의 준비 상태다. 실제 화면 모습은 소유자 관찰로만 확인한다.",
+  "playerLayerFound" : true,
+  "sessionSeconds" : 65.508300000000006,
+  "smokeSeconds" : -1,
+  "tapOnsets" : [
+    5.5167000000000002,
+    6.5167000000000002,
+    8.5167000000000002
+  ],
+  "uniqueFrames" : 301
+}

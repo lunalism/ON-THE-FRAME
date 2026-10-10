@@ -1,0 +1,1099 @@
+{
+  "checks" : [
+    {
+      "captionMismatch" : 0,
+      "clicks" : [
+        {
+          "nExp" : 106,
+          "tapNearestDeltaSamples" : 0,
+          "tExp" : 3.5167000000000002,
+          "video" : "pass"
+        },
+        {
+          "nExp" : 136,
+          "tapNearestDeltaSamples" : 0,
+          "tExp" : 4.5167000000000002,
+          "video" : "pass"
+        },
+        {
+          "nExp" : 196,
+          "tapNearestDeltaSamples" : 0,
+          "tExp" : 6.5167000000000002,
+          "video" : "pass"
+        }
+      ],
+      "codeMismatch" : 0,
+      "compositorCancelled" : 0,
+      "compositorErrors" : [
+
+      ],
+      "compositorHashMismatch" : 0,
+      "compositorInexact" : 0,
+      "compositorMaxInFlight" : 1,
+      "compositorRenderMsMax" : 2.3161999999999998,
+      "compositorRequests" : 302,
+      "delivered" : 302,
+      "duplicates" : 1,
+      "endFrameCompositorRequests" : 1,
+      "endFrameDelivered" : 1,
+      "endFrameMatchesRendererN300" : true,
+      "firstFrame" : 0,
+      "formatMismatch" : 0,
+      "hashMismatch" : 0,
+      "hashMismatchFrames" : [
+
+      ],
+      "id" : "V1-c1-baseline",
+      "inexactDisplayTimes" : 0,
+      "lastFrame" : 300,
+      "missingFrames" : 0,
+      "missingSample" : [
+
+      ],
+      "name" : "실제 재생(AVPlayer+합성기, 음소거): 전달 프레임·합성기 출력이 직접 렌더와 비트 동일, 독립 기대값(자막·톤·무음·클릭), 탭 onset = 기대 클릭",
+      "playerEndTime" : 10,
+      "pollLatenessMsMax" : 29.4405,
+      "pollLatenessMsMean" : 1.7926,
+      "quietFramesChecked" : 57,
+      "quietNonZero" : 0,
+      "reachedEnd" : true,
+      "renderContextNotes" : [
+
+      ],
+      "result" : "PASS",
+      "tapAllExpectedClicksExact" : true,
+      "tapDiscontinuities" : 3,
+      "tapExtraOnsets" : [
+
+      ],
+      "tapFormat" : "rate=48000.0 ch=2 bits=32 float=true nonInterleaved=true",
+      "tapFrames" : 512000,
+      "tapProcessCalls" : 126,
+      "toneFramesChecked" : 162,
+      "toneMismatch" : 0,
+      "uniqueFrames" : 300,
+      "wallS" : 10.4671
+    },
+    {
+      "id" : "S1-c1-baseline",
+      "name" : "일시정지 탐색(앞·뒤·자막 경계·끝 근처): 표시용 전달 프레임 = 목표 프레임, 직접 렌더와 비트 동일(이전 위치 잔상 없음)",
+      "result" : "PASS",
+      "seeks" : [
+        {
+          "caption" : false,
+          "code" : 0,
+          "displayed" : 0,
+          "displaySeconds" : 0,
+          "finished" : true,
+          "frameReadyMs" : 17.0931,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 0,
+          "seek" : "start",
+          "seekMs" : 4.0293999999999999,
+          "target" : 0
+        },
+        {
+          "caption" : true,
+          "code" : 210,
+          "displayed" : 210,
+          "displaySeconds" : 7,
+          "finished" : true,
+          "frameReadyMs" : 13.358599999999999,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 7,
+          "seek" : "forward 0→7.0s",
+          "seekMs" : 2.5121000000000002,
+          "target" : 7
+        },
+        {
+          "caption" : true,
+          "code" : 60,
+          "displayed" : 60,
+          "displaySeconds" : 2,
+          "finished" : true,
+          "frameReadyMs" : 12.2873,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 2,
+          "seek" : "backward 7.0→2.0s",
+          "seekMs" : 1.4895,
+          "target" : 2
+        },
+        {
+          "caption" : false,
+          "code" : 59,
+          "displayed" : 59,
+          "displaySeconds" : 1.9666999999999999,
+          "finished" : true,
+          "frameReadyMs" : 11.828200000000001,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 1.9666999999999999,
+          "seek" : "caption-before 59",
+          "seekMs" : 0.97409999999999997,
+          "target" : 1.9666999999999999
+        },
+        {
+          "caption" : true,
+          "code" : 239,
+          "displayed" : 239,
+          "displaySeconds" : 7.9667000000000003,
+          "finished" : true,
+          "frameReadyMs" : 12.4962,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 7.9667000000000003,
+          "seek" : "caption-last 239",
+          "seekMs" : 1.7349000000000001,
+          "target" : 7.9667000000000003
+        },
+        {
+          "caption" : false,
+          "code" : 240,
+          "displayed" : 240,
+          "displaySeconds" : 8,
+          "finished" : true,
+          "frameReadyMs" : 11.1629,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 8,
+          "seek" : "caption-after 240",
+          "seekMs" : 0.3468,
+          "target" : 8
+        },
+        {
+          "caption" : false,
+          "code" : 299,
+          "displayed" : 299,
+          "displaySeconds" : 9.9666999999999994,
+          "finished" : true,
+          "frameReadyMs" : 12.318099999999999,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 9.9666999999999994,
+          "seek" : "near-end 299",
+          "seekMs" : 1.5703,
+          "target" : 9.9666999999999994
+        },
+        {
+          "caption" : false,
+          "code" : 30,
+          "displayed" : 30,
+          "displaySeconds" : 1,
+          "finished" : true,
+          "frameReadyMs" : 12.504300000000001,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 1,
+          "seek" : "backward far 1.0s",
+          "seekMs" : 1.7034,
+          "target" : 1
+        },
+        {
+          "caption" : false,
+          "code" : 297,
+          "displayed" : 297,
+          "displaySeconds" : 9.9000000000000004,
+          "finished" : true,
+          "frameReadyMs" : 12.605,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 9.9000000000000004,
+          "seek" : "near-end 9.9s",
+          "seekMs" : 1.7427999999999999,
+          "target" : 9.9000000000000004
+        },
+        {
+          "caption" : false,
+          "code" : 300,
+          "displayed" : 300,
+          "displaySeconds" : 10,
+          "finished" : true,
+          "frameReadyMs" : 11.8276,
+          "hashMatch" : true,
+          "ok" : "record",
+          "playerTime" : 10,
+          "seek" : "end 10.0s",
+          "seekMs" : 0.95050000000000001,
+          "target" : 10
+        },
+        {
+          "caption" : false,
+          "code" : 0,
+          "displayed" : 0,
+          "displaySeconds" : 0,
+          "finished" : true,
+          "frameReadyMs" : 11.729699999999999,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 0,
+          "seek" : "back to 0",
+          "seekMs" : 0.88629999999999998,
+          "target" : 0
+        }
+      ]
+    },
+    {
+      "advanced" : 1.0223,
+      "after500ms" : 2.0038,
+      "after1000ms" : 2.0038,
+      "deliveredHashMismatch" : 0,
+      "framesAfterPause" : 0,
+      "id" : "C-pause",
+      "name" : "재생\/일시정지: 일시정지 중 시간이 1프레임 미만으로만 변하고 새 프레임 없음, 재개 후 진행",
+      "pausedAt" : 2.0038,
+      "result" : "PASS",
+      "resumedFor" : 1.0015000000000001,
+      "settleMs" : 0.0872
+    },
+    {
+      "deliveredTotal" : 81,
+      "id" : "C-seek-playing",
+      "maxFrame" : 300,
+      "name" : "재생 중 탐색(앞·뒤·끝 근처): 탐색 완료 후 이전 위치 프레임 없음, 모든 전달 프레임 비트 동일, 끝 프레임 299 도달",
+      "result" : "PASS",
+      "seeks" : [
+        {
+          "firstFrameAfter" : 181,
+          "firstFrameLatencyMs" : 459.09469999999999,
+          "framesAfter" : 17,
+          "lastFrameAfter" : 197,
+          "seek" : "fwd→6.0",
+          "seekMs" : 78.829400000000007,
+          "staleFrames" : 0,
+          "target" : 6
+        },
+        {
+          "firstFrameAfter" : 44,
+          "firstFrameLatencyMs" : 895.05119999999999,
+          "framesAfter" : 4,
+          "lastFrameAfter" : 47,
+          "seek" : "back→1.0",
+          "seekMs" : 73.564999999999998,
+          "staleFrames" : 0,
+          "target" : 1
+        },
+        {
+          "firstFrameAfter" : 286,
+          "firstFrameLatencyMs" : 458.98349999999999,
+          "framesAfter" : 15,
+          "lastFrameAfter" : 300,
+          "seek" : "end→9.5",
+          "seekMs" : 76.850999999999999,
+          "staleFrames" : 0,
+          "target" : 9.5
+        }
+      ],
+      "tapOnsetsSeconds" : [
+        6.5167000000000002
+      ]
+    },
+    {
+      "id" : "C-repeat",
+      "name" : "반복 재생 3회: 매회 판정 통과, footprint 기록(기준 없음)",
+      "reps" : [
+        {
+          "afterMiB" : 138.1258,
+          "beforeMiB" : 135.90710000000001,
+          "compositorRequests" : 302,
+          "delivered" : 302,
+          "missing" : 0,
+          "pass" : true,
+          "rep" : 1,
+          "wallS" : 10.4459
+        },
+        {
+          "afterMiB" : 128.28210000000001,
+          "beforeMiB" : 138.1258,
+          "compositorRequests" : 302,
+          "delivered" : 302,
+          "missing" : 0,
+          "pass" : true,
+          "rep" : 2,
+          "wallS" : 10.457000000000001
+        },
+        {
+          "afterMiB" : 119.73520000000001,
+          "beforeMiB" : 128.28210000000001,
+          "compositorRequests" : 302,
+          "delivered" : 302,
+          "missing" : 0,
+          "pass" : true,
+          "rep" : 3,
+          "wallS" : 10.444800000000001
+        }
+      ],
+      "result" : "PASS"
+    },
+    {
+      "captionMismatch" : 0,
+      "clicks" : [
+        {
+          "nExp" : 46,
+          "tapNearestDeltaSamples" : 0,
+          "tExp" : 1.5166999999999999,
+          "video" : "pass"
+        },
+        {
+          "nExp" : 256,
+          "tapNearestDeltaSamples" : 0,
+          "tExp" : 8.5167000000000002,
+          "video" : "pass"
+        }
+      ],
+      "codeMismatch" : 0,
+      "compositorCancelled" : 0,
+      "compositorErrors" : [
+
+      ],
+      "compositorHashMismatch" : 0,
+      "compositorInexact" : 0,
+      "compositorMaxInFlight" : 1,
+      "compositorRenderMsMax" : 2.2008000000000001,
+      "compositorRequests" : 302,
+      "delivered" : 302,
+      "duplicates" : 1,
+      "endFrameCompositorRequests" : 1,
+      "endFrameDelivered" : 1,
+      "endFrameMatchesRendererN300" : true,
+      "firstFrame" : 0,
+      "formatMismatch" : 0,
+      "hashMismatch" : 0,
+      "hashMismatchFrames" : [
+
+      ],
+      "id" : "V1-c2-trim",
+      "inexactDisplayTimes" : 0,
+      "lastFrame" : 300,
+      "missingFrames" : 0,
+      "missingSample" : [
+
+      ],
+      "name" : "실제 재생(AVPlayer+합성기, 음소거): 전달 프레임·합성기 출력이 직접 렌더와 비트 동일, 독립 기대값(자막·톤·무음·클릭), 탭 onset = 기대 클릭",
+      "playerEndTime" : 10,
+      "pollLatenessMsMax" : 4.5812999999999997,
+      "pollLatenessMsMean" : 2.0066000000000002,
+      "quietFramesChecked" : 117,
+      "quietNonZero" : 0,
+      "reachedEnd" : true,
+      "renderContextNotes" : [
+
+      ],
+      "result" : "PASS",
+      "tapAllExpectedClicksExact" : true,
+      "tapDiscontinuities" : 3,
+      "tapExtraOnsets" : [
+
+      ],
+      "tapFormat" : "rate=48000.0 ch=2 bits=32 float=true nonInterleaved=true",
+      "tapFrames" : 512000,
+      "tapProcessCalls" : 126,
+      "toneFramesChecked" : 162,
+      "toneMismatch" : 0,
+      "uniqueFrames" : 300,
+      "wallS" : 10.4168
+    },
+    {
+      "id" : "S1-c2-trim",
+      "name" : "일시정지 탐색(앞·뒤·자막 경계·끝 근처): 표시용 전달 프레임 = 목표 프레임, 직접 렌더와 비트 동일(이전 위치 잔상 없음)",
+      "result" : "PASS",
+      "seeks" : [
+        {
+          "caption" : false,
+          "code" : 0,
+          "displayed" : 0,
+          "displaySeconds" : 0,
+          "finished" : true,
+          "frameReadyMs" : 15.9078,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 0,
+          "seek" : "start",
+          "seekMs" : 3.8119000000000001,
+          "target" : 0
+        },
+        {
+          "caption" : true,
+          "code" : 210,
+          "displayed" : 210,
+          "displaySeconds" : 7,
+          "finished" : true,
+          "frameReadyMs" : 14.244400000000001,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 7,
+          "seek" : "forward 0→7.0s",
+          "seekMs" : 2.1770999999999998,
+          "target" : 7
+        },
+        {
+          "caption" : true,
+          "code" : 60,
+          "displayed" : 60,
+          "displaySeconds" : 2,
+          "finished" : true,
+          "frameReadyMs" : 13.4125,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 2,
+          "seek" : "backward 7.0→2.0s",
+          "seekMs" : 1.3984000000000001,
+          "target" : 2
+        },
+        {
+          "caption" : false,
+          "code" : 59,
+          "displayed" : 59,
+          "displaySeconds" : 1.9666999999999999,
+          "finished" : true,
+          "frameReadyMs" : 13.0898,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 1.9666999999999999,
+          "seek" : "caption-before 59",
+          "seekMs" : 0.97909999999999997,
+          "target" : 1.9666999999999999
+        },
+        {
+          "caption" : true,
+          "code" : 239,
+          "displayed" : 239,
+          "displaySeconds" : 7.9667000000000003,
+          "finished" : true,
+          "frameReadyMs" : 13.7247,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 7.9667000000000003,
+          "seek" : "caption-last 239",
+          "seekMs" : 1.6517999999999999,
+          "target" : 7.9667000000000003
+        },
+        {
+          "caption" : false,
+          "code" : 240,
+          "displayed" : 240,
+          "displaySeconds" : 8,
+          "finished" : true,
+          "frameReadyMs" : 11.413600000000001,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 8,
+          "seek" : "caption-after 240",
+          "seekMs" : 0.31540000000000001,
+          "target" : 8
+        },
+        {
+          "caption" : false,
+          "code" : 299,
+          "displayed" : 299,
+          "displaySeconds" : 9.9666999999999994,
+          "finished" : true,
+          "frameReadyMs" : 13.6669,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 9.9666999999999994,
+          "seek" : "near-end 299",
+          "seekMs" : 1.6979,
+          "target" : 9.9666999999999994
+        },
+        {
+          "caption" : false,
+          "code" : 30,
+          "displayed" : 30,
+          "displaySeconds" : 1,
+          "finished" : true,
+          "frameReadyMs" : 13.6227,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 1,
+          "seek" : "backward far 1.0s",
+          "seekMs" : 1.6094999999999999,
+          "target" : 1
+        },
+        {
+          "caption" : false,
+          "code" : 297,
+          "displayed" : 297,
+          "displaySeconds" : 9.9000000000000004,
+          "finished" : true,
+          "frameReadyMs" : 11.5083,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 9.9000000000000004,
+          "seek" : "near-end 9.9s",
+          "seekMs" : 1.5971,
+          "target" : 9.9000000000000004
+        },
+        {
+          "caption" : false,
+          "code" : 300,
+          "displayed" : 300,
+          "displaySeconds" : 10,
+          "finished" : true,
+          "frameReadyMs" : 12.9125,
+          "hashMatch" : true,
+          "ok" : "record",
+          "playerTime" : 10,
+          "seek" : "end 10.0s",
+          "seekMs" : 0.93500000000000005,
+          "target" : 10
+        },
+        {
+          "caption" : false,
+          "code" : 0,
+          "displayed" : 0,
+          "displaySeconds" : 0,
+          "finished" : true,
+          "frameReadyMs" : 10.6526,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 0,
+          "seek" : "back to 0",
+          "seekMs" : 0.88349999999999995,
+          "target" : 0
+        }
+      ]
+    },
+    {
+      "captionMismatch" : 0,
+      "clicks" : [
+        {
+          "nExp" : 166,
+          "tapNearestDeltaSamples" : 0,
+          "tExp" : 5.5167000000000002,
+          "video" : "pass"
+        },
+        {
+          "nExp" : 196,
+          "tapNearestDeltaSamples" : 0,
+          "tExp" : 6.5167000000000002,
+          "video" : "pass"
+        },
+        {
+          "nExp" : 256,
+          "tapNearestDeltaSamples" : 0,
+          "tExp" : 8.5167000000000002,
+          "video" : "pass"
+        }
+      ],
+      "codeMismatch" : 0,
+      "compositorCancelled" : 0,
+      "compositorErrors" : [
+
+      ],
+      "compositorHashMismatch" : 0,
+      "compositorInexact" : 0,
+      "compositorMaxInFlight" : 1,
+      "compositorRenderMsMax" : 2.5459000000000001,
+      "compositorRequests" : 302,
+      "delivered" : 302,
+      "duplicates" : 1,
+      "endFrameCompositorRequests" : 1,
+      "endFrameDelivered" : 1,
+      "endFrameMatchesRendererN300" : true,
+      "firstFrame" : 0,
+      "formatMismatch" : 0,
+      "hashMismatch" : 0,
+      "hashMismatchFrames" : [
+
+      ],
+      "id" : "V1-c3-offset",
+      "inexactDisplayTimes" : 0,
+      "lastFrame" : 300,
+      "missingFrames" : 0,
+      "missingSample" : [
+
+      ],
+      "name" : "실제 재생(AVPlayer+합성기, 음소거): 전달 프레임·합성기 출력이 직접 렌더와 비트 동일, 독립 기대값(자막·톤·무음·클릭), 탭 onset = 기대 클릭",
+      "playerEndTime" : 10,
+      "pollLatenessMsMax" : 3.7722000000000002,
+      "pollLatenessMsMean" : 2.1031,
+      "quietFramesChecked" : 60,
+      "quietNonZero" : 0,
+      "reachedEnd" : true,
+      "renderContextNotes" : [
+
+      ],
+      "result" : "PASS",
+      "tapAllExpectedClicksExact" : true,
+      "tapDiscontinuities" : 3,
+      "tapExtraOnsets" : [
+
+      ],
+      "tapFormat" : "rate=48000.0 ch=2 bits=32 float=true nonInterleaved=true",
+      "tapFrames" : 512000,
+      "tapProcessCalls" : 126,
+      "toneFramesChecked" : 162,
+      "toneMismatch" : 0,
+      "uniqueFrames" : 300,
+      "wallS" : 10.4138
+    },
+    {
+      "id" : "S1-c3-offset",
+      "name" : "일시정지 탐색(앞·뒤·자막 경계·끝 근처): 표시용 전달 프레임 = 목표 프레임, 직접 렌더와 비트 동일(이전 위치 잔상 없음)",
+      "result" : "PASS",
+      "seeks" : [
+        {
+          "caption" : false,
+          "code" : 0,
+          "displayed" : 0,
+          "displaySeconds" : 0,
+          "finished" : true,
+          "frameReadyMs" : 18.827000000000002,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 0,
+          "seek" : "start",
+          "seekMs" : 4.8882000000000003,
+          "target" : 0
+        },
+        {
+          "caption" : true,
+          "code" : 210,
+          "displayed" : 210,
+          "displaySeconds" : 7,
+          "finished" : true,
+          "frameReadyMs" : 15.107900000000001,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 7,
+          "seek" : "forward 0→7.0s",
+          "seekMs" : 3.0792000000000002,
+          "target" : 7
+        },
+        {
+          "caption" : true,
+          "code" : 60,
+          "displayed" : 60,
+          "displaySeconds" : 2,
+          "finished" : true,
+          "frameReadyMs" : 13.520899999999999,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 2,
+          "seek" : "backward 7.0→2.0s",
+          "seekMs" : 1.4558,
+          "target" : 2
+        },
+        {
+          "caption" : false,
+          "code" : 59,
+          "displayed" : 59,
+          "displaySeconds" : 1.9666999999999999,
+          "finished" : true,
+          "frameReadyMs" : 13.2308,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 1.9666999999999999,
+          "seek" : "caption-before 59",
+          "seekMs" : 0.98829999999999996,
+          "target" : 1.9666999999999999
+        },
+        {
+          "caption" : true,
+          "code" : 239,
+          "displayed" : 239,
+          "displaySeconds" : 7.9667000000000003,
+          "finished" : true,
+          "frameReadyMs" : 14.2986,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 7.9667000000000003,
+          "seek" : "caption-last 239",
+          "seekMs" : 2.0291000000000001,
+          "target" : 7.9667000000000003
+        },
+        {
+          "caption" : false,
+          "code" : 240,
+          "displayed" : 240,
+          "displaySeconds" : 8,
+          "finished" : true,
+          "frameReadyMs" : 12.564500000000001,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 8,
+          "seek" : "caption-after 240",
+          "seekMs" : 0.42870000000000003,
+          "target" : 8
+        },
+        {
+          "caption" : false,
+          "code" : 299,
+          "displayed" : 299,
+          "displaySeconds" : 9.9666999999999994,
+          "finished" : true,
+          "frameReadyMs" : 13.913399999999999,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 9.9666999999999994,
+          "seek" : "near-end 299",
+          "seekMs" : 1.7278,
+          "target" : 9.9666999999999994
+        },
+        {
+          "caption" : false,
+          "code" : 30,
+          "displayed" : 30,
+          "displaySeconds" : 1,
+          "finished" : true,
+          "frameReadyMs" : 13.880800000000001,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 1,
+          "seek" : "backward far 1.0s",
+          "seekMs" : 1.806,
+          "target" : 1
+        },
+        {
+          "caption" : false,
+          "code" : 297,
+          "displayed" : 297,
+          "displaySeconds" : 9.9000000000000004,
+          "finished" : true,
+          "frameReadyMs" : 13.8194,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 9.9000000000000004,
+          "seek" : "near-end 9.9s",
+          "seekMs" : 1.8242,
+          "target" : 9.9000000000000004
+        },
+        {
+          "caption" : false,
+          "code" : 300,
+          "displayed" : 300,
+          "displaySeconds" : 10,
+          "finished" : true,
+          "frameReadyMs" : 12.869400000000001,
+          "hashMatch" : true,
+          "ok" : "record",
+          "playerTime" : 10,
+          "seek" : "end 10.0s",
+          "seekMs" : 0.88770000000000004,
+          "target" : 10
+        },
+        {
+          "caption" : false,
+          "code" : 0,
+          "displayed" : 0,
+          "displaySeconds" : 0,
+          "finished" : true,
+          "frameReadyMs" : 12.967700000000001,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 0,
+          "seek" : "back to 0",
+          "seekMs" : 0.98219999999999996,
+          "target" : 0
+        }
+      ]
+    },
+    {
+      "captionMismatch" : 0,
+      "clicks" : [
+        {
+          "nExp" : 106,
+          "tapNearestDeltaSamples" : 0,
+          "tExp" : 3.5167000000000002,
+          "video" : "pass"
+        }
+      ],
+      "codeMismatch" : 0,
+      "compositorCancelled" : 0,
+      "compositorErrors" : [
+
+      ],
+      "compositorHashMismatch" : 0,
+      "compositorInexact" : 0,
+      "compositorMaxInFlight" : 1,
+      "compositorRenderMsMax" : 2.7273000000000001,
+      "compositorRequests" : 302,
+      "delivered" : 302,
+      "duplicates" : 1,
+      "endFrameCompositorRequests" : 1,
+      "endFrameDelivered" : 1,
+      "endFrameMatchesRendererN300" : true,
+      "firstFrame" : 0,
+      "formatMismatch" : 0,
+      "hashMismatch" : 0,
+      "hashMismatchFrames" : [
+
+      ],
+      "id" : "V1-c4-trim-offset",
+      "inexactDisplayTimes" : 0,
+      "lastFrame" : 300,
+      "missingFrames" : 0,
+      "missingSample" : [
+
+      ],
+      "name" : "실제 재생(AVPlayer+합성기, 음소거): 전달 프레임·합성기 출력이 직접 렌더와 비트 동일, 독립 기대값(자막·톤·무음·클릭), 탭 onset = 기대 클릭",
+      "playerEndTime" : 10,
+      "pollLatenessMsMax" : 4.6296999999999997,
+      "pollLatenessMsMean" : 1.9254,
+      "quietFramesChecked" : 177,
+      "quietNonZero" : 0,
+      "reachedEnd" : true,
+      "renderContextNotes" : [
+
+      ],
+      "result" : "PASS",
+      "tapAllExpectedClicksExact" : true,
+      "tapDiscontinuities" : 3,
+      "tapExtraOnsets" : [
+
+      ],
+      "tapFormat" : "rate=48000.0 ch=2 bits=32 float=true nonInterleaved=true",
+      "tapFrames" : 512000,
+      "tapProcessCalls" : 126,
+      "toneFramesChecked" : 102,
+      "toneMismatch" : 0,
+      "uniqueFrames" : 300,
+      "wallS" : 10.4191
+    },
+    {
+      "id" : "S1-c4-trim-offset",
+      "name" : "일시정지 탐색(앞·뒤·자막 경계·끝 근처): 표시용 전달 프레임 = 목표 프레임, 직접 렌더와 비트 동일(이전 위치 잔상 없음)",
+      "result" : "PASS",
+      "seeks" : [
+        {
+          "caption" : false,
+          "code" : 0,
+          "displayed" : 0,
+          "displaySeconds" : 0,
+          "finished" : true,
+          "frameReadyMs" : 17.045400000000001,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 0,
+          "seek" : "start",
+          "seekMs" : 4.7858999999999998,
+          "target" : 0
+        },
+        {
+          "caption" : true,
+          "code" : 210,
+          "displayed" : 210,
+          "displaySeconds" : 7,
+          "finished" : true,
+          "frameReadyMs" : 14.1821,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 7,
+          "seek" : "forward 0→7.0s",
+          "seekMs" : 2.1297999999999999,
+          "target" : 7
+        },
+        {
+          "caption" : true,
+          "code" : 60,
+          "displayed" : 60,
+          "displaySeconds" : 2,
+          "finished" : true,
+          "frameReadyMs" : 13.651199999999999,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 2,
+          "seek" : "backward 7.0→2.0s",
+          "seekMs" : 1.625,
+          "target" : 2
+        },
+        {
+          "caption" : false,
+          "code" : 59,
+          "displayed" : 59,
+          "displaySeconds" : 1.9666999999999999,
+          "finished" : true,
+          "frameReadyMs" : 13.142099999999999,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 1.9666999999999999,
+          "seek" : "caption-before 59",
+          "seekMs" : 1.0563,
+          "target" : 1.9666999999999999
+        },
+        {
+          "caption" : true,
+          "code" : 239,
+          "displayed" : 239,
+          "displaySeconds" : 7.9667000000000003,
+          "finished" : true,
+          "frameReadyMs" : 13.723100000000001,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 7.9667000000000003,
+          "seek" : "caption-last 239",
+          "seekMs" : 1.6254999999999999,
+          "target" : 7.9667000000000003
+        },
+        {
+          "caption" : false,
+          "code" : 240,
+          "displayed" : 240,
+          "displaySeconds" : 8,
+          "finished" : true,
+          "frameReadyMs" : 12.3371,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 8,
+          "seek" : "caption-after 240",
+          "seekMs" : 0.35199999999999998,
+          "target" : 8
+        },
+        {
+          "caption" : false,
+          "code" : 299,
+          "displayed" : 299,
+          "displaySeconds" : 9.9666999999999994,
+          "finished" : true,
+          "frameReadyMs" : 13.6212,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 9.9666999999999994,
+          "seek" : "near-end 299",
+          "seekMs" : 1.6213,
+          "target" : 9.9666999999999994
+        },
+        {
+          "caption" : false,
+          "code" : 30,
+          "displayed" : 30,
+          "displaySeconds" : 1,
+          "finished" : true,
+          "frameReadyMs" : 13.7822,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 1,
+          "seek" : "backward far 1.0s",
+          "seekMs" : 1.6445000000000001,
+          "target" : 1
+        },
+        {
+          "caption" : false,
+          "code" : 297,
+          "displayed" : 297,
+          "displaySeconds" : 9.9000000000000004,
+          "finished" : true,
+          "frameReadyMs" : 14.0427,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 9.9000000000000004,
+          "seek" : "near-end 9.9s",
+          "seekMs" : 1.9438,
+          "target" : 9.9000000000000004
+        },
+        {
+          "caption" : false,
+          "code" : 300,
+          "displayed" : 300,
+          "displaySeconds" : 10,
+          "finished" : true,
+          "frameReadyMs" : 12.348100000000001,
+          "hashMatch" : true,
+          "ok" : "record",
+          "playerTime" : 10,
+          "seek" : "end 10.0s",
+          "seekMs" : 1.0391999999999999,
+          "target" : 10
+        },
+        {
+          "caption" : false,
+          "code" : 0,
+          "displayed" : 0,
+          "displaySeconds" : 0,
+          "finished" : true,
+          "frameReadyMs" : 11.999599999999999,
+          "hashMatch" : true,
+          "ok" : true,
+          "playerTime" : 0,
+          "seek" : "back to 0",
+          "seekMs" : 1.0427999999999999,
+          "target" : 0
+        }
+      ]
+    }
+  ],
+  "sections" : {
+    "build" : {
+      "executable" : {
+        "bytes" : 1235384,
+        "configuration" : "release",
+        "modified" : "2026-10-09T23:34:03Z",
+        "name" : "e1preview",
+        "sha256" : "b39f2ace706218e808ded1e101a2be9c22373fafa69069dce26af103f2e294cc"
+      },
+      "sourceTree" : {
+        "fileCount" : 20,
+        "files" : {
+          "Package.swift" : "15e8506890394c8797fa3e8baa6dc75d88c94902f3527af60342b4a4ccc61851",
+          "Sources\/e1\/main.swift" : "738f8a81daa6075dd08b789361a4636b166be50793f1d4f37e6a3714137419f6",
+          "Sources\/E1Core\/Carrier.swift" : "2e7acdc6acca83fc35a87a291718bd0780f7e5da603411ea5ad5b9e2dcfd9cf9",
+          "Sources\/E1Core\/Compositor.swift" : "0b988dca12597767addaa38e4c8b27b406ca872221767190a03dd118e432cf48",
+          "Sources\/E1Core\/Decode.swift" : "262d9298b79da39d1ceda378ba38cea1a31c69406cbb65af6849d310a81711bd",
+          "Sources\/E1Core\/Exporter.swift" : "8989cc08c68164d1519bf57a1ed360d9da21b788e334ac293a2f4d3b1286efc9",
+          "Sources\/E1Core\/Fixtures.swift" : "149137c948c66e5cc2b68414d3bb6bd30b1e0a9a7c77709852cf1fc30e2611c5",
+          "Sources\/E1Core\/OutputGuard.swift" : "3ac18cb101f730e6d3b47fa3c70091b03fd9dcb56a32a14dbff5a1a8170671bb",
+          "Sources\/E1Core\/Preview.swift" : "0f4e74f55b1ad9154158cdfb6c3ceb56d933310d4648b91997ab373f5b50cf85",
+          "Sources\/E1Core\/Renderer.swift" : "c5a889a85fd6a8b4620eaae68092ee4bb55260d0db7128ae50b624a7bffd0fae",
+          "Sources\/E1Core\/Spec.swift" : "a4c04f924ebe97b7b9a216c20a951221641941ca14d9064db35548b50f6c223c",
+          "Sources\/E1Core\/Spectrum.swift" : "f645bc3c11820e0d9936b8eadf909baed84e79645d9cd52a711dcdc1fbe25c28",
+          "Sources\/E1Core\/Timeline.swift" : "64af731979c70891f522e75c1904c500902749e3ae2a016a2cda69b7d288d98f",
+          "Sources\/E1Core\/Util.swift" : "03a3b1508805077d5183d337647ae4d6fb8a66a7b617a79b3eb633de53e0c950",
+          "Sources\/E1Expect\/Expectations.swift" : "5ac36f6d811b2fa0bd3313e352d0e90c6d404d744503d6eb9b80a076b04c4fa1",
+          "Sources\/e1preview\/Diagnose.swift" : "0defc72c0ebd504663acb13c0572eaa45b21c2a9906a269ff2128156cf6433fe",
+          "Sources\/e1preview\/Frames.swift" : "a8305d3ddc809df96bbaeee7d5acb5197ac9149f27935226d3dffaab86360d51",
+          "Sources\/e1preview\/main.swift" : "d5d247c212ed5c1acb1658fce2b277f857e6dca36e25a8ddccfee27300ee3c08",
+          "Sources\/e1preview\/Present.swift" : "a5af4d0515e23dc004731d5f7fdceacfc608df4d46793ce38969b1c84ea331ff",
+          "Tests\/E1CoreTests\/CoreTests.swift" : "a607c48b0f8f7862a1e753bcc2612dcb3287a93671cafbccc1f2affe8eda0f48"
+        },
+        "treeSha256" : "04a7040a4b7f02412c8806e74788ed8cbb174727aafb0813aa422b630e5c7f66"
+      }
+    },
+    "endFootprintMiB" : 131.61019999999999,
+    "fixtures" : {
+      "carrier-160x90-10s.mov" : "0a0c1e456c759c44e5739ccef09aebe9ec8172cb3c45fd2942540901cc56f474",
+      "S-selected.wav" : "47f1d4ffd8d3eedd2284f37dbf26d4a73c4978cdbcc6e25ad026c845f7db2249",
+      "U-unrelated.wav" : "2ebdc9fd31fcd38eabf9ded3232b9194ff4c5f615ee463d1ee32420ce72aef7c"
+    },
+    "footprintPerCase" : [
+      {
+        "afterMiB" : 136.8914,
+        "beforeMiB" : 30.063199999999998,
+        "case" : "c1-baseline"
+      },
+      {
+        "afterMiB" : 129.3914,
+        "beforeMiB" : 32.531999999999996,
+        "case" : "c2-trim"
+      },
+      {
+        "afterMiB" : 130.98519999999999,
+        "beforeMiB" : 34.375700000000002,
+        "case" : "c3-offset"
+      },
+      {
+        "afterMiB" : 131.53210000000001,
+        "beforeMiB" : 35.969499999999996,
+        "case" : "c4-trim-offset"
+      }
+    ],
+    "run" : {
+      "id" : "2026-10-09T233535Z",
+      "muted" : true,
+      "os" : "Version 26.6.2 (Build 25G83)",
+      "startFootprintMiB" : 5.0942999999999996,
+      "window" : false
+    },
+    "summary" : {
+      "fail" : 0,
+      "failedIDs" : [
+
+      ],
+      "pass" : 11,
+      "record" : 0
+    },
+    "wallSecondsTotal" : 90.102500000000006
+  }
+}

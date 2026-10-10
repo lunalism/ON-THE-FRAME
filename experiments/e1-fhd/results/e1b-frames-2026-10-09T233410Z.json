@@ -1,0 +1,385 @@
+{
+  "checks" : [
+    {
+      "id" : "F-c1-baseline",
+      "name" : "창 부착 재생 프레임 계수(합성기 요청 \/ 출력 전달 \/ 관찰기 지연 구분): 전달 프레임 비트 동일·끝 도달만 판정, 개수는 기록",
+      "playerLayerFound" : true,
+      "result" : "PASS",
+      "runs" : [
+        {
+          "accessLogDroppedVideoFrames" : -1,
+          "accessLogEvents" : 0,
+          "compositorErrors" : [
+
+          ],
+          "compositorMaxInFlight" : 1,
+          "compositorRenderMsMax" : 12.012600000000001,
+          "compositorRequests" : 301,
+          "delivered" : 302,
+          "deliveredHashMismatch" : 0,
+          "deliveredUniqueInRange" : 300,
+          "layerReadyForDisplayAfter" : true,
+          "loadAvgAfter" : [
+            2.8696000000000002,
+            2.9712000000000001,
+            2.6440000000000001
+          ],
+          "loadAvgBefore" : [
+            3.1152000000000002,
+            3.0215000000000001,
+            2.6577000000000002
+          ],
+          "missingButRequested_observerStall" : 0,
+          "missingButRequested_outputNotHanded" : 0,
+          "missingFromObserver" : 0,
+          "notRequested" : 0,
+          "notRequestedFrames" : [
+
+          ],
+          "observerStallFrames" : [
+
+          ],
+          "outputNotHandedFrames" : [
+
+          ],
+          "pollCount" : 2673,
+          "pollGapMsMax" : 22.729700000000001,
+          "pollGapsOver20ms" : 1,
+          "reachedEnd" : true,
+          "renderFinishedAfterDisplayWindow" : 0,
+          "renderFinishedLateFrames" : [
+
+          ],
+          "requestedUniqueInRange" : 300,
+          "wallS" : 10.4588
+        },
+        {
+          "accessLogDroppedVideoFrames" : -1,
+          "accessLogEvents" : 0,
+          "compositorErrors" : [
+
+          ],
+          "compositorMaxInFlight" : 1,
+          "compositorRenderMsMax" : 2.6379000000000001,
+          "compositorRequests" : 302,
+          "delivered" : 302,
+          "deliveredHashMismatch" : 0,
+          "deliveredUniqueInRange" : 300,
+          "layerReadyForDisplayAfter" : true,
+          "loadAvgAfter" : [
+            3.0619999999999998,
+            3.0053999999999998,
+            2.6597
+          ],
+          "loadAvgBefore" : [
+            2.8696000000000002,
+            2.9712000000000001,
+            2.6440000000000001
+          ],
+          "missingButRequested_observerStall" : 0,
+          "missingButRequested_outputNotHanded" : 0,
+          "missingFromObserver" : 0,
+          "notRequested" : 0,
+          "notRequestedFrames" : [
+
+          ],
+          "observerStallFrames" : [
+
+          ],
+          "outputNotHandedFrames" : [
+
+          ],
+          "pollCount" : 2662,
+          "pollGapMsMax" : 0,
+          "pollGapsOver20ms" : 0,
+          "reachedEnd" : true,
+          "renderFinishedAfterDisplayWindow" : 0,
+          "renderFinishedLateFrames" : [
+
+          ],
+          "requestedUniqueInRange" : 300,
+          "wallS" : 10.444599999999999
+        },
+        {
+          "accessLogDroppedVideoFrames" : -1,
+          "accessLogEvents" : 0,
+          "compositorErrors" : [
+
+          ],
+          "compositorMaxInFlight" : 1,
+          "compositorRenderMsMax" : 3.9367000000000001,
+          "compositorRequests" : 302,
+          "delivered" : 302,
+          "deliveredHashMismatch" : 0,
+          "deliveredUniqueInRange" : 300,
+          "layerReadyForDisplayAfter" : true,
+          "loadAvgAfter" : [
+            3.7069999999999999,
+            3.1514000000000002,
+            2.7172999999999998
+          ],
+          "loadAvgBefore" : [
+            3.0619999999999998,
+            3.0053999999999998,
+            2.6597
+          ],
+          "missingButRequested_observerStall" : 0,
+          "missingButRequested_outputNotHanded" : 0,
+          "missingFromObserver" : 0,
+          "notRequested" : 0,
+          "notRequestedFrames" : [
+
+          ],
+          "observerStallFrames" : [
+
+          ],
+          "outputNotHandedFrames" : [
+
+          ],
+          "pollCount" : 2655,
+          "pollGapMsMax" : 0,
+          "pollGapsOver20ms" : 0,
+          "reachedEnd" : true,
+          "renderFinishedAfterDisplayWindow" : 0,
+          "renderFinishedLateFrames" : [
+
+          ],
+          "requestedUniqueInRange" : 300,
+          "wallS" : 10.443099999999999
+        }
+      ]
+    },
+    {
+      "id" : "F-c2-trim",
+      "name" : "창 부착 재생 프레임 계수(합성기 요청 \/ 출력 전달 \/ 관찰기 지연 구분): 전달 프레임 비트 동일·끝 도달만 판정, 개수는 기록",
+      "playerLayerFound" : true,
+      "result" : "PASS",
+      "runs" : [
+        {
+          "accessLogDroppedVideoFrames" : -1,
+          "accessLogEvents" : 0,
+          "compositorErrors" : [
+
+          ],
+          "compositorMaxInFlight" : 1,
+          "compositorRenderMsMax" : 11.873900000000001,
+          "compositorRequests" : 301,
+          "delivered" : 302,
+          "deliveredHashMismatch" : 0,
+          "deliveredUniqueInRange" : 300,
+          "layerReadyForDisplayAfter" : true,
+          "loadAvgAfter" : [
+            3.8188,
+            3.1947999999999999,
+            2.7378
+          ],
+          "loadAvgBefore" : [
+            3.7069999999999999,
+            3.1514000000000002,
+            2.7172999999999998
+          ],
+          "missingButRequested_observerStall" : 0,
+          "missingButRequested_outputNotHanded" : 0,
+          "missingFromObserver" : 0,
+          "notRequested" : 0,
+          "notRequestedFrames" : [
+
+          ],
+          "observerStallFrames" : [
+
+          ],
+          "outputNotHandedFrames" : [
+
+          ],
+          "pollCount" : 2652,
+          "pollGapMsMax" : 0,
+          "pollGapsOver20ms" : 0,
+          "reachedEnd" : true,
+          "renderFinishedAfterDisplayWindow" : 0,
+          "renderFinishedLateFrames" : [
+
+          ],
+          "requestedUniqueInRange" : 300,
+          "wallS" : 10.418900000000001
+        }
+      ]
+    },
+    {
+      "id" : "F-c3-offset",
+      "name" : "창 부착 재생 프레임 계수(합성기 요청 \/ 출력 전달 \/ 관찰기 지연 구분): 전달 프레임 비트 동일·끝 도달만 판정, 개수는 기록",
+      "playerLayerFound" : true,
+      "result" : "PASS",
+      "runs" : [
+        {
+          "accessLogDroppedVideoFrames" : -1,
+          "accessLogEvents" : 0,
+          "compositorErrors" : [
+
+          ],
+          "compositorMaxInFlight" : 1,
+          "compositorRenderMsMax" : 8.6227,
+          "compositorRequests" : 301,
+          "delivered" : 302,
+          "deliveredHashMismatch" : 0,
+          "deliveredUniqueInRange" : 300,
+          "layerReadyForDisplayAfter" : true,
+          "loadAvgAfter" : [
+            4.2465999999999999,
+            3.3037000000000001,
+            2.7816999999999998
+          ],
+          "loadAvgBefore" : [
+            3.8188,
+            3.1947999999999999,
+            2.7378
+          ],
+          "missingButRequested_observerStall" : 0,
+          "missingButRequested_outputNotHanded" : 0,
+          "missingFromObserver" : 0,
+          "notRequested" : 0,
+          "notRequestedFrames" : [
+
+          ],
+          "observerStallFrames" : [
+
+          ],
+          "outputNotHandedFrames" : [
+
+          ],
+          "pollCount" : 2653,
+          "pollGapMsMax" : 31.930800000000001,
+          "pollGapsOver20ms" : 3,
+          "reachedEnd" : true,
+          "renderFinishedAfterDisplayWindow" : 0,
+          "renderFinishedLateFrames" : [
+
+          ],
+          "requestedUniqueInRange" : 300,
+          "wallS" : 10.432700000000001
+        }
+      ]
+    },
+    {
+      "id" : "F-c4-trim-offset",
+      "name" : "창 부착 재생 프레임 계수(합성기 요청 \/ 출력 전달 \/ 관찰기 지연 구분): 전달 프레임 비트 동일·끝 도달만 판정, 개수는 기록",
+      "playerLayerFound" : true,
+      "result" : "PASS",
+      "runs" : [
+        {
+          "accessLogDroppedVideoFrames" : -1,
+          "accessLogEvents" : 0,
+          "compositorErrors" : [
+
+          ],
+          "compositorMaxInFlight" : 1,
+          "compositorRenderMsMax" : 21.525400000000001,
+          "compositorRequests" : 301,
+          "delivered" : 302,
+          "deliveredHashMismatch" : 0,
+          "deliveredUniqueInRange" : 300,
+          "layerReadyForDisplayAfter" : true,
+          "loadAvgAfter" : [
+            4.5483000000000002,
+            3.4180000000000001,
+            2.8315000000000001
+          ],
+          "loadAvgBefore" : [
+            4.4668000000000001,
+            3.3647,
+            2.8062
+          ],
+          "missingButRequested_observerStall" : 0,
+          "missingButRequested_outputNotHanded" : 0,
+          "missingFromObserver" : 0,
+          "notRequested" : 0,
+          "notRequestedFrames" : [
+
+          ],
+          "observerStallFrames" : [
+
+          ],
+          "outputNotHandedFrames" : [
+
+          ],
+          "pollCount" : 2621,
+          "pollGapMsMax" : 60.754899999999999,
+          "pollGapsOver20ms" : 3,
+          "reachedEnd" : true,
+          "renderFinishedAfterDisplayWindow" : 0,
+          "renderFinishedLateFrames" : [
+
+          ],
+          "requestedUniqueInRange" : 300,
+          "wallS" : 10.422000000000001
+        }
+      ]
+    }
+  ],
+  "sections" : {
+    "build" : {
+      "executable" : {
+        "bytes" : 1235384,
+        "configuration" : "release",
+        "modified" : "2026-10-09T23:34:03Z",
+        "name" : "e1preview",
+        "sha256" : "b39f2ace706218e808ded1e101a2be9c22373fafa69069dce26af103f2e294cc"
+      },
+      "sourceTree" : {
+        "fileCount" : 20,
+        "files" : {
+          "Package.swift" : "15e8506890394c8797fa3e8baa6dc75d88c94902f3527af60342b4a4ccc61851",
+          "Sources\/e1\/main.swift" : "738f8a81daa6075dd08b789361a4636b166be50793f1d4f37e6a3714137419f6",
+          "Sources\/E1Core\/Carrier.swift" : "2e7acdc6acca83fc35a87a291718bd0780f7e5da603411ea5ad5b9e2dcfd9cf9",
+          "Sources\/E1Core\/Compositor.swift" : "0b988dca12597767addaa38e4c8b27b406ca872221767190a03dd118e432cf48",
+          "Sources\/E1Core\/Decode.swift" : "262d9298b79da39d1ceda378ba38cea1a31c69406cbb65af6849d310a81711bd",
+          "Sources\/E1Core\/Exporter.swift" : "8989cc08c68164d1519bf57a1ed360d9da21b788e334ac293a2f4d3b1286efc9",
+          "Sources\/E1Core\/Fixtures.swift" : "149137c948c66e5cc2b68414d3bb6bd30b1e0a9a7c77709852cf1fc30e2611c5",
+          "Sources\/E1Core\/OutputGuard.swift" : "3ac18cb101f730e6d3b47fa3c70091b03fd9dcb56a32a14dbff5a1a8170671bb",
+          "Sources\/E1Core\/Preview.swift" : "0f4e74f55b1ad9154158cdfb6c3ceb56d933310d4648b91997ab373f5b50cf85",
+          "Sources\/E1Core\/Renderer.swift" : "c5a889a85fd6a8b4620eaae68092ee4bb55260d0db7128ae50b624a7bffd0fae",
+          "Sources\/E1Core\/Spec.swift" : "a4c04f924ebe97b7b9a216c20a951221641941ca14d9064db35548b50f6c223c",
+          "Sources\/E1Core\/Spectrum.swift" : "f645bc3c11820e0d9936b8eadf909baed84e79645d9cd52a711dcdc1fbe25c28",
+          "Sources\/E1Core\/Timeline.swift" : "64af731979c70891f522e75c1904c500902749e3ae2a016a2cda69b7d288d98f",
+          "Sources\/E1Core\/Util.swift" : "03a3b1508805077d5183d337647ae4d6fb8a66a7b617a79b3eb633de53e0c950",
+          "Sources\/E1Expect\/Expectations.swift" : "5ac36f6d811b2fa0bd3313e352d0e90c6d404d744503d6eb9b80a076b04c4fa1",
+          "Sources\/e1preview\/Diagnose.swift" : "0defc72c0ebd504663acb13c0572eaa45b21c2a9906a269ff2128156cf6433fe",
+          "Sources\/e1preview\/Frames.swift" : "a8305d3ddc809df96bbaeee7d5acb5197ac9149f27935226d3dffaab86360d51",
+          "Sources\/e1preview\/main.swift" : "d5d247c212ed5c1acb1658fce2b277f857e6dca36e25a8ddccfee27300ee3c08",
+          "Sources\/e1preview\/Present.swift" : "a5af4d0515e23dc004731d5f7fdceacfc608df4d46793ce38969b1c84ea331ff",
+          "Tests\/E1CoreTests\/CoreTests.swift" : "a607c48b0f8f7862a1e753bcc2612dcb3287a93671cafbccc1f2affe8eda0f48"
+        },
+        "treeSha256" : "04a7040a4b7f02412c8806e74788ed8cbb174727aafb0813aa422b630e5c7f66"
+      }
+    },
+    "fixtures" : {
+      "carrier-160x90-10s.mov" : "0a0c1e456c759c44e5739ccef09aebe9ec8172cb3c45fd2942540901cc56f474",
+      "S-selected.wav" : "47f1d4ffd8d3eedd2284f37dbf26d4a73c4978cdbcc6e25ad026c845f7db2249",
+      "U-unrelated.wav" : "2ebdc9fd31fcd38eabf9ded3232b9194ff4c5f615ee463d1ee32420ce72aef7c"
+    },
+    "loadAvgEnd" : [
+      4.5483000000000002,
+      3.4180000000000001,
+      2.8315000000000001
+    ],
+    "run" : {
+      "evidenceBoundary" : "합성기 요청·비디오 출력 전달은 프레임 단위 기록. 재생 중 AVPlayerLayer의 프레임 단위 표시는 관찰 불가(accessLog 집계만 참고)",
+      "id" : "2026-10-09T233410Z",
+      "loadAvgStart" : [
+        3.1152000000000002,
+        3.0215000000000001,
+        2.6577000000000002
+      ],
+      "os" : "Version 26.6.2 (Build 25G83)",
+      "volume" : 0,
+      "window" : "AVPlayerView (makePreviewWindow, window 모드와 같은 코드)"
+    },
+    "summary" : {
+      "fail" : 0,
+      "failedIDs" : [
+
+      ],
+      "pass" : 4
+    },
+    "wallSecondsTotal" : 70.483000000000004
+  }
+}

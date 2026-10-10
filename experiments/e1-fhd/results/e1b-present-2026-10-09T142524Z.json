@@ -1,0 +1,704 @@
+{
+  "checks" : [
+    {
+      "compositorErrors" : [
+
+      ],
+      "compositorRequests" : 68,
+      "displayedFormat" : "BGRA",
+      "id" : "L1-c1-baseline",
+      "layerBounds" : [
+        1280,
+        760
+      ],
+      "name" : "AVPlayerView 안 AVPlayerLayer: 재생 중 표시 준비 = true, 일시정지 탐색 9회의 표시 버퍼 = 목표 프레임(코드·해시·자막 여부)",
+      "readyForDisplaySamples" : [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "result" : "PASS",
+      "seeks" : [
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 30,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 400,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 30,
+          "waitMs" : 22.216699999999999,
+          "width" : 1920
+        },
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 59,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 400,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 59,
+          "waitMs" : 19.442699999999999,
+          "width" : 1920
+        },
+        {
+          "captionShown" : true,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 60,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 400,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 60,
+          "waitMs" : 21.337900000000001,
+          "width" : 1920
+        },
+        {
+          "captionShown" : true,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 120,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 0,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 120,
+          "waitMs" : 19.083400000000001,
+          "width" : 1920
+        },
+        {
+          "captionShown" : true,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 180,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 406,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 180,
+          "waitMs" : 19.4239,
+          "width" : 1920
+        },
+        {
+          "captionShown" : true,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 239,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 406,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 239,
+          "waitMs" : 19.638300000000001,
+          "width" : 1920
+        },
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 240,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 406,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 240,
+          "waitMs" : 19.519300000000001,
+          "width" : 1920
+        },
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 299,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 0,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 299,
+          "waitMs" : 19.804500000000001,
+          "width" : 1920
+        },
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 45,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 400,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 45,
+          "waitMs" : 19.601900000000001,
+          "width" : 1920
+        }
+      ],
+      "videoRect" : [
+        0,
+        20,
+        1280,
+        720
+      ]
+    },
+    {
+      "compositorErrors" : [
+
+      ],
+      "compositorRequests" : 68,
+      "displayedFormat" : "BGRA",
+      "id" : "L1-c2-trim",
+      "layerBounds" : [
+        1280,
+        760
+      ],
+      "name" : "AVPlayerView 안 AVPlayerLayer: 재생 중 표시 준비 = true, 일시정지 탐색 9회의 표시 버퍼 = 목표 프레임(코드·해시·자막 여부)",
+      "readyForDisplaySamples" : [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "result" : "PASS",
+      "seeks" : [
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 30,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 406,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 30,
+          "waitMs" : 84.223600000000005,
+          "width" : 1920
+        },
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 59,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 406,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 59,
+          "waitMs" : 37.019100000000002,
+          "width" : 1920
+        },
+        {
+          "captionShown" : true,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 60,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 406,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 60,
+          "waitMs" : 21.0124,
+          "width" : 1920
+        },
+        {
+          "captionShown" : true,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 120,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 0,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 120,
+          "waitMs" : 20.0625,
+          "width" : 1920
+        },
+        {
+          "captionShown" : true,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 180,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 0,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 180,
+          "waitMs" : 20.7258,
+          "width" : 1920
+        },
+        {
+          "captionShown" : true,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 239,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 402,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 239,
+          "waitMs" : 20.845800000000001,
+          "width" : 1920
+        },
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 240,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 402,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 240,
+          "waitMs" : 19.950500000000002,
+          "width" : 1920
+        },
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 299,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 402,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 299,
+          "waitMs" : 20.1691,
+          "width" : 1920
+        },
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 45,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 406,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 45,
+          "waitMs" : 20.2105,
+          "width" : 1920
+        }
+      ],
+      "videoRect" : [
+        0,
+        20,
+        1280,
+        720
+      ]
+    },
+    {
+      "compositorErrors" : [
+
+      ],
+      "compositorRequests" : 67,
+      "displayedFormat" : "BGRA",
+      "id" : "L1-c3-offset",
+      "layerBounds" : [
+        1280,
+        760
+      ],
+      "name" : "AVPlayerView 안 AVPlayerLayer: 재생 중 표시 준비 = true, 일시정지 탐색 9회의 표시 버퍼 = 목표 프레임(코드·해시·자막 여부)",
+      "readyForDisplaySamples" : [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "result" : "PASS",
+      "seeks" : [
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 30,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 0,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 30,
+          "waitMs" : 20.6035,
+          "width" : 1920
+        },
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 59,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 0,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 59,
+          "waitMs" : 21.374300000000002,
+          "width" : 1920
+        },
+        {
+          "captionShown" : true,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 60,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 0,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 60,
+          "waitMs" : 20.118200000000002,
+          "width" : 1920
+        },
+        {
+          "captionShown" : true,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 120,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 400,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 120,
+          "waitMs" : 20.162700000000001,
+          "width" : 1920
+        },
+        {
+          "captionShown" : true,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 180,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 0,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 180,
+          "waitMs" : 20.030000000000001,
+          "width" : 1920
+        },
+        {
+          "captionShown" : true,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 239,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 406,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 239,
+          "waitMs" : 20.109300000000001,
+          "width" : 1920
+        },
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 240,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 406,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 240,
+          "waitMs" : 19.9345,
+          "width" : 1920
+        },
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 299,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 406,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 299,
+          "waitMs" : 20.9815,
+          "width" : 1920
+        },
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 45,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 0,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 45,
+          "waitMs" : 20.679600000000001,
+          "width" : 1920
+        }
+      ],
+      "videoRect" : [
+        0,
+        20,
+        1280,
+        720
+      ]
+    },
+    {
+      "compositorErrors" : [
+
+      ],
+      "compositorRequests" : 73,
+      "displayedFormat" : "BGRA",
+      "id" : "L1-c4-trim-offset",
+      "layerBounds" : [
+        1280,
+        760
+      ],
+      "name" : "AVPlayerView 안 AVPlayerLayer: 재생 중 표시 준비 = true, 일시정지 탐색 9회의 표시 버퍼 = 목표 프레임(코드·해시·자막 여부)",
+      "readyForDisplaySamples" : [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "result" : "PASS",
+      "seeks" : [
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 30,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 0,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 30,
+          "waitMs" : 20.7849,
+          "width" : 1920
+        },
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 59,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 0,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 59,
+          "waitMs" : 21.589400000000001,
+          "width" : 1920
+        },
+        {
+          "captionShown" : true,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 60,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 0,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 60,
+          "waitMs" : 20.488299999999999,
+          "width" : 1920
+        },
+        {
+          "captionShown" : true,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 120,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 406,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 120,
+          "waitMs" : 21.6068,
+          "width" : 1920
+        },
+        {
+          "captionShown" : true,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 180,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 0,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 180,
+          "waitMs" : 21.4557,
+          "width" : 1920
+        },
+        {
+          "captionShown" : true,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 239,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 0,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 239,
+          "waitMs" : 21.131799999999998,
+          "width" : 1920
+        },
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 240,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 0,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 240,
+          "waitMs" : 21.467700000000001,
+          "width" : 1920
+        },
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 299,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 402,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 299,
+          "waitMs" : 21.446200000000001,
+          "width" : 1920
+        },
+        {
+          "captionShown" : false,
+          "displayedPixelBuffer" : "present",
+          "frameCode" : 45,
+          "hashMatchesReference" : true,
+          "height" : 1080,
+          "maxBarPx" : 0,
+          "ok" : true,
+          "pixelFormat" : "BGRA",
+          "target" : 45,
+          "waitMs" : 21.502199999999998,
+          "width" : 1920
+        }
+      ],
+      "videoRect" : [
+        0,
+        20,
+        1280,
+        720
+      ]
+    }
+  ],
+  "sections" : {
+    "build" : {
+      "executable" : {
+        "bytes" : 1175144,
+        "configuration" : "release",
+        "modified" : "2026-10-09T14:25:24Z",
+        "name" : "e1preview",
+        "sha256" : "09407a8fbe654e184717bf2f16da71f22881ac9eb107d9e1785cadf7aea9dbe3"
+      },
+      "sourceTree" : {
+        "fileCount" : 19,
+        "files" : {
+          "Package.swift" : "15e8506890394c8797fa3e8baa6dc75d88c94902f3527af60342b4a4ccc61851",
+          "Sources\/e1\/main.swift" : "738f8a81daa6075dd08b789361a4636b166be50793f1d4f37e6a3714137419f6",
+          "Sources\/E1Core\/Carrier.swift" : "2e7acdc6acca83fc35a87a291718bd0780f7e5da603411ea5ad5b9e2dcfd9cf9",
+          "Sources\/E1Core\/Compositor.swift" : "0b988dca12597767addaa38e4c8b27b406ca872221767190a03dd118e432cf48",
+          "Sources\/E1Core\/Decode.swift" : "262d9298b79da39d1ceda378ba38cea1a31c69406cbb65af6849d310a81711bd",
+          "Sources\/E1Core\/Exporter.swift" : "8989cc08c68164d1519bf57a1ed360d9da21b788e334ac293a2f4d3b1286efc9",
+          "Sources\/E1Core\/Fixtures.swift" : "149137c948c66e5cc2b68414d3bb6bd30b1e0a9a7c77709852cf1fc30e2611c5",
+          "Sources\/E1Core\/OutputGuard.swift" : "3ac18cb101f730e6d3b47fa3c70091b03fd9dcb56a32a14dbff5a1a8170671bb",
+          "Sources\/E1Core\/Preview.swift" : "d01158497b37b00dc26db1eca20c6f932fc5bcd59f1771f3974aadfb7f4ed16f",
+          "Sources\/E1Core\/Renderer.swift" : "c5a889a85fd6a8b4620eaae68092ee4bb55260d0db7128ae50b624a7bffd0fae",
+          "Sources\/E1Core\/Spec.swift" : "a4c04f924ebe97b7b9a216c20a951221641941ca14d9064db35548b50f6c223c",
+          "Sources\/E1Core\/Spectrum.swift" : "f645bc3c11820e0d9936b8eadf909baed84e79645d9cd52a711dcdc1fbe25c28",
+          "Sources\/E1Core\/Timeline.swift" : "64af731979c70891f522e75c1904c500902749e3ae2a016a2cda69b7d288d98f",
+          "Sources\/E1Core\/Util.swift" : "03a3b1508805077d5183d337647ae4d6fb8a66a7b617a79b3eb633de53e0c950",
+          "Sources\/E1Expect\/Expectations.swift" : "5ac36f6d811b2fa0bd3313e352d0e90c6d404d744503d6eb9b80a076b04c4fa1",
+          "Sources\/e1preview\/Diagnose.swift" : "0defc72c0ebd504663acb13c0572eaa45b21c2a9906a269ff2128156cf6433fe",
+          "Sources\/e1preview\/main.swift" : "0954463ec3356e9711b632a60f999d596803411e8857359760d90d707b018fd7",
+          "Sources\/e1preview\/Present.swift" : "93e5f68c30d755408dd351e253a0e4b446103ea0b7f5588f1884d673c966d1a6",
+          "Tests\/E1CoreTests\/CoreTests.swift" : "a607c48b0f8f7862a1e753bcc2612dcb3287a93671cafbccc1f2affe8eda0f48"
+        },
+        "treeSha256" : "f775bb3bfbb89d36b1a5a94eeab3c914f026215fbb1a528e07b8b40aafb94cd3"
+      }
+    },
+    "fixtures" : {
+      "carrier-160x90-10s.mov" : "0a0c1e456c759c44e5739ccef09aebe9ec8172cb3c45fd2942540901cc56f474",
+      "S-selected.wav" : "47f1d4ffd8d3eedd2284f37dbf26d4a73c4978cdbcc6e25ad026c845f7db2249",
+      "U-unrelated.wav" : "2ebdc9fd31fcd38eabf9ded3232b9194ff4c5f615ee463d1ee32420ce72aef7c"
+    },
+    "run" : {
+      "evidenceBoundary" : "AVPlayerLayer.isReadyForDisplay와 일시정지 중 displayedPixelBuffer. 실제 화면 픽셀 아님",
+      "id" : "2026-10-09T142524Z",
+      "os" : "Version 26.6.2 (Build 25G83)",
+      "volume" : 0,
+      "window" : "AVPlayerView (makePreviewWindow, window 모드와 같은 코드)"
+    },
+    "summary" : {
+      "fail" : 0,
+      "failedIDs" : [
+
+      ],
+      "pass" : 4
+    },
+    "wallSecondsTotal" : 16.816800000000001
+  }
+}

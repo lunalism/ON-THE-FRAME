@@ -1,0 +1,180 @@
+{
+  "checks" : [
+    {
+      "compositorRequests" : 67,
+      "id" : "L0-negative-control",
+      "name" : "대조: 수정 전 구성(빈 비디오 트랙)에서 같은 검사가 실패를 검출",
+      "readyForDisplaySamples" : [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "result" : "PASS",
+      "seeks" : [
+        {
+          "displayedPixelBuffer" : "nil",
+          "ok" : false,
+          "target" : 30,
+          "timedOut" : true,
+          "waitMs" : 1505.7888
+        },
+        {
+          "displayedPixelBuffer" : "nil",
+          "ok" : false,
+          "target" : 59,
+          "timedOut" : true,
+          "waitMs" : 1508.3163
+        },
+        {
+          "displayedPixelBuffer" : "nil",
+          "ok" : false,
+          "target" : 60,
+          "timedOut" : true,
+          "waitMs" : 1500.1757
+        },
+        {
+          "displayedPixelBuffer" : "nil",
+          "ok" : false,
+          "target" : 120,
+          "timedOut" : true,
+          "waitMs" : 1508.6459
+        },
+        {
+          "displayedPixelBuffer" : "nil",
+          "ok" : false,
+          "target" : 180,
+          "timedOut" : true,
+          "waitMs" : 1502.3442
+        },
+        {
+          "displayedPixelBuffer" : "nil",
+          "ok" : false,
+          "target" : 239,
+          "timedOut" : true,
+          "waitMs" : 1503.8279
+        },
+        {
+          "displayedPixelBuffer" : "nil",
+          "ok" : false,
+          "target" : 240,
+          "timedOut" : true,
+          "waitMs" : 1504.8748000000001
+        },
+        {
+          "displayedPixelBuffer" : "nil",
+          "ok" : false,
+          "target" : 299,
+          "timedOut" : true,
+          "waitMs" : 1504.5183
+        },
+        {
+          "displayedPixelBuffer" : "nil",
+          "ok" : false,
+          "target" : 300,
+          "timedOut" : true,
+          "waitMs" : 1508.1925000000001
+        },
+        {
+          "displayedPixelBuffer" : "nil",
+          "move" : "step",
+          "ok" : false,
+          "playerTimeIndex" : 293,
+          "target" : 299,
+          "timedOut" : true,
+          "waitMs" : 1511.4356
+        },
+        {
+          "displayedPixelBuffer" : "nil",
+          "move" : "step",
+          "ok" : false,
+          "playerTimeIndex" : 285,
+          "target" : 298,
+          "timedOut" : true,
+          "waitMs" : 1506.6623
+        },
+        {
+          "displayedPixelBuffer" : "nil",
+          "ok" : false,
+          "target" : 45,
+          "timedOut" : true,
+          "waitMs" : 1510.1693
+        }
+      ]
+    }
+  ],
+  "sections" : {
+    "build" : {
+      "executable" : {
+        "bytes" : 1278696,
+        "configuration" : "release",
+        "modified" : "2026-10-10T00:00:08Z",
+        "name" : "e1preview",
+        "sha256" : "6770ae0b5c4c7fe98c7e178690ab8d637d0bae484ff068c23f97075b8a90a2d7"
+      },
+      "sourceTree" : {
+        "fileCount" : 20,
+        "files" : {
+          "Package.swift" : "15e8506890394c8797fa3e8baa6dc75d88c94902f3527af60342b4a4ccc61851",
+          "Sources\/e1\/main.swift" : "643e08c9bd8936d56a3a8e20c5d9f49383ee9ce69f10622672d613ecc23b4702",
+          "Sources\/E1Core\/Carrier.swift" : "2e7acdc6acca83fc35a87a291718bd0780f7e5da603411ea5ad5b9e2dcfd9cf9",
+          "Sources\/E1Core\/Compositor.swift" : "8b00047fc90320c8e3dc5d9c93dc7d68bad6b88b2fb51a4ff889d5b962dd5ec7",
+          "Sources\/E1Core\/Decode.swift" : "262d9298b79da39d1ceda378ba38cea1a31c69406cbb65af6849d310a81711bd",
+          "Sources\/E1Core\/Exporter.swift" : "8989cc08c68164d1519bf57a1ed360d9da21b788e334ac293a2f4d3b1286efc9",
+          "Sources\/E1Core\/Fixtures.swift" : "149137c948c66e5cc2b68414d3bb6bd30b1e0a9a7c77709852cf1fc30e2611c5",
+          "Sources\/E1Core\/OutputGuard.swift" : "3ac18cb101f730e6d3b47fa3c70091b03fd9dcb56a32a14dbff5a1a8170671bb",
+          "Sources\/E1Core\/Preview.swift" : "0f4e74f55b1ad9154158cdfb6c3ceb56d933310d4648b91997ab373f5b50cf85",
+          "Sources\/E1Core\/Renderer.swift" : "c5a889a85fd6a8b4620eaae68092ee4bb55260d0db7128ae50b624a7bffd0fae",
+          "Sources\/E1Core\/Spec.swift" : "a4c04f924ebe97b7b9a216c20a951221641941ca14d9064db35548b50f6c223c",
+          "Sources\/E1Core\/Spectrum.swift" : "f645bc3c11820e0d9936b8eadf909baed84e79645d9cd52a711dcdc1fbe25c28",
+          "Sources\/E1Core\/Timeline.swift" : "1f39b9381fdf1a98a8a9eefd6ce97fdb3d32539a4ec7dfcdb43b9fecabea4e0b",
+          "Sources\/E1Core\/Util.swift" : "03a3b1508805077d5183d337647ae4d6fb8a66a7b617a79b3eb633de53e0c950",
+          "Sources\/E1Expect\/Expectations.swift" : "2c663e58795999a9d8b74e1f96dd61f5ce921ef800036a06386be7e61fd4b9fc",
+          "Sources\/e1preview\/Diagnose.swift" : "0defc72c0ebd504663acb13c0572eaa45b21c2a9906a269ff2128156cf6433fe",
+          "Sources\/e1preview\/Frames.swift" : "a8305d3ddc809df96bbaeee7d5acb5197ac9149f27935226d3dffaab86360d51",
+          "Sources\/e1preview\/main.swift" : "22bc65218f4711b84de0695e28ec6720e9c481a890a7da0a7ba879090f1d0b53",
+          "Sources\/e1preview\/Present.swift" : "be9e1fe8a4a4450a4839e7e3ec5a3fa7d7d70604a840d0294552745d777c93e9",
+          "Tests\/E1CoreTests\/CoreTests.swift" : "323d1552b31c24c1a6524bc6d5a78b0217ea7e499c878816da32b1069592e9de"
+        },
+        "treeSha256" : "502f20bc46142789f77effd08fe46140c41bfa77c931bd1c0f7a999660a9419f"
+      }
+    },
+    "fixtures" : {
+      "carrier-160x90-10s.mov" : "0a0c1e456c759c44e5739ccef09aebe9ec8172cb3c45fd2942540901cc56f474",
+      "S-selected.wav" : "47f1d4ffd8d3eedd2284f37dbf26d4a73c4978cdbcc6e25ad026c845f7db2249",
+      "U-unrelated.wav" : "2ebdc9fd31fcd38eabf9ded3232b9194ff4c5f615ee463d1ee32420ce72aef7c"
+    },
+    "run" : {
+      "evidenceBoundary" : "AVPlayerLayer.isReadyForDisplay와 일시정지 중 displayedPixelBuffer. 실제 화면 픽셀 아님",
+      "id" : "2026-10-10T000330Z",
+      "negativeControl" : true,
+      "os" : "Version 26.6.2 (Build 25G83)",
+      "volume" : 0,
+      "window" : "AVPlayerView (makePreviewWindow, window 모드와 같은 코드)"
+    },
+    "summary" : {
+      "fail" : 0,
+      "failedIDs" : [
+
+      ],
+      "pass" : 1
+    },
+    "wallSecondsTotal" : 21.963100000000001
+  }
+}

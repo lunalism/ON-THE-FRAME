@@ -1,0 +1,1689 @@
+{
+  "checks" : [
+    {
+      "created" : false,
+      "id" : "F-S-selected.wav",
+      "name" : "fixture 재현성(재생성 해시 = 디스크 해시)",
+      "result" : "PASS",
+      "sha256" : "47f1d4ffd8d3eedd"
+    },
+    {
+      "created" : false,
+      "id" : "F-U-unrelated.wav",
+      "name" : "fixture 재현성(재생성 해시 = 디스크 해시)",
+      "result" : "PASS",
+      "sha256" : "2ebdc9fd31fcd38e"
+    },
+    {
+      "created" : false,
+      "id" : "F-S-rename-probe.wav",
+      "name" : "fixture 재현성(재생성 해시 = 디스크 해시)",
+      "result" : "PASS",
+      "sha256" : "47f1d4ffd8d3eedd"
+    },
+    {
+      "fromCache" : true,
+      "hops" : 2401,
+      "id" : "A1",
+      "maxBufferFrames" : 8192,
+      "name" : "선택 소스 청크 분석: 캐시 = 직접 분석, hop 수 = 20s×120+1",
+      "ptsContiguous" : true,
+      "result" : "PASS",
+      "sampleBuffers" : 118,
+      "totalFrames" : 960000,
+      "wallS" : 0.078600000000000003
+    },
+    {
+      "id" : "R0",
+      "name" : "선택 소스 식별: 다른 원본(U)의 분석 캐시 연결 거부",
+      "result" : "PASS"
+    },
+    {
+      "frames" : [
+        0,
+        59,
+        60,
+        105,
+        106,
+        120,
+        180,
+        239,
+        240,
+        299
+      ],
+      "id" : "R1",
+      "mismatches" : [
+
+      ],
+      "name" : "결정적 렌더링(반복·새 인스턴스·다른 스레드·더러운 버퍼, 비트 단위)",
+      "result" : "PASS"
+    },
+    {
+      "diffBox" : [
+        483,
+        948,
+        953,
+        58
+      ],
+      "edgeErrorPx(minX,minY,maxX,maxY)" : [
+        0,
+        0,
+        0,
+        0
+      ],
+      "id" : "R2",
+      "name" : "자막 경계 상자 vs 레이아웃 기대 사각형(각 변 ±1px)",
+      "result" : "PASS"
+    },
+    {
+      "fallbackRuns" : [
+
+      ],
+      "id" : "R3",
+      "name" : "글리프 누락 없음(.notdef 0개), 실행 폰트 기록",
+      "result" : "PASS",
+      "runFonts" : [
+        "AppleSDGothicNeo-Bold",
+        "AppleSDGothicNeo-Bold"
+      ]
+    },
+    {
+      "id" : "R4",
+      "name" : "자막 표시 경계 [2.0s, 8.0s): 59✗ 60✓ 239✓ 240✗, 전체 60…239",
+      "pixelDiffShown" : {
+        "59" : false,
+        "60" : true,
+        "239" : true,
+        "240" : false
+      },
+      "result" : "PASS"
+    },
+    {
+      "failures" : [
+
+      ],
+      "framesChecked" : 162,
+      "id" : "R5-c1-baseline",
+      "name" : "톤 구간에서 기대 밴드가 최대(독립 표)",
+      "result" : "PASS"
+    },
+    {
+      "framesSampled" : 60,
+      "id" : "R6-c1-baseline",
+      "maxErrorPx" : 0,
+      "name" : "그려진 막대 높이 = round(값×480) (±1px), 프레임 코드 일치",
+      "result" : "PASS"
+    },
+    {
+      "differingFrames" : 0,
+      "id" : "R7-c1-baseline",
+      "name" : "격리: U 추가 전후 밴드 값 수치 동일(300프레임)",
+      "result" : "PASS"
+    },
+    {
+      "framesChecked" : 57,
+      "id" : "R9-c1-baseline",
+      "name" : "무음·부재 구간에서 모든 밴드 = 0",
+      "nonZeroFrames" : 0,
+      "result" : "PASS"
+    },
+    {
+      "clicks" : [
+        {
+          "nExp" : 106,
+          "nObs" : 106,
+          "tExp" : 3.5167000000000002
+        },
+        {
+          "nExp" : 136,
+          "nObs" : 136,
+          "tExp" : 4.5167000000000002
+        },
+        {
+          "nExp" : 196,
+          "nObs" : 196,
+          "tExp" : 6.5167000000000002
+        }
+      ],
+      "id" : "R10-c1-baseline",
+      "name" : "클릭 반응 |n_obs − n_exp| ≤ 1 (렌더 단계), U 클릭 무반응",
+      "result" : "PASS",
+      "uClickFramesChecked" : 3,
+      "uLeakFrames" : 0
+    },
+    {
+      "failures" : [
+
+      ],
+      "framesChecked" : 162,
+      "id" : "R5-c2-trim",
+      "name" : "톤 구간에서 기대 밴드가 최대(독립 표)",
+      "result" : "PASS"
+    },
+    {
+      "framesSampled" : 60,
+      "id" : "R6-c2-trim",
+      "maxErrorPx" : 0,
+      "name" : "그려진 막대 높이 = round(값×480) (±1px), 프레임 코드 일치",
+      "result" : "PASS"
+    },
+    {
+      "differingFrames" : 0,
+      "id" : "R7-c2-trim",
+      "name" : "격리: U 추가 전후 밴드 값 수치 동일(300프레임)",
+      "result" : "PASS"
+    },
+    {
+      "framesChecked" : 117,
+      "id" : "R9-c2-trim",
+      "name" : "무음·부재 구간에서 모든 밴드 = 0",
+      "nonZeroFrames" : 0,
+      "result" : "PASS"
+    },
+    {
+      "clicks" : [
+        {
+          "nExp" : 46,
+          "nObs" : 46,
+          "tExp" : 1.5166999999999999
+        },
+        {
+          "nExp" : 256,
+          "nObs" : 256,
+          "tExp" : 8.5167000000000002
+        }
+      ],
+      "id" : "R10-c2-trim",
+      "name" : "클릭 반응 |n_obs − n_exp| ≤ 1 (렌더 단계), U 클릭 무반응",
+      "result" : "PASS",
+      "uClickFramesChecked" : 6,
+      "uLeakFrames" : 0
+    },
+    {
+      "failures" : [
+
+      ],
+      "framesChecked" : 162,
+      "id" : "R5-c3-offset",
+      "name" : "톤 구간에서 기대 밴드가 최대(독립 표)",
+      "result" : "PASS"
+    },
+    {
+      "framesSampled" : 60,
+      "id" : "R6-c3-offset",
+      "maxErrorPx" : 0,
+      "name" : "그려진 막대 높이 = round(값×480) (±1px), 프레임 코드 일치",
+      "result" : "PASS"
+    },
+    {
+      "differingFrames" : 0,
+      "id" : "R7-c3-offset",
+      "name" : "격리: U 추가 전후 밴드 값 수치 동일(300프레임)",
+      "result" : "PASS"
+    },
+    {
+      "framesChecked" : 60,
+      "id" : "R9-c3-offset",
+      "name" : "무음·부재 구간에서 모든 밴드 = 0",
+      "nonZeroFrames" : 0,
+      "result" : "PASS"
+    },
+    {
+      "clicks" : [
+        {
+          "nExp" : 166,
+          "nObs" : 166,
+          "tExp" : 5.5167000000000002
+        },
+        {
+          "nExp" : 196,
+          "nObs" : 196,
+          "tExp" : 6.5167000000000002
+        },
+        {
+          "nExp" : 256,
+          "nObs" : 256,
+          "tExp" : 8.5167000000000002
+        }
+      ],
+      "id" : "R10-c3-offset",
+      "name" : "클릭 반응 |n_obs − n_exp| ≤ 1 (렌더 단계), U 클릭 무반응",
+      "result" : "PASS",
+      "uClickFramesChecked" : 3,
+      "uLeakFrames" : 0
+    },
+    {
+      "failures" : [
+
+      ],
+      "framesChecked" : 102,
+      "id" : "R5-c4-trim-offset",
+      "name" : "톤 구간에서 기대 밴드가 최대(독립 표)",
+      "result" : "PASS"
+    },
+    {
+      "framesSampled" : 60,
+      "id" : "R6-c4-trim-offset",
+      "maxErrorPx" : 0,
+      "name" : "그려진 막대 높이 = round(값×480) (±1px), 프레임 코드 일치",
+      "result" : "PASS"
+    },
+    {
+      "differingFrames" : 0,
+      "id" : "R7-c4-trim-offset",
+      "name" : "격리: U 추가 전후 밴드 값 수치 동일(300프레임)",
+      "result" : "PASS"
+    },
+    {
+      "framesChecked" : 177,
+      "id" : "R9-c4-trim-offset",
+      "name" : "무음·부재 구간에서 모든 밴드 = 0",
+      "nonZeroFrames" : 0,
+      "result" : "PASS"
+    },
+    {
+      "clicks" : [
+        {
+          "nExp" : 106,
+          "nObs" : 106,
+          "tExp" : 3.5167000000000002
+        }
+      ],
+      "id" : "R10-c4-trim-offset",
+      "name" : "클릭 반응 |n_obs − n_exp| ≤ 1 (렌더 단계), U 클릭 무반응",
+      "result" : "PASS",
+      "uClickFramesChecked" : 9,
+      "uLeakFrames" : 0
+    },
+    {
+      "band14AtSource6" : 0.84670000000000001,
+      "id" : "R8",
+      "name" : "트림·오프셋 대응: 원본 6.0\/7.0 s 프레임(180\/210, 30\/60, 240\/270, 90\/120) 밴드 동일",
+      "result" : "PASS"
+    },
+    {
+      "frames" : 57,
+      "id" : "R7b",
+      "mixBand25Min" : 0.82310000000000005,
+      "name" : "대조: S 무음 구간에서 타임라인 믹스 분석은 U(밴드 25)를 보이고, 선택 소스 경로는 모든 밴드 0",
+      "result" : "PASS",
+      "selectedMax" : 0
+    },
+    {
+      "audioReadyCallbacks" : 8,
+      "bytes" : 383115,
+      "distinctPoolBuffers" : 6,
+      "duringExport" : {
+        "destExistsDuringExport" : false,
+        "tempDirsDuringExport" : 1
+      },
+      "error" : "-",
+      "finalProgress" : 1,
+      "id" : "X-c1-baseline-aac-export",
+      "maxAudioBufferFrames" : 8192,
+      "name" : "내보내기 완료·승격",
+      "peakFootprintMiB" : 132.6414,
+      "progressMonotonic" : true,
+      "result" : "PASS",
+      "startFootprintMiB" : 50.000700000000002,
+      "videoReadyCallbacks" : 271,
+      "wallS" : 1.6254999999999999
+    },
+    {
+      "codeMismatches" : 0,
+      "frames" : 300,
+      "id" : "X-c1-baseline-aac-frames",
+      "name" : "프레임 수 300, PTS = n\/30 정확, 프레임 코드 = n",
+      "ptsExact" : true,
+      "result" : "PASS",
+      "videoFormat" : {
+        "codec" : "avc1",
+        "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+        "CVImageBufferTransferFunction" : "ITU_R_709_2",
+        "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+        "dimensions" : "1920x1080"
+      },
+      "videoTrackRange" : [
+        0,
+        10
+      ]
+    },
+    {
+      "count" : 180,
+      "first" : 60,
+      "id" : "X-c1-baseline-aac-caption",
+      "last" : 239,
+      "name" : "디코딩 자막 첫\/마지막 표시 프레임 = 60\/239",
+      "result" : "PASS"
+    },
+    {
+      "id" : "X-c1-baseline-aac-spectrum",
+      "name" : "디코딩 막대: 톤 구간 기대 밴드 최대, 무음 구간 막대 ≤ 3px",
+      "quietFrames" : 57,
+      "quietMaxBarPx" : 0,
+      "result" : "PASS",
+      "toneFail" : 0,
+      "toneFrames" : 162
+    },
+    {
+      "id" : "X-c1-baseline-aac-bars-psnr",
+      "maxBarErrPx" : 1,
+      "name" : "디코딩 막대 높이 − 렌더 막대 높이 최대 오차, PSNR(진단)",
+      "psnrMeanDb" : 49.121099999999998,
+      "psnrMinDb" : 38.7881,
+      "result" : "RECORD"
+    },
+    {
+      "clicks" : [
+        {
+          "delta" : 0,
+          "nExp" : 106,
+          "nObs" : 106,
+          "tA" : 3.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 3.5167000000000002
+        },
+        {
+          "delta" : 0,
+          "nExp" : 136,
+          "nObs" : 136,
+          "tA" : 4.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 4.5167000000000002
+        },
+        {
+          "delta" : 0,
+          "nExp" : 196,
+          "nObs" : 196,
+          "tA" : 6.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 6.5167000000000002
+        }
+      ],
+      "id" : "X-c1-baseline-aac-sync",
+      "name" : "스펙트럼 반응 |n_obs − n_exp| ≤ 1 (n_exp = floor(t_a·30)+1)",
+      "result" : "PASS"
+    },
+    {
+      "audioFirstPTS" : 0,
+      "audioFormat" : "aac  48000.0Hz ch=2 bits=0",
+      "audioFrames" : 480000,
+      "audioTrackRange" : [
+        0,
+        10
+      ],
+      "failures" : [
+
+      ],
+      "id" : "X-c1-baseline-aac-audio",
+      "name" : "내보낸 오디오: 기대 톤 존재·비기대 톤 부재, U 포함 여부",
+      "primingTrimFrames" : -1,
+      "result" : "PASS",
+      "u4700Amp" : 0.2001
+    },
+    {
+      "audioReadyCallbacks" : 5,
+      "bytes" : 2164382,
+      "distinctPoolBuffers" : 6,
+      "duringExport" : {
+        "destExistsDuringExport" : false,
+        "tempDirsDuringExport" : 1
+      },
+      "error" : "-",
+      "finalProgress" : 1,
+      "id" : "X-c1-baseline-lpcm-export",
+      "maxAudioBufferFrames" : 8192,
+      "name" : "내보내기 완료·승격",
+      "peakFootprintMiB" : 140.04769999999999,
+      "progressMonotonic" : true,
+      "result" : "PASS",
+      "startFootprintMiB" : 56.453899999999997,
+      "videoReadyCallbacks" : 264,
+      "wallS" : 1.5920000000000001
+    },
+    {
+      "codeMismatches" : 0,
+      "frames" : 300,
+      "id" : "X-c1-baseline-lpcm-frames",
+      "name" : "프레임 수 300, PTS = n\/30 정확, 프레임 코드 = n",
+      "ptsExact" : true,
+      "result" : "PASS",
+      "videoFormat" : {
+        "codec" : "avc1",
+        "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+        "CVImageBufferTransferFunction" : "ITU_R_709_2",
+        "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+        "dimensions" : "1920x1080"
+      },
+      "videoTrackRange" : [
+        0,
+        10
+      ]
+    },
+    {
+      "count" : 180,
+      "first" : 60,
+      "id" : "X-c1-baseline-lpcm-caption",
+      "last" : 239,
+      "name" : "디코딩 자막 첫\/마지막 표시 프레임 = 60\/239",
+      "result" : "PASS"
+    },
+    {
+      "id" : "X-c1-baseline-lpcm-spectrum",
+      "name" : "디코딩 막대: 톤 구간 기대 밴드 최대, 무음 구간 막대 ≤ 3px",
+      "quietFrames" : 57,
+      "quietMaxBarPx" : 0,
+      "result" : "PASS",
+      "toneFail" : 0,
+      "toneFrames" : 162
+    },
+    {
+      "id" : "X-c1-baseline-lpcm-bars-psnr",
+      "maxBarErrPx" : 1,
+      "name" : "디코딩 막대 높이 − 렌더 막대 높이 최대 오차, PSNR(진단)",
+      "psnrMeanDb" : 49.121099999999998,
+      "psnrMinDb" : 38.7881,
+      "result" : "RECORD"
+    },
+    {
+      "clicks" : [
+        {
+          "delta" : 0,
+          "nExp" : 106,
+          "nObs" : 106,
+          "tA" : 3.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 3.5167000000000002
+        },
+        {
+          "delta" : 0,
+          "nExp" : 136,
+          "nObs" : 136,
+          "tA" : 4.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 4.5167000000000002
+        },
+        {
+          "delta" : 0,
+          "nExp" : 196,
+          "nObs" : 196,
+          "tA" : 6.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 6.5167000000000002
+        }
+      ],
+      "id" : "X-c1-baseline-lpcm-sync",
+      "name" : "스펙트럼 반응 |n_obs − n_exp| ≤ 1 (n_exp = floor(t_a·30)+1)",
+      "result" : "PASS"
+    },
+    {
+      "audioFirstPTS" : 0,
+      "audioFormat" : "lpcm 48000.0Hz ch=2 bits=16",
+      "audioFrames" : 480000,
+      "audioTrackRange" : [
+        0,
+        10
+      ],
+      "failures" : [
+
+      ],
+      "id" : "X-c1-baseline-lpcm-audio",
+      "name" : "내보낸 오디오: 기대 톤 존재·비기대 톤 부재, U 포함 여부",
+      "primingTrimFrames" : -1,
+      "result" : "PASS",
+      "u4700Amp" : 0.2001
+    },
+    {
+      "audioReadyCallbacks" : 8,
+      "bytes" : 359527,
+      "distinctPoolBuffers" : 6,
+      "duringExport" : {
+        "destExistsDuringExport" : false,
+        "tempDirsDuringExport" : 1
+      },
+      "error" : "-",
+      "finalProgress" : 1,
+      "id" : "X-c2-trim-aac-export",
+      "maxAudioBufferFrames" : 8192,
+      "name" : "내보내기 완료·승격",
+      "peakFootprintMiB" : 139.36019999999999,
+      "progressMonotonic" : true,
+      "result" : "PASS",
+      "startFootprintMiB" : 63.297600000000003,
+      "videoReadyCallbacks" : 284,
+      "wallS" : 1.4956
+    },
+    {
+      "codeMismatches" : 0,
+      "frames" : 300,
+      "id" : "X-c2-trim-aac-frames",
+      "name" : "프레임 수 300, PTS = n\/30 정확, 프레임 코드 = n",
+      "ptsExact" : true,
+      "result" : "PASS",
+      "videoFormat" : {
+        "codec" : "avc1",
+        "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+        "CVImageBufferTransferFunction" : "ITU_R_709_2",
+        "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+        "dimensions" : "1920x1080"
+      },
+      "videoTrackRange" : [
+        0,
+        10
+      ]
+    },
+    {
+      "count" : 180,
+      "first" : 60,
+      "id" : "X-c2-trim-aac-caption",
+      "last" : 239,
+      "name" : "디코딩 자막 첫\/마지막 표시 프레임 = 60\/239",
+      "result" : "PASS"
+    },
+    {
+      "id" : "X-c2-trim-aac-spectrum",
+      "name" : "디코딩 막대: 톤 구간 기대 밴드 최대, 무음 구간 막대 ≤ 3px",
+      "quietFrames" : 117,
+      "quietMaxBarPx" : 0,
+      "result" : "PASS",
+      "toneFail" : 0,
+      "toneFrames" : 162
+    },
+    {
+      "id" : "X-c2-trim-aac-bars-psnr",
+      "maxBarErrPx" : 1,
+      "name" : "디코딩 막대 높이 − 렌더 막대 높이 최대 오차, PSNR(진단)",
+      "psnrMeanDb" : 50.763500000000001,
+      "psnrMinDb" : 38.083199999999998,
+      "result" : "RECORD"
+    },
+    {
+      "clicks" : [
+        {
+          "delta" : 0,
+          "nExp" : 46,
+          "nObs" : 46,
+          "tA" : 1.5166999999999999,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 1.5166999999999999
+        },
+        {
+          "delta" : 0,
+          "nExp" : 256,
+          "nObs" : 256,
+          "tA" : 8.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 8.5167000000000002
+        }
+      ],
+      "id" : "X-c2-trim-aac-sync",
+      "name" : "스펙트럼 반응 |n_obs − n_exp| ≤ 1 (n_exp = floor(t_a·30)+1)",
+      "result" : "PASS"
+    },
+    {
+      "audioFirstPTS" : 0,
+      "audioFormat" : "aac  48000.0Hz ch=2 bits=0",
+      "audioFrames" : 480000,
+      "audioTrackRange" : [
+        0,
+        10
+      ],
+      "failures" : [
+
+      ],
+      "id" : "X-c2-trim-aac-audio",
+      "name" : "내보낸 오디오: 기대 톤 존재·비기대 톤 부재, U 포함 여부",
+      "primingTrimFrames" : -1,
+      "result" : "PASS",
+      "u4700Amp" : 0.20000000000000001
+    },
+    {
+      "audioReadyCallbacks" : 4,
+      "bytes" : 2143833,
+      "distinctPoolBuffers" : 5,
+      "duringExport" : {
+        "destExistsDuringExport" : false,
+        "tempDirsDuringExport" : 1
+      },
+      "error" : "-",
+      "finalProgress" : 1,
+      "id" : "X-c2-trim-lpcm-export",
+      "maxAudioBufferFrames" : 8192,
+      "name" : "내보내기 완료·승격",
+      "peakFootprintMiB" : 141.36019999999999,
+      "progressMonotonic" : true,
+      "result" : "PASS",
+      "startFootprintMiB" : 63.797600000000003,
+      "videoReadyCallbacks" : 283,
+      "wallS" : 1.5062
+    },
+    {
+      "codeMismatches" : 0,
+      "frames" : 300,
+      "id" : "X-c2-trim-lpcm-frames",
+      "name" : "프레임 수 300, PTS = n\/30 정확, 프레임 코드 = n",
+      "ptsExact" : true,
+      "result" : "PASS",
+      "videoFormat" : {
+        "codec" : "avc1",
+        "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+        "CVImageBufferTransferFunction" : "ITU_R_709_2",
+        "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+        "dimensions" : "1920x1080"
+      },
+      "videoTrackRange" : [
+        0,
+        10
+      ]
+    },
+    {
+      "count" : 180,
+      "first" : 60,
+      "id" : "X-c2-trim-lpcm-caption",
+      "last" : 239,
+      "name" : "디코딩 자막 첫\/마지막 표시 프레임 = 60\/239",
+      "result" : "PASS"
+    },
+    {
+      "id" : "X-c2-trim-lpcm-spectrum",
+      "name" : "디코딩 막대: 톤 구간 기대 밴드 최대, 무음 구간 막대 ≤ 3px",
+      "quietFrames" : 117,
+      "quietMaxBarPx" : 0,
+      "result" : "PASS",
+      "toneFail" : 0,
+      "toneFrames" : 162
+    },
+    {
+      "id" : "X-c2-trim-lpcm-bars-psnr",
+      "maxBarErrPx" : 1,
+      "name" : "디코딩 막대 높이 − 렌더 막대 높이 최대 오차, PSNR(진단)",
+      "psnrMeanDb" : 50.763500000000001,
+      "psnrMinDb" : 38.083199999999998,
+      "result" : "RECORD"
+    },
+    {
+      "clicks" : [
+        {
+          "delta" : 0,
+          "nExp" : 46,
+          "nObs" : 46,
+          "tA" : 1.5166999999999999,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 1.5166999999999999
+        },
+        {
+          "delta" : 0,
+          "nExp" : 256,
+          "nObs" : 256,
+          "tA" : 8.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 8.5167000000000002
+        }
+      ],
+      "id" : "X-c2-trim-lpcm-sync",
+      "name" : "스펙트럼 반응 |n_obs − n_exp| ≤ 1 (n_exp = floor(t_a·30)+1)",
+      "result" : "PASS"
+    },
+    {
+      "audioFirstPTS" : 0,
+      "audioFormat" : "lpcm 48000.0Hz ch=2 bits=16",
+      "audioFrames" : 480000,
+      "audioTrackRange" : [
+        0,
+        10
+      ],
+      "failures" : [
+
+      ],
+      "id" : "X-c2-trim-lpcm-audio",
+      "name" : "내보낸 오디오: 기대 톤 존재·비기대 톤 부재, U 포함 여부",
+      "primingTrimFrames" : -1,
+      "result" : "PASS",
+      "u4700Amp" : 0.19989999999999999
+    },
+    {
+      "audioReadyCallbacks" : 8,
+      "bytes" : 373236,
+      "distinctPoolBuffers" : 7,
+      "duringExport" : {
+        "destExistsDuringExport" : false,
+        "tempDirsDuringExport" : 1
+      },
+      "error" : "-",
+      "finalProgress" : 1,
+      "id" : "X-c3-offset-aac-export",
+      "maxAudioBufferFrames" : 8192,
+      "name" : "내보내기 완료·승격",
+      "peakFootprintMiB" : 143.3133,
+      "progressMonotonic" : true,
+      "result" : "PASS",
+      "startFootprintMiB" : 65.969499999999996,
+      "videoReadyCallbacks" : 284,
+      "wallS" : 1.5037
+    },
+    {
+      "codeMismatches" : 0,
+      "frames" : 300,
+      "id" : "X-c3-offset-aac-frames",
+      "name" : "프레임 수 300, PTS = n\/30 정확, 프레임 코드 = n",
+      "ptsExact" : true,
+      "result" : "PASS",
+      "videoFormat" : {
+        "codec" : "avc1",
+        "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+        "CVImageBufferTransferFunction" : "ITU_R_709_2",
+        "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+        "dimensions" : "1920x1080"
+      },
+      "videoTrackRange" : [
+        0,
+        10
+      ]
+    },
+    {
+      "count" : 180,
+      "first" : 60,
+      "id" : "X-c3-offset-aac-caption",
+      "last" : 239,
+      "name" : "디코딩 자막 첫\/마지막 표시 프레임 = 60\/239",
+      "result" : "PASS"
+    },
+    {
+      "id" : "X-c3-offset-aac-spectrum",
+      "name" : "디코딩 막대: 톤 구간 기대 밴드 최대, 무음 구간 막대 ≤ 3px",
+      "quietFrames" : 60,
+      "quietMaxBarPx" : 0,
+      "result" : "PASS",
+      "toneFail" : 0,
+      "toneFrames" : 162
+    },
+    {
+      "id" : "X-c3-offset-aac-bars-psnr",
+      "maxBarErrPx" : 1,
+      "name" : "디코딩 막대 높이 − 렌더 막대 높이 최대 오차, PSNR(진단)",
+      "psnrMeanDb" : 48.661499999999997,
+      "psnrMinDb" : 38.846499999999999,
+      "result" : "RECORD"
+    },
+    {
+      "clicks" : [
+        {
+          "delta" : 0,
+          "nExp" : 166,
+          "nObs" : 166,
+          "tA" : 5.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 5.5167000000000002
+        },
+        {
+          "delta" : 0,
+          "nExp" : 196,
+          "nObs" : 196,
+          "tA" : 6.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 6.5167000000000002
+        },
+        {
+          "delta" : 0,
+          "nExp" : 256,
+          "nObs" : 256,
+          "tA" : 8.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 8.5167000000000002
+        }
+      ],
+      "id" : "X-c3-offset-aac-sync",
+      "name" : "스펙트럼 반응 |n_obs − n_exp| ≤ 1 (n_exp = floor(t_a·30)+1)",
+      "result" : "PASS"
+    },
+    {
+      "audioFirstPTS" : 0,
+      "audioFormat" : "aac  48000.0Hz ch=2 bits=0",
+      "audioFrames" : 480000,
+      "audioTrackRange" : [
+        0,
+        10
+      ],
+      "failures" : [
+
+      ],
+      "id" : "X-c3-offset-aac-audio",
+      "name" : "내보낸 오디오: 기대 톤 존재·비기대 톤 부재, U 포함 여부",
+      "primingTrimFrames" : -1,
+      "result" : "PASS",
+      "u4700Amp" : 0.2001
+    },
+    {
+      "audioReadyCallbacks" : 4,
+      "bytes" : 2155889,
+      "distinctPoolBuffers" : 5,
+      "duringExport" : {
+        "destExistsDuringExport" : false,
+        "tempDirsDuringExport" : 1
+      },
+      "error" : "-",
+      "finalProgress" : 1,
+      "id" : "X-c3-offset-lpcm-export",
+      "maxAudioBufferFrames" : 8192,
+      "name" : "내보내기 완료·승격",
+      "peakFootprintMiB" : 148.2664,
+      "progressMonotonic" : true,
+      "result" : "PASS",
+      "startFootprintMiB" : 67.610100000000003,
+      "videoReadyCallbacks" : 279,
+      "wallS" : 2.7138
+    },
+    {
+      "codeMismatches" : 0,
+      "frames" : 300,
+      "id" : "X-c3-offset-lpcm-frames",
+      "name" : "프레임 수 300, PTS = n\/30 정확, 프레임 코드 = n",
+      "ptsExact" : true,
+      "result" : "PASS",
+      "videoFormat" : {
+        "codec" : "avc1",
+        "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+        "CVImageBufferTransferFunction" : "ITU_R_709_2",
+        "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+        "dimensions" : "1920x1080"
+      },
+      "videoTrackRange" : [
+        0,
+        10
+      ]
+    },
+    {
+      "count" : 180,
+      "first" : 60,
+      "id" : "X-c3-offset-lpcm-caption",
+      "last" : 239,
+      "name" : "디코딩 자막 첫\/마지막 표시 프레임 = 60\/239",
+      "result" : "PASS"
+    },
+    {
+      "id" : "X-c3-offset-lpcm-spectrum",
+      "name" : "디코딩 막대: 톤 구간 기대 밴드 최대, 무음 구간 막대 ≤ 3px",
+      "quietFrames" : 60,
+      "quietMaxBarPx" : 0,
+      "result" : "PASS",
+      "toneFail" : 0,
+      "toneFrames" : 162
+    },
+    {
+      "id" : "X-c3-offset-lpcm-bars-psnr",
+      "maxBarErrPx" : 1,
+      "name" : "디코딩 막대 높이 − 렌더 막대 높이 최대 오차, PSNR(진단)",
+      "psnrMeanDb" : 48.661499999999997,
+      "psnrMinDb" : 38.846499999999999,
+      "result" : "RECORD"
+    },
+    {
+      "clicks" : [
+        {
+          "delta" : 0,
+          "nExp" : 166,
+          "nObs" : 166,
+          "tA" : 5.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 5.5167000000000002
+        },
+        {
+          "delta" : 0,
+          "nExp" : 196,
+          "nObs" : 196,
+          "tA" : 6.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 6.5167000000000002
+        },
+        {
+          "delta" : 0,
+          "nExp" : 256,
+          "nObs" : 256,
+          "tA" : 8.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 8.5167000000000002
+        }
+      ],
+      "id" : "X-c3-offset-lpcm-sync",
+      "name" : "스펙트럼 반응 |n_obs − n_exp| ≤ 1 (n_exp = floor(t_a·30)+1)",
+      "result" : "PASS"
+    },
+    {
+      "audioFirstPTS" : 0,
+      "audioFormat" : "lpcm 48000.0Hz ch=2 bits=16",
+      "audioFrames" : 480000,
+      "audioTrackRange" : [
+        0,
+        10
+      ],
+      "failures" : [
+
+      ],
+      "id" : "X-c3-offset-lpcm-audio",
+      "name" : "내보낸 오디오: 기대 톤 존재·비기대 톤 부재, U 포함 여부",
+      "primingTrimFrames" : -1,
+      "result" : "PASS",
+      "u4700Amp" : 0.20000000000000001
+    },
+    {
+      "audioReadyCallbacks" : 8,
+      "bytes" : 349356,
+      "distinctPoolBuffers" : 7,
+      "duringExport" : {
+        "destExistsDuringExport" : false,
+        "tempDirsDuringExport" : 1
+      },
+      "error" : "-",
+      "finalProgress" : 1,
+      "id" : "X-c4-trim-offset-aac-export",
+      "maxAudioBufferFrames" : 8192,
+      "name" : "내보내기 완료·승격",
+      "peakFootprintMiB" : 147.03210000000001,
+      "progressMonotonic" : true,
+      "result" : "PASS",
+      "startFootprintMiB" : 71.094499999999996,
+      "videoReadyCallbacks" : 280,
+      "wallS" : 1.4988999999999999
+    },
+    {
+      "codeMismatches" : 0,
+      "frames" : 300,
+      "id" : "X-c4-trim-offset-aac-frames",
+      "name" : "프레임 수 300, PTS = n\/30 정확, 프레임 코드 = n",
+      "ptsExact" : true,
+      "result" : "PASS",
+      "videoFormat" : {
+        "codec" : "avc1",
+        "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+        "CVImageBufferTransferFunction" : "ITU_R_709_2",
+        "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+        "dimensions" : "1920x1080"
+      },
+      "videoTrackRange" : [
+        0,
+        10
+      ]
+    },
+    {
+      "count" : 180,
+      "first" : 60,
+      "id" : "X-c4-trim-offset-aac-caption",
+      "last" : 239,
+      "name" : "디코딩 자막 첫\/마지막 표시 프레임 = 60\/239",
+      "result" : "PASS"
+    },
+    {
+      "id" : "X-c4-trim-offset-aac-spectrum",
+      "name" : "디코딩 막대: 톤 구간 기대 밴드 최대, 무음 구간 막대 ≤ 3px",
+      "quietFrames" : 177,
+      "quietMaxBarPx" : 0,
+      "result" : "PASS",
+      "toneFail" : 0,
+      "toneFrames" : 102
+    },
+    {
+      "id" : "X-c4-trim-offset-aac-bars-psnr",
+      "maxBarErrPx" : 0,
+      "name" : "디코딩 막대 높이 − 렌더 막대 높이 최대 오차, PSNR(진단)",
+      "psnrMeanDb" : 51.2121,
+      "psnrMinDb" : 38.935499999999998,
+      "result" : "RECORD"
+    },
+    {
+      "clicks" : [
+        {
+          "delta" : 0,
+          "nExp" : 106,
+          "nObs" : 106,
+          "tA" : 3.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 3.5167000000000002
+        }
+      ],
+      "id" : "X-c4-trim-offset-aac-sync",
+      "name" : "스펙트럼 반응 |n_obs − n_exp| ≤ 1 (n_exp = floor(t_a·30)+1)",
+      "result" : "PASS"
+    },
+    {
+      "audioFirstPTS" : 0,
+      "audioFormat" : "aac  48000.0Hz ch=2 bits=0",
+      "audioFrames" : 480000,
+      "audioTrackRange" : [
+        0,
+        10
+      ],
+      "failures" : [
+
+      ],
+      "id" : "X-c4-trim-offset-aac-audio",
+      "name" : "내보낸 오디오: 기대 톤 존재·비기대 톤 부재, U 포함 여부",
+      "primingTrimFrames" : -1,
+      "result" : "PASS",
+      "u4700Amp" : 0.20000000000000001
+    },
+    {
+      "audioReadyCallbacks" : 4,
+      "bytes" : 2133609,
+      "distinctPoolBuffers" : 5,
+      "duringExport" : {
+        "destExistsDuringExport" : false,
+        "tempDirsDuringExport" : 1
+      },
+      "error" : "-",
+      "finalProgress" : 1,
+      "id" : "X-c4-trim-offset-lpcm-export",
+      "maxAudioBufferFrames" : 8192,
+      "name" : "내보내기 완료·승격",
+      "peakFootprintMiB" : 130.8133,
+      "progressMonotonic" : true,
+      "result" : "PASS",
+      "startFootprintMiB" : 52.594499999999996,
+      "videoReadyCallbacks" : 280,
+      "wallS" : 1.5013000000000001
+    },
+    {
+      "codeMismatches" : 0,
+      "frames" : 300,
+      "id" : "X-c4-trim-offset-lpcm-frames",
+      "name" : "프레임 수 300, PTS = n\/30 정확, 프레임 코드 = n",
+      "ptsExact" : true,
+      "result" : "PASS",
+      "videoFormat" : {
+        "codec" : "avc1",
+        "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+        "CVImageBufferTransferFunction" : "ITU_R_709_2",
+        "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+        "dimensions" : "1920x1080"
+      },
+      "videoTrackRange" : [
+        0,
+        10
+      ]
+    },
+    {
+      "count" : 180,
+      "first" : 60,
+      "id" : "X-c4-trim-offset-lpcm-caption",
+      "last" : 239,
+      "name" : "디코딩 자막 첫\/마지막 표시 프레임 = 60\/239",
+      "result" : "PASS"
+    },
+    {
+      "id" : "X-c4-trim-offset-lpcm-spectrum",
+      "name" : "디코딩 막대: 톤 구간 기대 밴드 최대, 무음 구간 막대 ≤ 3px",
+      "quietFrames" : 177,
+      "quietMaxBarPx" : 0,
+      "result" : "PASS",
+      "toneFail" : 0,
+      "toneFrames" : 102
+    },
+    {
+      "id" : "X-c4-trim-offset-lpcm-bars-psnr",
+      "maxBarErrPx" : 0,
+      "name" : "디코딩 막대 높이 − 렌더 막대 높이 최대 오차, PSNR(진단)",
+      "psnrMeanDb" : 51.2121,
+      "psnrMinDb" : 38.935499999999998,
+      "result" : "RECORD"
+    },
+    {
+      "clicks" : [
+        {
+          "delta" : 0,
+          "nExp" : 106,
+          "nObs" : 106,
+          "tA" : 3.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 3.5167000000000002
+        }
+      ],
+      "id" : "X-c4-trim-offset-lpcm-sync",
+      "name" : "스펙트럼 반응 |n_obs − n_exp| ≤ 1 (n_exp = floor(t_a·30)+1)",
+      "result" : "PASS"
+    },
+    {
+      "audioFirstPTS" : 0,
+      "audioFormat" : "lpcm 48000.0Hz ch=2 bits=16",
+      "audioFrames" : 480000,
+      "audioTrackRange" : [
+        0,
+        10
+      ],
+      "failures" : [
+
+      ],
+      "id" : "X-c4-trim-offset-lpcm-audio",
+      "name" : "내보낸 오디오: 기대 톤 존재·비기대 톤 부재, U 포함 여부",
+      "primingTrimFrames" : -1,
+      "result" : "PASS",
+      "u4700Amp" : 0.20000000000000001
+    },
+    {
+      "id" : "T1",
+      "name" : "LPCM 대조: 클릭 onset = 기대 시각(±1샘플), AAC − LPCM 차이 기록",
+      "result" : "PASS",
+      "rows" : [
+        {
+          "aacMinusLpcmMs" : 0,
+          "case" : "c1-baseline",
+          "lpcmMinusExpMs" : 0,
+          "tA_aac" : 3.5167000000000002,
+          "tA_lpcm" : 3.5167000000000002,
+          "tExp" : 3.5167000000000002
+        },
+        {
+          "aacMinusLpcmMs" : 0,
+          "case" : "c1-baseline",
+          "lpcmMinusExpMs" : 0,
+          "tA_aac" : 4.5167000000000002,
+          "tA_lpcm" : 4.5167000000000002,
+          "tExp" : 4.5167000000000002
+        },
+        {
+          "aacMinusLpcmMs" : 0,
+          "case" : "c1-baseline",
+          "lpcmMinusExpMs" : 0,
+          "tA_aac" : 6.5167000000000002,
+          "tA_lpcm" : 6.5167000000000002,
+          "tExp" : 6.5167000000000002
+        },
+        {
+          "aacMinusLpcmMs" : 0,
+          "case" : "c2-trim",
+          "lpcmMinusExpMs" : 0,
+          "tA_aac" : 1.5166999999999999,
+          "tA_lpcm" : 1.5166999999999999,
+          "tExp" : 1.5166999999999999
+        },
+        {
+          "aacMinusLpcmMs" : 0,
+          "case" : "c2-trim",
+          "lpcmMinusExpMs" : 0,
+          "tA_aac" : 8.5167000000000002,
+          "tA_lpcm" : 8.5167000000000002,
+          "tExp" : 8.5167000000000002
+        },
+        {
+          "aacMinusLpcmMs" : 0,
+          "case" : "c3-offset",
+          "lpcmMinusExpMs" : 0,
+          "tA_aac" : 5.5167000000000002,
+          "tA_lpcm" : 5.5167000000000002,
+          "tExp" : 5.5167000000000002
+        },
+        {
+          "aacMinusLpcmMs" : 0,
+          "case" : "c3-offset",
+          "lpcmMinusExpMs" : 0,
+          "tA_aac" : 6.5167000000000002,
+          "tA_lpcm" : 6.5167000000000002,
+          "tExp" : 6.5167000000000002
+        },
+        {
+          "aacMinusLpcmMs" : 0,
+          "case" : "c3-offset",
+          "lpcmMinusExpMs" : 0,
+          "tA_aac" : 8.5167000000000002,
+          "tA_lpcm" : 8.5167000000000002,
+          "tExp" : 8.5167000000000002
+        },
+        {
+          "aacMinusLpcmMs" : 0,
+          "case" : "c4-trim-offset",
+          "lpcmMinusExpMs" : 0,
+          "tA_aac" : 3.5167000000000002,
+          "tA_lpcm" : 3.5167000000000002,
+          "tExp" : 3.5167000000000002
+        }
+      ]
+    },
+    {
+      "audioReadyCallbacks" : 8,
+      "bytes" : 322903,
+      "distinctPoolBuffers" : 7,
+      "duringExport" : {
+        "destExistsDuringExport" : false,
+        "tempDirsDuringExport" : 1
+      },
+      "error" : "-",
+      "finalProgress" : 1,
+      "id" : "X-c1-noU-aac-export",
+      "maxAudioBufferFrames" : 8192,
+      "name" : "내보내기 완료·승격",
+      "peakFootprintMiB" : 139.03210000000001,
+      "progressMonotonic" : true,
+      "result" : "PASS",
+      "startFootprintMiB" : 55.094499999999996,
+      "videoReadyCallbacks" : 283,
+      "wallS" : 1.506
+    },
+    {
+      "codeMismatches" : 0,
+      "frames" : 300,
+      "id" : "X-c1-noU-aac-frames",
+      "name" : "프레임 수 300, PTS = n\/30 정확, 프레임 코드 = n",
+      "ptsExact" : true,
+      "result" : "PASS",
+      "videoFormat" : {
+        "codec" : "avc1",
+        "CVImageBufferColorPrimaries" : "ITU_R_709_2",
+        "CVImageBufferTransferFunction" : "ITU_R_709_2",
+        "CVImageBufferYCbCrMatrix" : "ITU_R_709_2",
+        "dimensions" : "1920x1080"
+      },
+      "videoTrackRange" : [
+        0,
+        10
+      ]
+    },
+    {
+      "count" : 180,
+      "first" : 60,
+      "id" : "X-c1-noU-aac-caption",
+      "last" : 239,
+      "name" : "디코딩 자막 첫\/마지막 표시 프레임 = 60\/239",
+      "result" : "PASS"
+    },
+    {
+      "id" : "X-c1-noU-aac-spectrum",
+      "name" : "디코딩 막대: 톤 구간 기대 밴드 최대, 무음 구간 막대 ≤ 3px",
+      "quietFrames" : 57,
+      "quietMaxBarPx" : 0,
+      "result" : "PASS",
+      "toneFail" : 0,
+      "toneFrames" : 162
+    },
+    {
+      "id" : "X-c1-noU-aac-bars-psnr",
+      "maxBarErrPx" : 1,
+      "name" : "디코딩 막대 높이 − 렌더 막대 높이 최대 오차, PSNR(진단)",
+      "psnrMeanDb" : 49.121099999999998,
+      "psnrMinDb" : 38.7881,
+      "result" : "RECORD"
+    },
+    {
+      "clicks" : [
+        {
+          "delta" : 0,
+          "nExp" : 106,
+          "nObs" : 106,
+          "tA" : 3.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 3.5167000000000002
+        },
+        {
+          "delta" : 0,
+          "nExp" : 136,
+          "nObs" : 136,
+          "tA" : 4.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 4.5167000000000002
+        },
+        {
+          "delta" : 0,
+          "nExp" : 196,
+          "nObs" : 196,
+          "tA" : 6.5167000000000002,
+          "tA_minus_tExp_ms" : 0,
+          "tExp" : 6.5167000000000002
+        }
+      ],
+      "id" : "X-c1-noU-aac-sync",
+      "name" : "스펙트럼 반응 |n_obs − n_exp| ≤ 1 (n_exp = floor(t_a·30)+1)",
+      "result" : "PASS"
+    },
+    {
+      "audioFirstPTS" : 0,
+      "audioFormat" : "aac  48000.0Hz ch=2 bits=0",
+      "audioFrames" : 480000,
+      "audioTrackRange" : [
+        0,
+        10
+      ],
+      "failures" : [
+
+      ],
+      "id" : "X-c1-noU-aac-audio",
+      "name" : "내보낸 오디오: 기대 톤 존재·비기대 톤 부재, U 포함 여부",
+      "primingTrimFrames" : -1,
+      "result" : "PASS",
+      "u4700Amp" : 0.00020000000000000001
+    },
+    {
+      "id" : "X-isolation",
+      "maxDiffPx" : 0,
+      "name" : "격리(내보내기): U 유무에 따른 디코딩 막대 높이 차이",
+      "result" : "PASS"
+    },
+    {
+      "distinctPoolBuffers" : [
+        6,
+        6,
+        6
+      ],
+      "id" : "M1",
+      "name" : "c1 AAC 10초 내보내기 벽시계 시간·최대 footprint (기록만, 기준 없음)",
+      "peakFootprintMiB" : [
+        132.6414,
+        135.1258,
+        139.40710000000001
+      ],
+      "result" : "RECORD",
+      "startFootprintMiB" : [
+        50.000700000000002,
+        55.578899999999997,
+        59.328899999999997
+      ],
+      "wallS" : [
+        1.6254999999999999,
+        1.4982,
+        1.492
+      ]
+    },
+    {
+      "id" : "P1",
+      "name" : "취소(50%): 최종 파일 없음, 임시 정리, 중지 후 추가 쓰기 없음",
+      "result" : "PASS",
+      "runs" : [
+        {
+          "destExists" : false,
+          "framesAtStop" : 150,
+          "leftoverTemp" : 0,
+          "outcome" : "cancelled",
+          "rep" : 1,
+          "tAckMs" : 0.0001,
+          "tCleanupMs" : 0.23630000000000001,
+          "tStopMs" : 71.535499999999999,
+          "tWorkersStoppedMs" : 8.7148000000000003
+        },
+        {
+          "destExists" : false,
+          "framesAtStop" : 150,
+          "leftoverTemp" : 0,
+          "outcome" : "cancelled",
+          "rep" : 2,
+          "tAckMs" : 0.00059999999999999995,
+          "tCleanupMs" : 0.34949999999999998,
+          "tStopMs" : 70.587699999999998,
+          "tWorkersStoppedMs" : 7.2971000000000004
+        },
+        {
+          "destExists" : false,
+          "framesAtStop" : 150,
+          "leftoverTemp" : 0,
+          "outcome" : "cancelled",
+          "rep" : 3,
+          "tAckMs" : 0.00040000000000000002,
+          "tCleanupMs" : 0.29339999999999999,
+          "tStopMs" : 69.974999999999994,
+          "tWorkersStoppedMs" : 6.9269999999999996
+        }
+      ]
+    },
+    {
+      "error" : "injectedFailure at frame 100",
+      "framesAppended" : 100,
+      "id" : "P2",
+      "name" : "렌더 중 실패 주입(프레임 100): 실패 보고, 최종 파일 없음, 임시 정리",
+      "result" : "PASS"
+    },
+    {
+      "error" : "destinationParentNotWritable: \/Volumes\/Data\/dev\/ON-THE-FRAME\/experiments\/e1-fhd\/artifacts\/runs\/2026-10-09T131455Z\/protect\/readonly-dir",
+      "id" : "P3",
+      "name" : "쓰기 불가 디렉터리: 시작 전 거부, 임시 미생성",
+      "result" : "PASS"
+    },
+    {
+      "error" : "invalidSource: not readable: \/Volumes\/Data\/dev\/ON-THE-FRAME\/experiments\/e1-fhd\/artifacts\/fixtures\/does-not-exist.wav",
+      "id" : "P4",
+      "name" : "원본 없음: 실패 보고, 임시 미생성",
+      "result" : "PASS"
+    },
+    {
+      "destExists" : true,
+      "error" : "-",
+      "id" : "P5",
+      "name" : "내보내기 중 원본 이름 변경(관찰): 결과 기록, 원본 복구·해시 불변",
+      "outcome" : "completed",
+      "renameError" : "none",
+      "result" : "PASS"
+    },
+    {
+      "error" : "destinationExists: \/Volumes\/Data\/dev\/ON-THE-FRAME\/experiments\/e1-fhd\/artifacts\/runs\/2026-10-09T131455Z\/protect\/existing-destination.mp4",
+      "id" : "P6",
+      "name" : "대상 충돌(기존 파일): 시작 전 거부, 기존 파일 해시 불변",
+      "result" : "PASS"
+    },
+    {
+      "error" : "destinationIsSource: \/Volumes\/Data\/dev\/ON-THE-FRAME\/experiments\/e1-fhd\/artifacts\/fixtures\/S-selected.wav",
+      "id" : "P7",
+      "name" : "대상 = 원본 경로: 시작 전 거부, 원본 해시 불변",
+      "result" : "PASS"
+    },
+    {
+      "error" : "promotionConflict: \/Volumes\/Data\/dev\/ON-THE-FRAME\/experiments\/e1-fhd\/artifacts\/runs\/2026-10-09T131455Z\/protect\/conflict-during-export.mp4",
+      "id" : "P8",
+      "name" : "내보내기 중 대상 충돌: 승격 거부(RENAME_EXCL), 충돌 파일 보존, 임시 정리",
+      "result" : "PASS"
+    },
+    {
+      "id" : "P9",
+      "name" : "기존 대상 sentinel 해시 불변(전체 보호 검사 후)",
+      "result" : "PASS",
+      "sha256" : "c033e25689699191"
+    },
+    {
+      "id" : "P10",
+      "name" : "원본 fixture 해시 불변(S, U, probe)",
+      "result" : "PASS"
+    },
+    {
+      "id" : "P11",
+      "leftovers" : [
+
+      ],
+      "name" : "실행 디렉터리 전체에 남은 실험 임시 디렉터리 없음",
+      "result" : "PASS"
+    }
+  ],
+  "sections" : {
+    "captionLayout" : {
+      "colorSpace" : "sRGB (context); buffers untagged",
+      "font" : "AppleSDGothicNeo-Bold",
+      "glyphCount" : 23,
+      "inkRectTopLeft" : [
+        483.92000000000002,
+        948.03199999999993,
+        951.55200000000025,
+        57.024000000000001
+      ],
+      "missingGlyphs" : 0,
+      "pixelFormat" : "32BGRA premultipliedFirst byteOrder32Little",
+      "runFonts" : [
+        "AppleSDGothicNeo-Bold",
+        "AppleSDGothicNeo-Bold"
+      ]
+    },
+    "fixtures" : [
+      {
+        "bytes" : 3840044,
+        "createdThisRun" : false,
+        "file" : "artifacts\/fixtures\/S-selected.wav",
+        "regeneratedSha256" : "47f1d4ffd8d3eedd2284f37dbf26d4a73c4978cdbcc6e25ad026c845f7db2249",
+        "sha256" : "47f1d4ffd8d3eedd2284f37dbf26d4a73c4978cdbcc6e25ad026c845f7db2249",
+        "spec" : {
+          "clickAmplitude" : 0.80000000000000004,
+          "clickLengthSamples" : 96,
+          "clickSeed" : 1579075565,
+          "clickStartSamples" : [
+            168800,
+            216800,
+            312800,
+            648800,
+            792800,
+            888800
+          ],
+          "fadeSamples" : 240,
+          "format" : "WAVE LPCM s16le 48000 Hz stereo (L=R)",
+          "lengthSamples" : 960000,
+          "name" : "S-selected",
+          "tones" : [
+            {
+              "amplitude" : 0.25,
+              "endSample" : 144000,
+              "hz" : 135,
+              "startSample" : 0
+            },
+            {
+              "amplitude" : 0.25,
+              "endSample" : 384000,
+              "hz" : 600,
+              "startSample" : 240000
+            },
+            {
+              "amplitude" : 0.25,
+              "endSample" : 720000,
+              "hz" : 2700,
+              "startSample" : 576000
+            }
+          ]
+        }
+      },
+      {
+        "bytes" : 3840044,
+        "createdThisRun" : false,
+        "file" : "artifacts\/fixtures\/U-unrelated.wav",
+        "regeneratedSha256" : "2ebdc9fd31fcd38eabf9ded3232b9194ff4c5f615ee463d1ee32420ce72aef7c",
+        "sha256" : "2ebdc9fd31fcd38eabf9ded3232b9194ff4c5f615ee463d1ee32420ce72aef7c",
+        "spec" : {
+          "clickAmplitude" : 0.80000000000000004,
+          "clickLengthSamples" : 96,
+          "clickSeed" : 195936478,
+          "clickStartSamples" : [
+            60000,
+            156000,
+            252000,
+            348000,
+            444000,
+            540000,
+            636000,
+            732000,
+            828000,
+            924000
+          ],
+          "fadeSamples" : 240,
+          "format" : "WAVE LPCM s16le 48000 Hz stereo (L=R)",
+          "lengthSamples" : 960000,
+          "name" : "U-unrelated",
+          "tones" : [
+            {
+              "amplitude" : 0.20000000000000001,
+              "endSample" : 960000,
+              "hz" : 4700,
+              "startSample" : 0
+            }
+          ]
+        }
+      },
+      {
+        "bytes" : 3840044,
+        "createdThisRun" : false,
+        "file" : "artifacts\/fixtures\/S-rename-probe.wav",
+        "regeneratedSha256" : "47f1d4ffd8d3eedd2284f37dbf26d4a73c4978cdbcc6e25ad026c845f7db2249",
+        "sha256" : "47f1d4ffd8d3eedd2284f37dbf26d4a73c4978cdbcc6e25ad026c845f7db2249",
+        "spec" : {
+          "clickAmplitude" : 0.80000000000000004,
+          "clickLengthSamples" : 96,
+          "clickSeed" : 1579075565,
+          "clickStartSamples" : [
+            168800,
+            216800,
+            312800,
+            648800,
+            792800,
+            888800
+          ],
+          "fadeSamples" : 240,
+          "format" : "WAVE LPCM s16le 48000 Hz stereo (L=R)",
+          "lengthSamples" : 960000,
+          "name" : "S-selected",
+          "tones" : [
+            {
+              "amplitude" : 0.25,
+              "endSample" : 144000,
+              "hz" : 135,
+              "startSample" : 0
+            },
+            {
+              "amplitude" : 0.25,
+              "endSample" : 384000,
+              "hz" : 600,
+              "startSample" : 240000
+            },
+            {
+              "amplitude" : 0.25,
+              "endSample" : 720000,
+              "hz" : 2700,
+              "startSample" : 576000
+            }
+          ]
+        }
+      }
+    ],
+    "processPeakFootprintNowMiB" : 51.000799999999998,
+    "renderHashesCase4WithU" : {
+      "0" : "45c7b14d122b88007645f3b483f5334fa439afaf3a584e9b65325efbd4211fcf",
+      "59" : "adce1b04cb0cd46509eeb8913d5b99a069eaf9af7450e74290b8a928e15dc57e",
+      "60" : "ae48009d14624986226c9fd8a61d157ef25c5948a4c32b6cac44a9821485e010",
+      "105" : "2bc8a65923330b250d5f92efdb599dfd93ff4f2e3c433890964935a6729c9ce2",
+      "106" : "fadc28fc65feeb936bead7b8f465f27df9fe6a40fed2f056ecb2e57a33f7f3e2",
+      "120" : "0c808df5922ce766a00a49d296c9828d184e826d9d08f2655934469e34bdcd93",
+      "180" : "f8c6f90835dbf840184e7868968c8cbf9d955e06fe70cde5993df4c41f35f627",
+      "239" : "0c5f3d16126ba32bf653f936621c671f3ab65e4ea68c7fa5494c47e5bb15c05e",
+      "240" : "14ee87e6f032a59936d76270def2fb9d524af60a0874b8cf5e239aeea996bd46",
+      "299" : "e2d05cc092ceeeb9420247e64960eb25a417b3cfe03250ddb5e8f6ca478165c3"
+    },
+    "run" : {
+      "cpuCount" : 8,
+      "id" : "2026-10-09T131455Z",
+      "os" : "Version 26.6.2 (Build 25G83)",
+      "spectrumParams" : {
+        "bandCount" : 32,
+        "bandHighHz" : 16000,
+        "bandLowHz" : 40,
+        "bandValue" : "max-bin-amplitude-dB-linear",
+        "channelMix" : "mean(L,R)",
+        "dbFloor" : -80,
+        "fftSize" : 4096,
+        "hop" : 400,
+        "sampleRate" : 48000,
+        "window" : "hann(periodic)",
+        "windowAlignment" : "trailing"
+      },
+      "startFootprintMiB" : 3.0630000000000002
+    },
+    "runDirBytes" : 14557184,
+    "summary" : {
+      "fail" : 0,
+      "failedIDs" : [
+
+      ],
+      "pass" : 98,
+      "record" : 10
+    },
+    "usageAfter" : {
+      ".build" : 447766528,
+      "artifacts\/cache" : 630784,
+      "artifacts\/fixtures" : 11526144,
+      "artifacts\/frames" : 163840,
+      "artifacts\/runs" : 29257728
+    },
+    "usageBefore" : {
+      ".build" : 447766528,
+      "artifacts\/cache" : 630784,
+      "artifacts\/fixtures" : 11526144,
+      "artifacts\/frames" : 163840,
+      "artifacts\/runs" : 14700544
+    },
+    "wallSecondsTotal" : 35.0777
+  }
+}
