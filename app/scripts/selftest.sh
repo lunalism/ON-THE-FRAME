@@ -5,7 +5,7 @@
 # 폴더 밖 접근 거부 확인용으로 app/selftest-work/outside-probe.txt를 둔다. 실행 폴더는 판정 뒤 지운다(KEEP=1이면 남김).
 set -euo pipefail
 cd "${0:A:h}/.."
-APP=.build/DerivedData/Build/Products/Debug/OnTheFrame.app
+APP=${APP:-.build/DerivedData/Build/Products/Debug/OnTheFrame.app}
 [[ -d $APP ]] || { echo "build first: scripts/build.sh"; exit 2 }
 swift build --package-path Engine --product otf-dev 2>&1 | grep -E "error|warning:" || true
 DEV=Engine/.build/debug/otf-dev

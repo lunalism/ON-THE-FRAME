@@ -44,7 +44,8 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                Text(store.projectName).font(.headline).padding(.horizontal, 6)
+                Text(store.projectName + (store.isDirty ? " •" : "")).font(.headline).padding(.horizontal, 6)
+                    .help(store.isDirty ? "저장하지 않은 변경 사항이 있습니다" : (store.projectURL?.path ?? "아직 저장하지 않은 프로젝트"))
             }
             // 목록·정보 패널 접기/펼치기(펼치면 이전 너비, 남는 폭은 프리뷰가 쓴다)
             ToolbarItemGroup(placement: .navigation) {
@@ -60,7 +61,8 @@ struct ContentView: View {
                     .help("MP4로 내보내기(⌘E)").disabled(!store.canExport)
             }
         }
-        .navigationTitle("ON THE FRAME")
+        .navigationTitle(store.windowTitle)
+        .onChange(of: store.isDirty) { _, _ in store.updateWindowDocumentState() }
         .background(WindowAccessor { store.attachEditorWindow($0) })
         // 가져오기·내보내기 진행은 창을 막지 않는 카드로 보인다(A-011). 두 작업은 차례로만 진행하므로 카드는 하나다.
         // 내보내기는 시작 시점 스냅샷이므로 편집을 계속해도 결과가 바뀌지 않는다.
@@ -145,7 +147,28 @@ struct MediaListView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("영상").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.vertical, 6)
-            if store.assets.isEmpty {
+            // 찾을 수 없는 원본(A-013): 따로 보이고 재연결을 권한다
+            if !store.missingMedia.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(store.timeline.media.filter { store.missingMedia[$0.id] != nil }) { r in
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(r.name).lineLimit(1).truncationMode(.middle)
+                                Text(store.missingMedia[r.id] ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                            Spacer()
+                            Button("미디어 재연결…") { store.relinkMedia(r.id) }.controlSize(.small)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("찾을 수 없는 원본 \(r.name)")
+                    }
+                }
+                .padding(8)
+                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                .padding(.horizontal, 8)
+            }
+            if store.assets.isEmpty && store.missingMedia.isEmpty {
                 VStack(spacing: 10) {
                     Spacer()
                     Image(systemName: "film.stack").font(.system(size: 30)).foregroundStyle(.tertiary)
@@ -184,6 +207,15 @@ struct PreviewPane: View {
             ZStack {
                 Color.black
                 PlayerLayerView(player: store.player)
+                // 찾을 수 없는 원본을 쓰는 구간: 의도한 빈틈과 구별해 알린다(A-013)
+                if let name = store.missingNameAtPlayhead {
+                    VStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 28)).foregroundStyle(.orange)
+                        Text("원본 미디어를 찾을 수 없는 구간입니다").foregroundStyle(.white)
+                        Text("\(name) — 파일 > 미디어 재연결…").font(.caption).foregroundStyle(.white.opacity(0.75))
+                    }
+                    .padding(12).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+                }
                 if store.timeline.isEmpty && store.durationFrames == 0 {   // 빈틈만 남은 타임라인은 검정(안내 없음)
                     VStack(spacing: 6) {
                         Image(systemName: "play.rectangle").font(.system(size: 34)).foregroundStyle(.white.opacity(0.35))

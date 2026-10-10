@@ -3,7 +3,7 @@
 # 결과 visual-result.json과 PNG(<실행 폴더>/visual/)는 KEEP=1이면 남긴다(사람이 보는 용도).
 set -euo pipefail
 cd "${0:A:h}/.."
-APP=.build/DerivedData/Build/Products/Debug/OnTheFrame.app
+APP=${APP:-.build/DerivedData/Build/Products/Debug/OnTheFrame.app}
 [[ -d $APP ]] || { echo "build first: scripts/build.sh"; exit 2 }
 swift build --package-path Engine --product otf-dev 2>&1 | grep -E "error|warning:" || true
 DEV=Engine/.build/debug/otf-dev
@@ -16,6 +16,7 @@ OPENPID=$!
 for i in {1..240}; do [[ -f $RUN/visual-result.json ]] && break; sleep 1; done
 wait $OPENPID || true
 [[ -f $RUN/visual-result.json ]] || { echo "no result (timeout)"; exit 1 }
+set +e   # 판정이 실패해도 아래 정리(실행 폴더 지우기)를 한다
 python3 - "$RUN/visual-result.json" <<'PY'
 import json, sys
 cs = json.load(open(sys.argv[1]))

@@ -3,7 +3,7 @@
 # 앱이 합성 마우스·키 이벤트로 편집하고, 마지막 내보내기를 otf-dev verify-lanes가 독립 기대값으로 판정한다.
 set -euo pipefail
 cd "${0:A:h}/.."
-APP=.build/DerivedData/Build/Products/Debug/OnTheFrame.app
+APP=${APP:-.build/DerivedData/Build/Products/Debug/OnTheFrame.app}
 [[ -d $APP ]] || { echo "build first: scripts/build.sh"; exit 2 }
 swift build --package-path Engine --product otf-dev 2>&1 | grep -E "error|warning:" || true
 DEV=Engine/.build/debug/otf-dev

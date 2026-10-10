@@ -41,6 +41,8 @@ struct TimelineDrawState: Equatable {
     var playhead: Int
     var insertion: Int?
     var proposalStart: Int?, proposalOK: Bool, proposalID: UUID?
+    /// 찾을 수 없는 원본(미디어 id)
+    var missing: Set<UUID>
     @MainActor init(store: ProjectStore) {
         timeline = store.timeline
         names = Dictionary(uniqueKeysWithValues: store.assets.map { ($0.id, $0.name) })
@@ -50,6 +52,8 @@ struct TimelineDrawState: Equatable {
         playhead = store.playhead
         insertion = store.moveInsertionIndex
         proposalStart = store.freeMoveProposal?.start; proposalOK = store.freeMoveProposal?.ok ?? true; proposalID = store.freeMoveProposal?.id
+        missing = Set(store.missingMedia.keys)
+        names = Dictionary(uniqueKeysWithValues: store.timeline.media.map { ($0.id, $0.name) })
     }
 }
 
@@ -282,6 +286,19 @@ final class TimelineNSView: NSView {
         (selected ? NSColor.controlAccentColor : NSColor.separatorColor).setStroke()
         path.lineWidth = selected ? 2 : 1
         path.stroke()
+        if st.missing.contains(c.mediaID) {   // 찾을 수 없는 원본: 빗금·"원본 없음"(빈틈과 구별)
+            NSGraphicsContext.saveGraphicsState()
+            path.addClip()
+            NSColor.systemOrange.withAlphaComponent(0.35).setStroke()
+            let hatch = NSBezierPath(); hatch.lineWidth = 2
+            var hx = r.minX - r.height
+            while hx < r.maxX { hatch.move(to: NSPoint(x: hx, y: r.minY)); hatch.line(to: NSPoint(x: hx + r.height, y: r.maxY)); hx += 10 }
+            hatch.stroke()
+            NSGraphicsContext.restoreGraphicsState()
+            if r.width > 70 {
+                NSString(string: "원본 없음").draw(at: NSPoint(x: r.minX + 6, y: r.maxY - 16), withAttributes: [.font: NSFont.systemFont(ofSize: 10, weight: .bold), .foregroundColor: NSColor.systemOrange])
+            }
+        }
         var labelX = r.minX + 6
         if c.link != nil, r.width > 20, let img = NSImage(systemSymbolName: "link", accessibilityDescription: "연결됨") {
             img.draw(in: NSRect(x: r.minX + 5, y: r.minY + 5, width: 11, height: 11)); labelX += 14

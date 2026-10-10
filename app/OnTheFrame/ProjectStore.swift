@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import AVFoundation
 import IOKit.pwr_mgt
 import Observation
@@ -14,8 +15,36 @@ final class ProjectStore {
     static let log = Logger(subsystem: "dev.ontheframe.app", category: "store")
 
     let settings = RenderSettings.m1
-    var projectName = "제목 없음"
-    private(set) var assets: [MediaAsset] = []
+    /// 쓸 수 있는(찾은) 원본 미디어. 프로젝트의 미디어 목록(timeline.media)과 검사 결과 캐시에서 만든다(refreshAssets).
+    var assets: [MediaAsset] = []
+    // MARK: 프로젝트(A-013)
+    /// 현재 프로젝트 파일 위치(처음 저장 전에는 nil)
+    var projectURL: URL?
+    var projectID = UUID()
+    /// 마지막으로 저장하거나 연 상태. 지금 상태와 다르면 저장하지 않은 변경이 있다(실행 취소로 돌아오면 사라짐).
+    var savedTimeline = Timeline()
+    var isDirty: Bool { history.timeline != savedTimeline }
+    var projectName: String { projectURL?.deletingPathExtension().lastPathComponent ?? "제목 없음" }
+    /// 창 제목: 프로젝트 이름과 저장하지 않은 변경 표시
+    var windowTitle: String { projectName + (isDirty ? " — 편집됨" : "") }
+    /// 찾을 수 없거나 쓸 수 없는 원본 미디어(미디어 id → 이유)
+    var missingMedia: [UUID: String] = [:]
+    /// 원본 경로(MediaRef.path) → 검사 결과(실제 위치). 재연결 실행 취소·다시 실행이 여기서 원본을 바꿔 낀다.
+    @ObservationIgnored var assetCache: [String: MediaAsset] = [:]
+    /// 미디어 id → 샌드박스 접근 북마크(저장 파일에 넣음)
+    @ObservationIgnored var bookmarks: [UUID: Data] = [:]
+    /// 이 프로젝트가 시작한 보안 범위 접근(프로젝트를 바꾸거나 앱을 끝낼 때 모두 멈춘다)
+    @ObservationIgnored var scopedURLs: [URL] = []
+    var recentProjects: [RecentProject] = []
+    #if DEBUG
+    /// 자체 검사 전용: 실제 저장 패널을 띄운 뒤 이 위치·이름으로 확인한다
+    @ObservationIgnored var savePanelAutoConfirmForTest: (directory: URL, name: String)?
+    @ObservationIgnored var autoConfirmTimer: Timer?
+    /// 자체 검사 전용: 다음 저장 패널이 확인으로 이 위치를 돌려준 것처럼 한다(패널을 띄우지 않음)
+    @ObservationIgnored var savePanelResultForTest: URL?
+    /// 자체 검사 전용: 다음 프로젝트 저장을 승격 직전에 실패시킨다
+    @ObservationIgnored var saveFailureForTest = false
+    #endif
     private(set) var history = EditHistory()
     var timeline: Timeline { history.timeline }
     /// 선택한 클립(주 선택). 연결된 짝도 함께 선택된 것으로 보인다(selectedIDs).
@@ -50,7 +79,7 @@ final class ProjectStore {
     struct AlertInfo: Identifiable {
         let id = UUID(); let title: String; let message: String; var revealURL: URL? = nil
         /// 지정하면 이 단추들과 처리기를 쓴다(buttons[0]이 기본 단추)
-        var buttons: [String]? = nil; var destructiveIndex: Int? = nil; var bringToFront = false; var onButton: (@MainActor (Int) -> Void)? = nil
+        var buttons: [String]? = nil; var destructiveIndex: Int? = nil; var cancelIndex: Int? = nil; var bringToFront = false; var onButton: (@MainActor (Int) -> Void)? = nil
         /// 내보내기 완료(검증·승격 성공 뒤에만): 완료 시트로 보인다(파일 이름, "걸린 시간 MM:SS")
         var completion: (fileName: String, detail: String)? = nil
     }
@@ -97,6 +126,7 @@ final class ProjectStore {
 
     init() {
         player.actionAtItemEnd = .pause
+        loadRecents()
         timeObserver = player.addPeriodicTimeObserver(forInterval: settings.frameDuration, queue: .main) { [weak self] t in
             MainActor.assumeIsolated {
                 guard let self, self.isPlaying else { return }
@@ -173,7 +203,7 @@ final class ProjectStore {
 
     var mediaByID: [UUID: MediaAsset] { Dictionary(uniqueKeysWithValues: assets.map { ($0.id, $0) }) }
     var durationFrames: Int { timeline.durationFrames }
-    var canExport: Bool { !timeline.isEmpty && exportPhase == .idle && importProgress == nil && pendingOps.isEmpty }
+    var canExport: Bool { !timeline.isEmpty && exportPhase == .idle && importProgress == nil && pendingOps.isEmpty && missingUsedMedia.isEmpty }
 
     // MARK: 가져오기
 
@@ -234,8 +264,10 @@ final class ProjectStore {
                 if assets.contains(where: { $0.identity.sameFile(as: a.identity) }) {
                     statusMessage = "이미 가져온 파일입니다: \(url.lastPathComponent)"; continue
                 }
-                assets.append(a)
-                history.replaceWithoutUndo(timeline.registering(a))
+                // 가져오기는 실행 취소로 사라지지 않는다(모든 단계에 등록). 프로젝트 변경이라 저장하지 않은 상태가 된다.
+                assetCache[a.url.standardizedFileURL.path] = a
+                history.mapAll { $0.registering(a) }
+                refreshAssets()
                 Self.log.info("imported media frames=\(a.frameCount) timing=\(a.timing.detail, privacy: .public)")
             case .failure(let e):
                 rejected.append("\(url.lastPathComponent): \((e as? ProbeError)?.description ?? e.localizedDescription)")
@@ -257,7 +289,7 @@ final class ProjectStore {
     /// 알림 표시: 떠 있는 알림이 있으면 대기열에 넣고, 사용자가 닫은 뒤 차례로 띄운다.
     func presentAlert(_ a: AlertInfo) {
         let buttons = a.buttons ?? (a.revealURL == nil ? ["확인"] : ["Finder에서 보기", "닫기"])
-        let req = AlertPresenter.Request(title: a.title, message: a.message, buttons: buttons, destructiveIndex: a.destructiveIndex, bringToFront: a.bringToFront,
+        let req = AlertPresenter.Request(title: a.title, message: a.message, buttons: buttons, destructiveIndex: a.destructiveIndex, cancelIndex: a.cancelIndex, bringToFront: a.bringToFront,
                                          completion: a.completion) { [weak self] i in
             if a.buttons == nil, i == 0, let u = a.revealURL { self?.reveal(u) }
             self?.shownAlerts.removeFirst()
@@ -427,9 +459,12 @@ final class ProjectStore {
 
     /// 타임라인이 바뀌면: 재생 헤드를 새 길이 안으로, composition을 비동기로 다시 만들고 오래된 결과는 버린다.
     func timelineChanged() {
+        refreshAssets()
+        updateWindowDocumentState()
         playhead = min(playhead, timeline.durationFrames)
         generation += 1
-        let g = generation, snap = timeline, media = mediaByID, s = settings
+        // 찾을 수 없는 원본의 클립은 프리뷰에서 빼고(검정·무음) 화면에 따로 표시한다. 편집 상태는 그대로다.
+        let g = generation, snap = timeline.excludingMedia(missingUsedMedia), media = mediaByID, s = settings
         guard !snap.isEmpty else {
             currentPlan = nil
             player.replaceCurrentItem(with: nil)
@@ -509,6 +544,7 @@ final class ProjectStore {
     // MARK: 내보내기
 
     func presentExportPanel() {
+        if let r = exportBlockReason { presentAlert(AlertInfo(title: "내보낼 수 없습니다", message: r)); return }
         guard canExport else { return }
         pauseForEdit()
         let p = NSSavePanel()
@@ -585,9 +621,9 @@ final class ProjectStore {
 
     // MARK: 닫기·종료 보호(저장 기능은 M1 범위 밖)
 
-    enum CloseIntent { case window, quit }
-    /// 버리면 잃는 편집 작업이 있는가: 가져온 영상이나 타임라인(길이 > 0)이 있으면. 내보낸 파일은 편집 가능한 프로젝트가 아니다.
-    var hasUnsavedWork: Bool { !assets.isEmpty || timeline.durationFrames > 0 }
+    enum CloseIntent { case window, quit, newProject, openProject }
+    /// 버리면 잃는 편집 작업이 있는가: 마지막 저장(또는 연) 상태와 다르면(A-013). 내보낸 MP4는 프로젝트 저장이 아니다.
+    var hasUnsavedWork: Bool { isDirty }
     /// 사용자가 "버리고 닫기/종료"를 고른 뒤(이 실행이 끝날 때까지 유지)
     @ObservationIgnored private(set) var discardConfirmed = false
     /// 닫기 확인이 떠 있거나 대기 중(같은 확인을 겹쳐 띄우지 않음)
@@ -597,22 +633,39 @@ final class ProjectStore {
     /// 확인 없이 닫을 수 있는가
     var canCloseWithoutPrompt: Bool { discardConfirmed || (!hasUnsavedWork && exportPhase == .idle) }
 
-    /// 닫기·종료 요청. 확인이 필요하면 대기열 알림(취소가 기본)을 띄운다. proceed는 버리기를 확정했고 진행 중인 내보내기가
-    /// 취소·정리된 뒤 불린다. cancel은 취소했거나 이미 같은 확인이 떠 있을 때 불린다.
+    /// 저장하지 않은 변경이 있을 때의 확인(A-013): 저장 / 취소 / 저장 안 함. 새 프로젝트·열기·창 닫기·종료가 같은 처리를 쓴다.
+    /// - 저장: 저장 패널(처음) 또는 현재 위치에 저장. 저장을 취소했거나 실패하면 이어지는 동작을 하지 않는다.
+    /// - 저장 안 함: 변경을 버리고 진행. 취소(Esc): 아무것도 하지 않음.
+    /// 창 닫기·종료는 진행 전에 진행 중인 가져오기·내보내기를 취소·정리한다(finishDiscard). proceed는 그 뒤에 불린다.
     func requestDiscard(_ intent: CloseIntent, proceed: @escaping @MainActor () -> Void, cancel: @escaping @MainActor () -> Void) {
-        if canCloseWithoutPrompt { finishDiscard(proceed); return }
+        let closing = intent == .window || intent == .quit
+        let go: @MainActor () -> Void = { [weak self] in
+            guard let self else { return }
+            if closing { self.discardConfirmed = true; self.finishDiscard(proceed) } else { proceed() }
+        }
+        if closing ? canCloseWithoutPrompt : !isDirty { go(); return }
         if closePromptPending { cancel(); return }
         closePromptPending = true
         pauseForEdit()
-        var msg = "ON THE FRAME은 아직 프로젝트를 저장할 수 없습니다. \(intent == .quit ? "종료하면" : "창을 닫으면") 가져온 영상 목록과 타임라인 편집 내용이 사라지고 되돌릴 수 없습니다.\n\n내보낸 영상 파일은 편집할 수 있는 프로젝트가 아니므로, 나중에 다시 열어 편집을 이어 갈 수 없습니다. 원본 파일과 이미 내보낸 파일은 그대로 남습니다."
+        let action: String
+        switch intent {
+        case .window: action = "창을 닫으면"
+        case .quit: action = "종료하면"
+        case .newProject: action = "새 프로젝트를 만들면"
+        case .openProject: action = "다른 프로젝트를 열면"
+        }
+        var msg = "‘\(projectName)’에 저장하지 않은 변경 사항이 있습니다. 저장하지 않고 \(action) 마지막 저장 이후의 변경 사항이 사라집니다.\n\n내보낸 MP4는 프로젝트 저장이 아닙니다. 원본 파일과 이미 내보낸 파일은 그대로 남습니다."
         if exportPhase != .idle { msg += "\n\n진행 중인 내보내기는 취소되고 임시 파일은 정리됩니다. 대상 파일은 만들어지지 않습니다." }
         if importProgress != nil || !pendingOps.isEmpty { msg += "\n\n진행 중인 가져오기는 취소되고, 이번에 고른 파일은 추가되지 않습니다." }
-        presentAlert(AlertInfo(title: intent == .quit ? "편집 내용을 버리고 종료할까요?" : "편집 내용을 버리고 창을 닫을까요?",
-                               message: msg, buttons: ["취소", intent == .quit ? "버리고 종료" : "버리고 닫기"], destructiveIndex: 1, bringToFront: true,
+        presentAlert(AlertInfo(title: "변경 사항을 저장할까요?", message: msg, buttons: ["저장", "취소", "저장 안 함"], destructiveIndex: 2, cancelIndex: 1, bringToFront: true,
                                onButton: { [weak self] i in
             guard let self else { return }
             self.closePromptPending = false
-            if i == 1 { self.discardConfirmed = true; self.finishDiscard(proceed) } else { cancel() }
+            switch i {
+            case 0: self.saveProject { ok in if ok { go() } else { cancel() } }   // 저장 실패·취소면 진행하지 않음
+            case 2: go()
+            default: cancel()
+            }
         }))
     }
     /// 진행 중인 내보내기가 있으면 취소하고 정리(임시 디렉터리 삭제)가 끝난 뒤 proceed
@@ -707,5 +760,371 @@ final class WindowCloseGuard: NSObject, NSWindowDelegate {
     func window(_ window: NSWindow, willPositionSheet sheet: NSWindow, using rect: NSRect) -> NSRect {
         if let r = MainActor.assumeIsolated({ ProjectStore.shared.alerts.sheetPosition(for: window, sheet: sheet) }) { return r }
         return original?.window?(window, willPositionSheet: sheet, using: rect) ?? rect
+    }
+}
+
+// MARK: - 프로젝트 저장·열기·최근·재연결(A-013)
+
+/// 최근 프로젝트(앱 설정, 프로젝트 파일 밖). 경로와 앱 범위 보안 북마크.
+struct RecentProject: Codable, Equatable, Identifiable {
+    var id: String { path }
+    let path: String
+    let name: String
+    let bookmark: Data?
+}
+
+extension ProjectStore {
+    static let projectType = UTType(exportedAs: "dev.ontheframe.project", conformingTo: .json)
+    static let recentKey = "recentProjects", recentLimit = 10
+
+    // MARK: 상태
+
+    /// 프로젝트 미디어 목록에서 쓸 수 있는 원본(검사 결과)과 찾을 수 없는 원본을 다시 만든다
+    func refreshAssets() {
+        var list: [MediaAsset] = [], missing: [UUID: String] = [:]
+        for r in timeline.media {
+            if let a = assetCache[r.path] { list.append(a.withID(r.id)) } else { missing[r.id] = missingMedia[r.id] ?? "원본 파일을 찾을 수 없습니다." }
+        }
+        if list != assets { assets = list }
+        if missing != missingMedia { missingMedia = missing }
+    }
+    /// 타임라인 클립이 쓰는 찾을 수 없는 원본
+    var missingUsedMedia: Set<UUID> {
+        guard !missingMedia.isEmpty else { return [] }
+        return Set(missingMedia.keys).intersection((timeline.clips + timeline.audioClips).map(\.mediaID))
+    }
+    /// 재생 헤드 아래(영상·소리) 클립 중 찾을 수 없는 원본의 이름
+    var missingNameAtPlayhead: String? {
+        guard !missingMedia.isEmpty else { return nil }
+        let ids = [timeline.clipIndex(atFrame: playhead).map { timeline.clips[$0].mediaID }, timeline.audioClipIndex(atFrame: playhead).map { timeline.audioClips[$0].mediaID }]
+        return ids.compactMap { $0 }.first { missingMedia[$0] != nil }.flatMap { id in timeline.media.first { $0.id == id }?.name }
+    }
+    /// 내보내기를 할 수 없는 이유(찾을 수 없는 원본)
+    var exportBlockReason: String? {
+        let names = timeline.media.filter { missingUsedMedia.contains($0.id) }.map(\.name)
+        return names.isEmpty ? nil : "찾을 수 없는 원본 미디어(\(names.joined(separator: ", ")))가 있어 내보낼 수 없습니다. 파일 > 미디어 재연결…로 다시 연결하세요."
+    }
+    func updateWindowDocumentState() {
+        guard let w = editorWindow else { return }
+        if w.isDocumentEdited != isDirty { w.isDocumentEdited = isDirty }
+        if w.representedURL != projectURL { w.representedURL = projectURL }
+    }
+    /// 프로젝트를 바꿀 수 있는가(가져오기·내보내기 중이면 아니다)
+    func projectReplaceBlocked() -> Bool {
+        guard importProgress != nil || !pendingOps.isEmpty || exportPhase != .idle else { return false }
+        presentAlert(AlertInfo(title: "프로젝트를 바꿀 수 없습니다",
+                               message: "가져오기 또는 내보내기가 진행 중입니다. 끝나거나 취소한 뒤 다시 시도하세요."))
+        return true
+    }
+    func stopAllScopes() {
+        for u in scopedURLs { u.stopAccessingSecurityScopedResource() }
+        scopedURLs.removeAll()
+    }
+
+    // MARK: 새 프로젝트
+
+    func requestNewProject() {
+        guard !projectReplaceBlocked() else { return }
+        requestDiscard(.newProject, proceed: { [weak self] in self?.resetProject() }, cancel: {})
+    }
+    /// 빈 프로젝트로(창 배치·최근 목록은 그대로)
+    func resetProject() {
+        stopAllScopes()
+        replaceProject(timeline: Timeline(), url: nil, id: UUID(), cache: [:], bookmarks: [:], missing: [:])
+    }
+    private func replaceProject(timeline t: Timeline, url: URL?, id: UUID, cache: [String: MediaAsset], bookmarks bm: [UUID: Data], missing: [UUID: String]) {
+        pauseForEdit()
+        if gestureBase != nil { cancelGesture() }
+        history = EditHistory(t)
+        savedTimeline = t
+        projectURL = url; projectID = id
+        assetCache = cache; bookmarks = bm; missingMedia = missing
+        selection = nil; linkCandidate = nil; statusMessage = nil
+        seek(to: 0)
+        timelineChanged()
+    }
+
+    // MARK: 저장
+
+    /// 프로젝트 저장. 위치가 없거나 saveAs면 저장 패널. done(true)는 저장에 성공했을 때.
+    /// 주의(2026-10-10 저장 실패 원인): `done?(writeProject(to: u))`처럼 쓰면 done이 nil일 때(메뉴·⌘S) Swift 선택적 호출이
+    /// 인자 계산까지 건너뛰어 writeProject가 불리지 않는다. 결과를 먼저 계산한 뒤 done에 넘긴다.
+    func saveProject(saveAs: Bool = false, done: (@MainActor (Bool) -> Void)? = nil) {
+        SaveTrace.note("saveProject saveAs=\(saveAs) hasURL=\(projectURL != nil) dirty=\(isDirty)")
+        if let u = projectURL, !saveAs {
+            let ok = writeProject(to: u)
+            done?(ok)
+            return
+        }
+        let p = NSSavePanel()
+        p.allowedContentTypes = [Self.projectType]
+        p.nameFieldStringValue = projectName + "." + ProjectFile.fileExtension
+        p.canCreateDirectories = true
+        p.message = "프로젝트를 저장할 위치를 고르세요. 원본 미디어는 복사하지 않고 위치만 기록합니다."
+        #if DEBUG
+        if let auto = savePanelAutoConfirmForTest {
+            // 자체 검사: 실제 패널이 떠 있는 동안(모달 패널 실행 루프 모드) 위치·이름을 정하고 확인 단추(ok:)를 누른다.
+            // 주 대기열 블록은 runModal 동안 돌지 않아 패널이 닫힌 뒤에 ok:를 불러 예외가 났다(진단 실행에서 확인).
+            var step = 0
+            let t = Timer(timeInterval: 0.5, repeats: true) { _ in
+                MainActor.assumeIsolated {
+                    guard p.isVisible, step < 4 else { return }
+                    step += 1
+                    if step == 2 { p.directoryURL = auto.directory; p.nameFieldStringValue = auto.name }
+                    if step == 4 { SaveTrace.note("autoConfirm ok:"); p.ok(nil) }
+                }
+            }
+            RunLoop.main.add(t, forMode: .modalPanel)
+            autoConfirmTimer = t
+        }
+        #endif
+        var resp: NSApplication.ModalResponse
+        var chosen: URL?
+        #if DEBUG
+        if let injected = savePanelResultForTest {   // 자체 검사: 패널이 "확인 + 이 위치"를 돌려준 것과 같게(패널 뒤 경로 회귀)
+            savePanelResultForTest = nil; resp = .OK; chosen = injected
+        } else { resp = p.runModal(); chosen = p.url }
+        autoConfirmTimer?.invalidate(); autoConfirmTimer = nil
+        #else
+        resp = p.runModal(); chosen = p.url
+        #endif
+        SaveTrace.note("panel response=\(resp.rawValue) url=\(chosen?.path ?? "nil")")
+        guard resp == .OK else {
+            statusMessage = "프로젝트 저장을 취소했습니다. 저장하지 않은 변경 사항은 그대로입니다."
+            done?(false); return
+        }
+        guard let u = chosen else {
+            presentAlert(AlertInfo(title: "프로젝트를 저장하지 못했습니다", message: "저장 패널이 위치를 돌려주지 않았습니다. 다시 저장해 보세요. 편집 내용은 그대로입니다."))
+            done?(false); return
+        }
+        let ok = writeProject(to: u)
+        done?(ok)
+    }
+
+    /// 프로젝트 파일 쓰기: 원본 미디어 보호 → 북마크 → 임시 위치에 쓰기 → 원자적으로 옮기기. 실패하면 이전 파일·상태 그대로.
+    @discardableResult
+    func writeProject(to url: URL) -> Bool {
+        let dest = url.standardizedFileURL
+        SaveTrace.note("writeProject dest=\(dest.path)")
+        if let reason = protectedProjectDestination(dest) {
+            SaveTrace.note("protected: \(reason)")
+            presentAlert(AlertInfo(title: "프로젝트를 저장할 수 없습니다", message: reason)); return false
+        }
+        for a in assets {
+            if let b = try? a.url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) { bookmarks[a.id] = b }
+        }
+        let fm = FileManager.default
+        do {
+            let data = try ProjectFile.encode(timeline, projectID: projectID, settings: settings, bookmarks: bookmarks, projectURL: dest)
+            SaveTrace.note("encoded bytes=\(data.count)")
+            let tmpDir = try fm.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: dest, create: true)
+            SaveTrace.note("tmpDir=\(tmpDir.path)")
+            defer { try? fm.removeItem(at: tmpDir) }
+            let tmp = tmpDir.appendingPathComponent(dest.lastPathComponent)
+            try data.write(to: tmp, options: .withoutOverwriting)
+            SaveTrace.note("tmp written exists=\(fm.fileExists(atPath: tmp.path))")
+            // 확인: 옮기기 전에 임시 파일을 다시 읽어 같은 프로젝트인지 본다(잘못 쓴 파일이 이전 프로젝트 파일을 바꾸지 않게)
+            let (bt, bdoc) = try ProjectFile.decode(try Data(contentsOf: tmp), settings: settings)
+            guard bt == timeline, bdoc.projectID == projectID else {
+                throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "쓴 파일을 다시 읽었더니 내용이 다릅니다."])
+            }
+            #if DEBUG
+            if saveFailureForTest { saveFailureForTest = false; throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "시험용 저장 실패"]) }
+            #endif
+            if fm.fileExists(atPath: dest.path) {
+                _ = try fm.replaceItemAt(dest, withItemAt: tmp, backupItemName: nil, options: [])
+            } else if renamex_np(tmp.path, dest.path, UInt32(RENAME_EXCL)) != 0 {
+                let e = errno
+                SaveTrace.note("renamex_np errno=\(e)")
+                if e == EXDEV { try fm.moveItem(at: tmp, to: dest) } else { throw POSIXError(POSIXErrorCode(rawValue: e) ?? .EIO) }
+            }
+            // 옮긴 뒤: 대상에 같은 크기의 파일이 있어야 저장된 것으로 한다
+            let size = (try? fm.attributesOfItem(atPath: dest.path)[.size] as? Int) ?? -1
+            SaveTrace.note("promoted destSize=\(size) expected=\(data.count)")
+            guard size == data.count else {
+                throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "저장 위치에서 파일을 확인할 수 없습니다."])
+            }
+        } catch {
+            SaveTrace.note("error: \(error) — alert queued; presenter showing=\(alerts.isShowing) queued=\(alerts.queuedCount)")
+            let what = (error as? ProjectFile.LoadError)?.description ?? error.localizedDescription
+            presentAlert(AlertInfo(title: "프로젝트를 저장하지 못했습니다",
+                                   message: "\(dest.lastPathComponent): \(what)\n\n편집 내용은 저장하지 않은 상태로 그대로 있습니다. 다른 위치를 골라 다시 저장해 보세요."))
+            statusMessage = "프로젝트를 저장하지 못했습니다: \(what)"
+            return false
+        }
+        projectURL = dest
+        savedTimeline = timeline
+        addRecent(dest)
+        updateWindowDocumentState()
+        statusMessage = "프로젝트를 저장했습니다: \(dest.lastPathComponent)"
+        return true
+    }
+    /// 가져온 원본 미디어(같은 경로·심볼릭 링크·하드 링크)에는 프로젝트를 저장하지 않는다
+    func protectedProjectDestination(_ dest: URL) -> String? {
+        let d = dest.resolvingSymlinksInPath().path
+        let did = FileIdentity.of(dest)
+        let paths = assets.map { $0.url.standardizedFileURL } + timeline.media.map { URL(fileURLWithPath: $0.path) }
+        for u in paths {
+            if u.resolvingSymlinksInPath().path == d { return "‘\(u.lastPathComponent)’은(는) 프로젝트가 쓰는 원본 미디어입니다. 원본을 덮어쓰지 않도록 다른 이름을 고르세요." }
+            if let did, let sid = FileIdentity.of(u), did.sameFile(as: sid) { return "고른 파일이 원본 미디어 ‘\(u.lastPathComponent)’와 같은 파일(링크)입니다. 다른 이름을 고르세요." }
+        }
+        return nil
+    }
+
+    // MARK: 열기
+
+    /// 프로젝트 열기(메뉴·최근·Finder). url이 nil이면 열기 패널. 가져오기·내보내기 중이면 거절, 저장하지 않은 변경은 확인.
+    func requestOpenProject(_ url: URL?, scoped: Bool = false) {
+        guard !projectReplaceBlocked() else { if scoped { url?.stopAccessingSecurityScopedResource() }; return }
+        requestDiscard(.openProject, proceed: { [weak self] in
+            guard let self else { return }
+            var target = url
+            if target == nil {
+                let p = NSOpenPanel()
+                p.allowedContentTypes = [Self.projectType]
+                p.allowsMultipleSelection = false
+                p.message = "열 프로젝트(.ontheframe)를 고르세요."
+                guard p.runModal() == .OK, let u = p.url else { return }
+                target = u
+            }
+            guard let target else { return }
+            Task { @MainActor in
+                let ok = await self.openProject(at: target)
+                if scoped, !ok { target.stopAccessingSecurityScopedResource() }
+                if scoped, ok { self.scopedURLs.append(target) }   // 최근 목록 북마크로 연 프로젝트 파일: 프로젝트가 바뀔 때 멈춘다
+            }
+        }, cancel: { if scoped { url?.stopAccessingSecurityScopedResource() } })
+    }
+
+    /// 전체를 읽고 검사한 뒤에만 현재 프로젝트를 바꾼다. 실패하면 알림만(현재 상태 그대로). 성공하면 true.
+    @discardableResult
+    func openProject(at url: URL) async -> Bool {
+        let data: Data, decoded: (timeline: Timeline, document: ProjectFile.Document)
+        do { data = try Data(contentsOf: url) } catch {
+            presentAlert(AlertInfo(title: "프로젝트를 열 수 없습니다", message: "\(url.lastPathComponent): \(error.localizedDescription)")); return false
+        }
+        do { decoded = try ProjectFile.decode(data, settings: settings) } catch let e as ProjectFile.LoadError {
+            presentAlert(AlertInfo(title: "프로젝트를 열 수 없습니다", message: "\(url.lastPathComponent): \(e.description)")); return false
+        } catch {
+            presentAlert(AlertInfo(title: "프로젝트를 열 수 없습니다", message: error.localizedDescription)); return false
+        }
+        // 원본 미디어 찾기(북마크 → 프로젝트 기준 상대 경로 → 절대 경로). 찾지 못해도 편집 구조는 연다.
+        var t = decoded.timeline
+        var cache: [String: MediaAsset] = [:], bm: [UUID: Data] = [:], missing: [UUID: String] = [:], scopes: [URL] = []
+        let dir = url.deletingLastPathComponent()
+        for e in decoded.document.media {
+            if let b = e.bookmark { bm[e.ref.id] = b }
+            var candidates: [(URL, Bool)] = []
+            if let b = e.bookmark {
+                var stale = false
+                if let u = try? URL(resolvingBookmarkData: b, options: [.withSecurityScope], relativeTo: nil, bookmarkDataIsStale: &stale) {
+                    candidates.append((u, u.startAccessingSecurityScopedResource()))   // 오래된 북마크는 다음 저장 때 새로 만든다
+                }
+            }
+            if let rel = e.relativePath { candidates.append((dir.appendingPathComponent(rel).standardizedFileURL, false)) }
+            candidates.append((URL(fileURLWithPath: e.ref.path), false))
+            var reason = "원본 파일을 찾을 수 없습니다(이동·삭제됐거나 접근 권한이 없음)."
+            var found = false
+            for (u, started) in candidates {
+                guard !found, FileManager.default.isReadableFile(atPath: u.path), let a = try? await MediaProbe.inspect(u, settings: settings) else {
+                    if started { u.stopAccessingSecurityScopedResource() }; continue
+                }
+                let asset = a.withID(e.ref.id)
+                var ref = MediaRef(asset); ref.path = e.ref.path   // 저장된 경로를 키로 쓴다(실제 위치는 검사 결과에)
+                do {
+                    t = try t.relinking(media: e.ref.id, to: ref)
+                    cache[e.ref.path] = asset
+                    if started { scopes.append(u) }
+                    found = true
+                } catch let err as EditError {
+                    reason = "원본이 바뀌어 쓸 수 없습니다: \(err.description)"
+                    if started { u.stopAccessingSecurityScopedResource() }
+                } catch { if started { u.stopAccessingSecurityScopedResource() } }
+            }
+            if !found { missing[e.ref.id] = reason }
+        }
+        stopAllScopes()
+        scopedURLs = scopes
+        replaceProject(timeline: t, url: url.standardizedFileURL, id: decoded.document.projectID, cache: cache, bookmarks: bm, missing: missing)
+        addRecent(url.standardizedFileURL)
+        if !missing.isEmpty {
+            let names = t.media.filter { missing[$0.id] != nil }.map(\.name)
+            presentAlert(AlertInfo(title: "찾을 수 없는 원본 미디어가 있습니다",
+                                   message: "\(names.joined(separator: ", "))\n\n편집 내용은 그대로 열었습니다. 이 원본을 쓰는 구간은 프리뷰에서 비어 보이고, 내보내기는 다시 연결할 때까지 할 수 없습니다. 파일 > 미디어 재연결…을 쓰세요."))
+        }
+        return true
+    }
+
+    // MARK: 최근 프로젝트
+
+    func loadRecents() {
+        let d = EditorLayout.shared.defaults
+        if let data = d.data(forKey: Self.recentKey), let list = try? JSONDecoder().decode([RecentProject].self, from: data) { recentProjects = list }
+    }
+    private func saveRecents() {
+        if let data = try? JSONEncoder().encode(recentProjects) { EditorLayout.shared.defaults.set(data, forKey: Self.recentKey) }
+    }
+    /// 성공적으로 열거나 저장한 프로젝트만(맨 앞, 중복 없음, 최대 10개)
+    func addRecent(_ url: URL) {
+        let b = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
+        let item = RecentProject(path: url.standardizedFileURL.path, name: url.deletingPathExtension().lastPathComponent, bookmark: b)
+        recentProjects = Array(([item] + recentProjects.filter { $0.path != item.path }).prefix(Self.recentLimit))
+        saveRecents()
+    }
+    /// 목록만 지운다(프로젝트 파일은 그대로)
+    func clearRecents() { recentProjects = []; saveRecents() }
+    func openRecent(_ r: RecentProject) {
+        var stale = false
+        if let b = r.bookmark, let u = try? URL(resolvingBookmarkData: b, options: [.withSecurityScope], relativeTo: nil, bookmarkDataIsStale: &stale),
+           u.startAccessingSecurityScopedResource() {
+            guard FileManager.default.isReadableFile(atPath: u.path) else {
+                u.stopAccessingSecurityScopedResource(); recentUnavailable(r); return
+            }
+            requestOpenProject(u, scoped: true)
+        } else if FileManager.default.isReadableFile(atPath: r.path) {
+            requestOpenProject(URL(fileURLWithPath: r.path))
+        } else { recentUnavailable(r) }
+    }
+    private func recentUnavailable(_ r: RecentProject) {
+        presentAlert(AlertInfo(title: "최근 프로젝트를 열 수 없습니다",
+                               message: "‘\(r.name)’을(를) 찾을 수 없거나 접근 권한이 없습니다. 이동·삭제됐을 수 있습니다. 프로젝트 열기…로 다시 고르거나 최근 프로젝트 > 목록 지우기로 정리하세요."))
+    }
+
+    // MARK: 미디어 재연결
+
+    /// 찾을 수 없는 원본 하나를 고른 파일로 다시 연결한다(실행 취소 한 단계). 모든 원본 구간이 새 파일 안에 있어야 한다(클립을 줄이지 않음).
+    func relinkMedia(_ id: UUID) {
+        guard let r = timeline.media.first(where: { $0.id == id }) else { return }
+        let p = NSOpenPanel()
+        p.allowedContentTypes = [.movie]
+        p.allowsMultipleSelection = false
+        p.message = "‘\(r.name)’ 대신 쓸 파일을 고르세요(같은 원본, 길이 \(store_tc(r.frameCount)) 이상)."
+        p.directoryURL = URL(fileURLWithPath: r.path).deletingLastPathComponent()
+        guard p.runModal() == .OK, let u = p.url else { return }
+        Task { @MainActor in await self.relinkMedia(id, to: u) }
+    }
+    private func store_tc(_ f: Int) -> String { settings.timecode(f) }
+    /// 재연결 실행(검사 → 실행 취소 가능한 변경). 성공하면 true.
+    @discardableResult
+    func relinkMedia(_ id: UUID, to url: URL) async -> Bool {
+        do {
+            let a = try await MediaProbe.inspect(url, settings: settings).withID(id)
+            let t = try timeline.relinking(media: id, to: MediaRef(a))
+            assetCache[a.url.standardizedFileURL.path] = a
+            missingMedia[id] = nil
+            history.apply(t, focus: selection)
+            timelineChanged()
+            statusMessage = "‘\(url.lastPathComponent)’로 다시 연결했습니다."
+            return true
+        } catch let e as EditError {
+            presentAlert(AlertInfo(title: "다시 연결할 수 없습니다", message: e.description)); return false
+        } catch let e as ProbeError {
+            presentAlert(AlertInfo(title: "다시 연결할 수 없습니다", message: e.description)); return false
+        } catch {
+            presentAlert(AlertInfo(title: "다시 연결할 수 없습니다", message: error.localizedDescription)); return false
+        }
+    }
+    func relinkFirstMissing() {
+        if let id = timeline.media.first(where: { missingMedia[$0.id] != nil })?.id { relinkMedia(id) }
     }
 }

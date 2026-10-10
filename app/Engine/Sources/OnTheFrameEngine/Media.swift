@@ -70,6 +70,11 @@ public struct MediaAsset: Sendable, Identifiable, Equatable {
     public let hasAudio: Bool
     public let codec: String
     public let identity: FileIdentity
+    /// 같은 검사 결과에 프로젝트의 미디어 id를 붙인다(프로젝트를 다시 열 때 저장된 id를 유지, A-013)
+    public func withID(_ newID: UUID) -> MediaAsset {
+        MediaAsset(id: newID, url: url, name: name, frameCount: frameCount, timing: timing, naturalSize: naturalSize, displaySize: displaySize,
+                   preferredTransform: preferredTransform, hasAudio: hasAudio, codec: codec, identity: identity)
+    }
 }
 
 public enum ProbeError: Error, Equatable, CustomStringConvertible {

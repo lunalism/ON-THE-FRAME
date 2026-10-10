@@ -3,7 +3,7 @@
 # 앱이 고정 재생 헤드의 프리뷰 프레임을 저장하고, otf-dev verify-preview가 화면 코드·검정으로 판정한다.
 set -euo pipefail
 cd "${0:A:h}/.."
-APP=.build/DerivedData/Build/Products/Debug/OnTheFrame.app
+APP=${APP:-.build/DerivedData/Build/Products/Debug/OnTheFrame.app}
 [[ -d $APP ]] || { echo "build first: scripts/build.sh"; exit 2 }
 swift build --package-path Engine --product otf-dev 2>&1 | grep -E "error|warning:" || true
 DEV=Engine/.build/debug/otf-dev

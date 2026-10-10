@@ -11,7 +11,8 @@ final class AlertPresenter: NSObject {
     /// buttons[0]이 기본 단추(Return)다. destructiveIndex 단추는 파괴적 동작으로 표시한다.
     /// bringToFront: 붙일 창이 숨겨졌거나 최소화돼 있으면 앱을 다시 보이고 창을 앞으로 가져와 띄운다(사용자가 요청한 닫기·종료 확인).
     /// false면 창이 다시 보일 때까지 기다린다.
-    struct Request { let title: String; let message: String; let buttons: [String]; var destructiveIndex: Int? = nil; var bringToFront = false
+    /// cancelIndex 단추는 Esc로 누른다(한국어 "취소"는 NSAlert가 자동으로 Esc에 연결하지 않음).
+    struct Request { let title: String; let message: String; let buttons: [String]; var destructiveIndex: Int? = nil; var cancelIndex: Int? = nil; var bringToFront = false
         /// 지정하면 NSAlert 대신 내보내기 완료 시트(CompletionSheet)로 띄운다. 단추는 0 = Finder에서 보기, 1 = 닫기.
         var completion: (fileName: String, detail: String)? = nil
         let onButton: (Int) -> Void }
@@ -87,6 +88,7 @@ final class AlertPresenter: NSObject {
         a.messageText = r.title
         a.informativeText = r.message
         for b in r.buttons { a.addButton(withTitle: b) }
+        if let c = r.cancelIndex, a.buttons.indices.contains(c) { a.buttons[c].keyEquivalent = "\u{1b}" }
         if let d = r.destructiveIndex, a.buttons.indices.contains(d) {
             a.buttons[d].hasDestructiveAction = true
             // 기본 단추(Return)는 첫 단추(안전한 쪽)로 명시한다. 파괴적 단추에는 키를 주지 않는다.
@@ -102,6 +104,7 @@ final class AlertPresenter: NSObject {
             first.keyEquivalent = "\r"
             a.window.defaultButtonCell = first.cell as? NSButtonCell
             if let d = r.destructiveIndex, a.buttons.indices.contains(d) { a.buttons[d].keyEquivalent = "" }
+            if let c = r.cancelIndex, a.buttons.indices.contains(c) { a.buttons[c].keyEquivalent = "\u{1b}" }
         }
     }
 
@@ -150,11 +153,12 @@ final class AlertPresenter: NSObject {
 
     func windowAvailable() { showNext() }
 
+    /// 대기 중 알림 수(진단 기록용)
+    var queuedCount: Int { queue.count }
     #if DEBUG
     /// 자체 검사 전용: 사용자가 단추를 누르는 것과 같은 경로(NSButton 클릭)로 닫는다.
     func pressButton(_ i: Int) { currentButtons[safe: i]?.performClick(nil) }
     var currentButtons: [NSButton] { currentSheet.map { [$0.finderButton, $0.closeButton] } ?? current?.buttons ?? [] }
-    var queuedCount: Int { queue.count }
     #endif
 }
 

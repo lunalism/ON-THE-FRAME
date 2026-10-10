@@ -3,7 +3,7 @@
 # 마지막 버리기는 앱을 끝내므로, 앱 종료와 내보내기 정리는 이 스크립트가 확인한다.
 set -euo pipefail
 cd "${0:A:h}/.."
-APP=.build/DerivedData/Build/Products/Debug/OnTheFrame.app
+APP=${APP:-.build/DerivedData/Build/Products/Debug/OnTheFrame.app}
 [[ -d $APP ]] || { echo "build first: scripts/build.sh"; exit 2 }
 [[ -f .build/test-work/fixtures/otf-A.mp4 ]] || { swift build --package-path Engine --product otf-dev >/dev/null; Engine/.build/debug/otf-dev fixtures .build/test-work/fixtures; }
 FAILS=0

@@ -3,7 +3,7 @@
 # first(저장값 지움 → 70% 가운데, 나눔 비율, 나눔선 끌기·저장), restore(되살리기), offscreen(화면 밖 저장값 → 안으로).
 set -euo pipefail
 cd "${0:A:h}/.."
-APP=.build/DerivedData/Build/Products/Debug/OnTheFrame.app
+APP=${APP:-.build/DerivedData/Build/Products/Debug/OnTheFrame.app}
 [[ -d $APP ]] || { echo "build first: scripts/build.sh"; exit 2 }
 RUN=selftest-work/layout-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p $RUN

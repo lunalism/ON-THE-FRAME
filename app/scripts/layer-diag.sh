@@ -3,7 +3,7 @@
 # 첫 탐색 뒤 비디오 출력·AVPlayerLayer 표시 버퍼를 기록해 otf-dev verify-layer로 판정한다. 원시 프레임은 판정 뒤 지운다.
 set -euo pipefail
 cd "${0:A:h}/.."
-APP=.build/DerivedData/Build/Products/Debug/OnTheFrame.app
+APP=${APP:-.build/DerivedData/Build/Products/Debug/OnTheFrame.app}
 [[ -d $APP ]] || { echo "build first: scripts/build.sh"; exit 2 }
 swift build --package-path Engine --product otf-dev 2>&1 | grep -E "error|warning:" || true
 DEV=Engine/.build/debug/otf-dev

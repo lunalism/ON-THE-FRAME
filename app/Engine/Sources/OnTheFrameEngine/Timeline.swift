@@ -26,6 +26,31 @@ public struct Clip: Sendable, Equatable, Identifiable, Codable {
     }
 }
 
+/// 프로젝트가 참조하는 원본 미디어(A-013). 원본은 프로젝트 밖에 있고 읽기만 한다. 같은 id가 클립의 mediaID다.
+/// 위치(path)·식별(크기·수정 시각)·검사 결과(길이·소리·크기·코덱)를 담는다. 샌드박스 접근 북마크는 저장 파일에만 있다(여기 없음).
+public struct MediaRef: Sendable, Equatable, Codable, Identifiable {
+    public let id: UUID
+    public var name: String
+    /// 절대 경로(표시·재연결 힌트)
+    public var path: String
+    /// 원본 길이 안의 타임라인(30 fps) 프레임 수
+    public var frameCount: Int
+    public var hasAudio: Bool
+    public var size: Int64
+    public var modifiedNs: Int64
+    public var codec: String
+    public var width: Int
+    public var height: Int
+    public init(id: UUID, name: String, path: String, frameCount: Int, hasAudio: Bool, size: Int64, modifiedNs: Int64, codec: String, width: Int, height: Int) {
+        self.id = id; self.name = name; self.path = path; self.frameCount = frameCount; self.hasAudio = hasAudio
+        self.size = size; self.modifiedNs = modifiedNs; self.codec = codec; self.width = width; self.height = height
+    }
+    public init(_ a: MediaAsset) {
+        self.init(id: a.id, name: a.name, path: a.url.standardizedFileURL.path, frameCount: a.frameCount, hasAudio: a.hasAudio,
+                  size: a.identity.size, modifiedNs: a.identity.modifiedNs, codec: a.codec, width: Int(a.displaySize.width), height: Int(a.displaySize.height))
+    }
+}
+
 /// 레인(A-012). 이름은 클립·파일 이름과 따로이며 안정된 레인 ID에 붙는다(이후 프로젝트 파일에 그대로 둘 수 있게 Codable).
 public enum LaneKind: String, Sendable, Codable { case video, audio }
 public struct Lane: Sendable, Equatable, Codable, Identifiable {
@@ -48,6 +73,10 @@ public enum EditError: Error, Equatable, CustomStringConvertible {
     case linkedSplitOutside
     case linkNeedsPair, linkDifferentMedia, alreadyLinked, notLinked
     case emptyName, unknownLane
+    /// 재연결: 새 파일이 기존 클립의 원본 구간을 모두 덮지 못함(클립을 줄이지 않음)
+    case relinkTooShort(need: Int, have: Int)
+    /// 재연결: 소리 클립이 쓰는데 새 파일에 소리가 없음
+    case relinkNoAudio
     public var description: String {
         switch self {
         case .unknownClip: return "클립을 찾을 수 없습니다."
@@ -65,6 +94,8 @@ public enum EditError: Error, Equatable, CustomStringConvertible {
         case .notLinked: return "연결되지 않은 클립입니다."
         case .emptyName: return "이름이 비어 있어 이전 이름으로 되돌렸습니다."
         case .unknownLane: return "레인을 찾을 수 없습니다."
+        case .relinkTooShort(let need, let have): return "고른 파일이 너무 짧습니다(필요 \(need)프레임, 파일 \(have)프레임). 클립을 줄이지 않으므로 같은 원본을 고르세요."
+        case .relinkNoAudio: return "고른 파일에 소리가 없습니다. 원본 소리 레인의 클립이 이 원본의 소리를 씁니다."
         }
     }
 }
@@ -85,6 +116,8 @@ public struct Timeline: Sendable, Equatable {
     public let clips: [Clip]
     public let audioClips: [Clip]
     public let lanes: [Lane]
+    /// 프로젝트의 원본 미디어 목록(가져온 순서). 타임라인에 쓰지 않은 미디어도 포함한다(A-013).
+    public let media: [MediaRef]
     /// 미디어 id → 원본 프레임 수(범위 검사용)
     public let mediaFrames: [UUID: Int]
     /// 미디어 id → 소리 트랙이 있는가(삽입 때 연결된 소리 클립을 만들지)
@@ -92,16 +125,16 @@ public struct Timeline: Sendable, Equatable {
     public let durationFrames: Int
 
     /// durationFrames를 주지 않으면 마지막 클립 끝을 길이로 한다. 주면 마지막 클립 끝보다 짧을 수 없다.
-    public init(clips: [Clip] = [], audioClips: [Clip] = [], lanes: [Lane] = Lane.defaults, mediaFrames: [UUID: Int] = [:],
+    public init(clips: [Clip] = [], audioClips: [Clip] = [], lanes: [Lane] = Lane.defaults, media: [MediaRef] = [], mediaFrames: [UUID: Int] = [:],
                 mediaHasAudio: [UUID: Bool] = [:], durationFrames: Int? = nil) {
         let v = clips.sorted { $0.start < $1.start }, a = audioClips.sorted { $0.start < $1.start }
-        self.clips = v; self.audioClips = a; self.lanes = lanes
+        self.clips = v; self.audioClips = a; self.lanes = lanes; self.media = media
         self.mediaFrames = mediaFrames; self.mediaHasAudio = mediaHasAudio
         self.durationFrames = max(durationFrames ?? 0, v.last?.end ?? 0, a.map(\.end).max() ?? 0)
     }
-    private func rebuilt(video: [Clip]? = nil, audio: [Clip]? = nil, lanes: [Lane]? = nil, mediaFrames: [UUID: Int]? = nil,
+    private func rebuilt(video: [Clip]? = nil, audio: [Clip]? = nil, lanes: [Lane]? = nil, media: [MediaRef]? = nil, mediaFrames: [UUID: Int]? = nil,
                          mediaHasAudio: [UUID: Bool]? = nil, duration: Int? = nil) -> Timeline {
-        Timeline(clips: video ?? clips, audioClips: audio ?? audioClips, lanes: lanes ?? self.lanes, mediaFrames: mediaFrames ?? self.mediaFrames,
+        Timeline(clips: video ?? clips, audioClips: audio ?? audioClips, lanes: lanes ?? self.lanes, media: media ?? self.media, mediaFrames: mediaFrames ?? self.mediaFrames,
                  mediaHasAudio: mediaHasAudio ?? self.mediaHasAudio, durationFrames: duration ?? durationFrames)
     }
 
@@ -174,10 +207,31 @@ public struct Timeline: Sendable, Equatable {
     }
     public func laneName(_ kind: LaneKind) -> String { lanes.first { $0.kind == kind }?.name ?? "" }
 
+    /// 미디어 등록(가져오기): 범위 검사 정보와 미디어 목록(MediaRef)에 넣는다. 이미 있으면 정보만 갱신한다.
     public func registering(_ asset: MediaAsset) -> Timeline {
         var m = mediaFrames; m[asset.id] = asset.frameCount
         var h = mediaHasAudio; h[asset.id] = asset.hasAudio
-        return rebuilt(mediaFrames: m, mediaHasAudio: h)
+        var refs = media
+        if let i = refs.firstIndex(where: { $0.id == asset.id }) { refs[i] = MediaRef(asset) } else { refs.append(MediaRef(asset)) }
+        return rebuilt(media: refs, mediaFrames: m, mediaHasAudio: h)
+    }
+    /// 프리뷰용(A-013): 쓸 수 없는 원본의 클립을 뺀 사본(그 구간은 검정·무음). 길이·다른 클립·레인은 그대로다.
+    /// 편집 상태가 아니라 프리뷰 구성에만 쓴다(빈틈과 구별해 화면에 따로 표시).
+    public func excludingMedia(_ ids: Set<UUID>) -> Timeline {
+        guard !ids.isEmpty else { return self }
+        return rebuilt(video: clips.filter { !ids.contains($0.mediaID) }, audio: audioClips.filter { !ids.contains($0.mediaID) })
+    }
+    /// 미디어 재연결(A-013): 같은 id에 새 원본을 붙인다. 이 미디어를 쓰는 모든 클립의 원본 구간이 새 파일 안에 있어야 하고,
+    /// 소리 클립이 쓰면 새 파일에 소리가 있어야 한다. 클립·ID·위치는 그대로다(줄이지 않음).
+    public func relinking(media id: UUID, to new: MediaRef) throws -> Timeline {
+        guard let i = media.firstIndex(where: { $0.id == id }), new.id == id else { throw EditError.unknownMedia }
+        let need = (clips + audioClips).filter { $0.mediaID == id }.map(\.sourceOut).max() ?? 0
+        guard new.frameCount >= need else { throw EditError.relinkTooShort(need: need, have: new.frameCount) }
+        if audioClips.contains(where: { $0.mediaID == id }), !new.hasAudio { throw EditError.relinkNoAudio }
+        var refs = media; refs[i] = new
+        var m = mediaFrames; m[id] = new.frameCount
+        var h = mediaHasAudio; h[id] = new.hasAudio
+        return try checked(rebuilt(media: refs, mediaFrames: m, mediaHasAudio: h))
     }
 
     // MARK: 편집 도우미
@@ -368,6 +422,13 @@ public struct EditHistory: Sendable {
 
     /// 실행 취소 대상이 아닌 변경(미디어 등록 등)
     public mutating func replaceWithoutUndo(_ t: Timeline) { current = Entry(timeline: t, focus: current.focus) }
+    /// 모든 단계(현재·실행 취소·다시 실행·드래그 기준)에 같은 변경을 적용한다(A-013: 미디어 가져오기는 실행 취소로 사라지지 않음)
+    public mutating func mapAll(_ f: (Timeline) -> Timeline) {
+        current = Entry(timeline: f(current.timeline), focus: current.focus)
+        undoStack = undoStack.map { Entry(timeline: f($0.timeline), focus: $0.focus) }
+        redoStack = redoStack.map { Entry(timeline: f($0.timeline), focus: $0.focus) }
+        if let g = gestureBase { gestureBase = Entry(timeline: f(g.timeline), focus: g.focus) }
+    }
 
     /// 한 번에 끝나는 편집. 같은 상태면 기록하지 않는다.
     public mutating func apply(_ t: Timeline, focus: UUID?) {

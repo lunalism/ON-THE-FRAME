@@ -44,7 +44,7 @@ enum KeyRouting {
         return a
     }
 
-    enum CommandAction: Equatable { case split, undo, redo, export }
+    enum CommandAction: Equatable { case split, undo, redo, export, newProject, openProject, save, saveAs }
 
     /// ⌘ 조합 → 명령. 글자는 수정 키를 뺀 문자로 맞추고, 한글 등 라틴 문자가 아닌 입력 소스에서는 키 코드(ANSI)로 맞춘다.
     static func commandAction(keyCode: UInt16, charactersIgnoringModifiers: String?, modifiers: NSEvent.ModifierFlags) -> CommandAction? {
@@ -56,8 +56,12 @@ enum KeyRouting {
             if letter("k", 40) { return .split }
             if letter("z", 6) { return .undo }
             if letter("e", 14) { return .export }
+            if letter("n", 45) { return .newProject }
+            if letter("o", 31) { return .openProject }
+            if letter("s", 1) { return .save }
         }
         if mods == [.command, .shift], letter("z", 6) { return .redo }
+        if mods == [.command, .shift], letter("s", 1) { return .saveAs }
         return nil
     }
 
@@ -151,7 +155,7 @@ enum KeyRouting {
             switch cmd {
             case .undo: NSApp.sendAction(Selector(("undo:")), to: nil, from: nil); return nil
             case .redo: NSApp.sendAction(Selector(("redo:")), to: nil, from: nil); return nil
-            case .split, .export: return e
+            case .split, .export, .newProject, .openProject, .save, .saveAs: return e   // 텍스트 입력 중: 메뉴(응답자 체인)로
             }
         }
         guard editorAcceptsShortcuts(store) else { return e }
@@ -162,7 +166,12 @@ enum KeyRouting {
         case .split: if !store.timeline.isEmpty, store.alert == nil, store.gestureBase == nil { store.splitAtPlayhead(); done = true }
         case .undo: if store.gestureBase == nil, store.history.canUndo { store.undo(); done = true }
         case .redo: if store.gestureBase == nil, store.history.canRedo { store.redo(); done = true }
-        case .export: if store.canExport, store.gestureBase == nil { store.presentExportPanel(); done = true }
+        case .export: if store.gestureBase == nil, store.exportBlockReason != nil || store.canExport { store.presentExportPanel(); done = true }
+        // 프로젝트 파일(A-013): 한국어 입력 소스에서도 한 번만 동작하도록 라우터가 처리한다
+        case .newProject: if store.gestureBase == nil { store.requestNewProject(); done = true }
+        case .openProject: if store.gestureBase == nil { store.requestOpenProject(nil); done = true }
+        case .save: if store.gestureBase == nil { store.saveProject(); done = true }
+        case .saveAs: if store.gestureBase == nil { store.saveProject(saveAs: true); done = true }
         }
         if !done { NSSound.beep() }   // 꺼진 동작: 메뉴 키 등가물과 같이 경고음만
         return nil

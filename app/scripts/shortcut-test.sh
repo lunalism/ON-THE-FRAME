@@ -4,7 +4,7 @@
 # TRACE=1이면 키 경로 기록(-OTFKeyTrace)을 켠다.
 set -euo pipefail
 cd "${0:A:h}/.."
-APP=.build/DerivedData/Build/Products/Debug/OnTheFrame.app
+APP=${APP:-.build/DerivedData/Build/Products/Debug/OnTheFrame.app}
 [[ -d $APP ]] || { echo "build first: scripts/build.sh"; exit 2 }
 [[ -f .build/test-work/fixtures/otf-A.mp4 ]] || { swift build --package-path Engine --product otf-dev >/dev/null; Engine/.build/debug/otf-dev fixtures .build/test-work/fixtures; }
 RUN=selftest-work/keys-$(date -u +%Y%m%dT%H%M%SZ)

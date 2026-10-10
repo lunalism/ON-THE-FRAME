@@ -1,4 +1,5 @@
 import AppKit
+import OnTheFrameEngine
 import SwiftUI
 
 @main
@@ -15,10 +16,23 @@ struct OnTheFrameApp: App {
         // 창 위치·크기는 EditorLayout이 처음 70% 가운데 / 마지막 보통 창 되살리기로 직접 관리한다(SwiftUI 창 복원과 겹치지 않게 끔)
         .restorationBehavior(.disabled)
         .commands {
-            CommandGroup(replacing: .newItem) {}
-            CommandGroup(after: .newItem) {
+            // 파일(A-013): 프로젝트 하나를 편집기 창 하나에서. 새로 만들기·열기·최근·Finder 열기는 같은 저장하지 않은 변경 처리를 거친다.
+            CommandGroup(replacing: .newItem) {
+                Button("새 프로젝트") { store.requestNewProject() }.keyboardShortcut("n")
+                Button("프로젝트 열기…") { store.requestOpenProject(nil) }.keyboardShortcut("o")
+                Menu("최근 프로젝트") {
+                    ForEach(store.recentProjects) { r in Button(r.name) { store.openRecent(r) } }
+                    if !store.recentProjects.isEmpty { Divider() }
+                    Button("목록 지우기") { store.clearRecents() }.disabled(store.recentProjects.isEmpty)
+                }
+                Divider()
                 Button("가져오기…") { store.presentImportPanel() }.keyboardShortcut("i")
-                Button("내보내기…") { store.presentExportPanel() }.keyboardShortcut("e").disabled(!store.canExport)
+                Button("내보내기…") { store.presentExportPanel() }.keyboardShortcut("e").disabled(!store.canExport && store.exportBlockReason == nil)
+                Button("미디어 재연결…") { store.relinkFirstMissing() }.disabled(store.missingMedia.isEmpty)
+            }
+            CommandGroup(replacing: .saveItem) {
+                Button("프로젝트 저장") { store.saveProject() }.keyboardShortcut("s")
+                Button("다른 이름으로 저장…") { store.saveProject(saveAs: true) }.keyboardShortcut("s", modifiers: [.command, .shift])
             }
             // 단축키는 Premiere 방식 기본값(D-019, 완전 호환 아님). 키 입력은 KeyRouting이 실제 상태로 판단해 처리하고,
             // 메뉴는 표시·마우스 선택용이다(SwiftUI 메뉴 항목 상태는 메뉴를 열 때만 갱신되어 키 등가물로는 믿을 수 없었다).
@@ -65,17 +79,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         let args = ProcessInfo.processInfo.arguments
         guard let i = args.firstIndex(of: "-OTFLayoutSuite"), i + 1 < args.count, let d = UserDefaults(suiteName: args[i + 1]) else { return }
-        if args.contains("-OTFLayoutReset") { d.removePersistentDomain(forName: args[i + 1]) }
+        if args.contains("-OTFLayoutReset") { d.removePersistentDomain(forName: args[i + 1]); ProjectStore.shared.recentProjects = [] }   // 이미 읽어 둔 최근 목록도 비운다
         if let j = args.firstIndex(of: "-OTFLayoutInject"), j + 1 < args.count {
             let n = args[j + 1].split(separator: ",").compactMap { Double($0) }
             if n.count == 4 { d.set(NSStringFromRect(NSRect(x: n[0], y: n[1], width: n[2], height: n[3])), forKey: EditorLayout.frameKey) }
         }
     }
     #endif
+    /// 종료 때 이 프로젝트가 시작한 보안 범위 접근을 멈춘다
+    func applicationWillTerminate(_ notification: Notification) { ProjectStore.shared.stopAllScopes() }
     func application(_ application: NSApplication, open urls: [URL]) {
         ProjectStore.shared.ensureEditorVisible()
+        // Finder에서 연 프로젝트 파일(A-013): 같은 저장하지 않은 변경 처리. 여러 개면 첫 파일만(창 하나에 프로젝트 하나).
+        let projects = urls.filter { $0.pathExtension.lowercased() == ProjectFile.fileExtension }
+        if let p = projects.first {
+            ProjectStore.shared.requestOpenProject(p)
+            if projects.count > 1 { ProjectStore.shared.statusMessage = "프로젝트는 한 번에 하나만 엽니다: \(p.lastPathComponent)" }
+            let rest = urls.filter { $0.pathExtension.lowercased() != ProjectFile.fileExtension && !$0.hasDirectoryPath }
+            if !rest.isEmpty { ProjectStore.shared.importFiles(rest) }
+            return
+        }
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
+        if args.contains("-OTFSavePanelTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await SavePanelSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFProjectTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await ProjectSelfTest.run(folder: folder) }
+            return
+        }
         if args.contains("-OTFLaneTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await LaneSelfTest.run(folder: folder) }
             return

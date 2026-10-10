@@ -52,8 +52,10 @@ enum CloseSelfTest {
             let shown = await waitUntil(5) { s.alerts.isShowing && (s.alert?.title.contains(titlePart) ?? false) }
             let b = s.alerts.currentButtons
             let keys = b.map { $0.keyEquivalent.unicodeScalars.map { String($0.value, radix: 16) }.joined() }
-            let detail = "title \(s.alert?.title ?? "nil") buttons \(b.map(\.title)) keys \(keys) destructive \(b.count > 1 && b[1].hasDestructiveAction) queued \(s.alerts.queuedCount)"
-            let ok = shown && b.map(\.title).first == "취소" && b.first?.keyEquivalent == "\r" && b.count == 2 && b[1].hasDestructiveAction && s.alerts.queuedCount == 0
+            let detail = "title \(s.alert?.title ?? "nil") buttons \(b.map(\.title)) keys \(keys) destructive \(b.count > 2 && b[2].hasDestructiveAction) queued \(s.alerts.queuedCount)"
+            // A-013: 저장(기본, Return) · 취소(Esc) · 저장 안 함(파괴적)
+            let ok = shown && b.map(\.title) == ["저장", "취소", "저장 안 함"] && b[0].keyEquivalent == "\r" && b[1].keyEquivalent == "\u{1b}" && b[2].hasDestructiveAction
+                && s.alerts.queuedCount == 0
             return (ok, detail)
         }
         func dismissed() async -> Bool { await waitUntil(5) { !s.alerts.isShowing } }
@@ -61,29 +63,26 @@ enum CloseSelfTest {
         if mode == "window" {
             // 닫기 단추 → 확인 → 취소
             w.standardWindowButton(.closeButton)?.performClick(nil)
-            let p1 = await promptShown("창을 닫을까요")
-            s.alerts.pressButton(0)
+            let p1 = await promptShown("저장할까요")
+            s.alerts.pressButton(1)
             let c1 = await dismissed()
             check("closeButton.promptAndCancel", p1.ok && c1 && w.isVisible && s.timeline == tl, p1.detail)
-            // ⌘W(파일 > 닫기의 performClose:) → 확인 → Return(기본 = 취소)
+            // ⌘W(파일 > 닫기의 performClose:) → 확인 → Esc(= 취소). Return은 "저장"이다(저장 패널을 띄우므로 여기서는 누르지 않음).
             w.performClose(nil)
-            let p2 = await promptShown("창을 닫을까요")
-            if let k = NSApp.keyWindow { await key(36, "\r", k) }
-            let c2 = await dismissed()
-            check("cmdW.returnIsCancel", p2.ok && c2 && w.isVisible && s.timeline == tl, p2.detail)
-            // 모두 닫기(closeAll:) → 확인 → Esc 동작 기록 → 취소
-            NSApp.sendAction(Selector(("closeAll:")), to: nil, from: nil)
-            let p3 = await promptShown("창을 닫을까요")
+            let p2 = await promptShown("저장할까요")
             if let k = NSApp.keyWindow { await key(53, "\u{1b}", k) }
-            let escClosed = await waitUntil(1.5) { !s.alerts.isShowing }
-            if !escClosed { s.alerts.pressButton(0) }
+            let c2 = await dismissed()
+            check("cmdW.escIsCancel", p2.ok && c2 && w.isVisible && s.timeline == tl, p2.detail)
+            // 모두 닫기(closeAll:) → 확인 → 취소 단추
+            NSApp.sendAction(Selector(("closeAll:")), to: nil, from: nil)
+            let p3 = await promptShown("저장할까요")
+            s.alerts.pressButton(1)
             let c3 = await dismissed()
             check("closeAll.prompt", p3.ok && c3 && w.isVisible && s.timeline == tl, p3.detail)
-            check("esc.behavior", true, escClosed ? "Esc가 취소로 닫음" : "Esc로는 닫히지 않음(취소 단추·Return으로 닫음)")
             // 겹친 요청: 확인은 하나만
             w.performClose(nil); w.performClose(nil)
-            let p4 = await promptShown("창을 닫을까요")
-            s.alerts.pressButton(0)
+            let p4 = await promptShown("저장할까요")
+            s.alerts.pressButton(1)
             let c4 = await dismissed()
             check("duplicate.singlePrompt", p4.ok && c4 && w.isVisible, p4.detail)
             // 내보내기는 프로젝트 저장이 아니다: 내보내기 완료 뒤에도 확인
@@ -94,45 +93,45 @@ enum CloseSelfTest {
             if s.alerts.isShowing { s.alerts.pressButton(1) }
             _ = await dismissed()
             w.performClose(nil)
-            let p5 = await promptShown("창을 닫을까요")
-            s.alerts.pressButton(0)
+            let p5 = await promptShown("저장할까요")
+            s.alerts.pressButton(1)
             _ = await dismissed()
             check("afterExport.stillPrompts", exported && p5.ok && w.isVisible, p5.detail)
             // 마지막: 버리고 닫기 → 창이 닫히고(마지막 창) 앱이 두 번째 확인 없이 끝나야 한다(스크립트가 확인)
             r.pendingDiscard = "window"
             save()
             w.performClose(nil)
-            _ = await promptShown("창을 닫을까요")
-            s.alerts.pressButton(1)
+            _ = await promptShown("저장할까요")
+            s.alerts.pressButton(2)   // 저장 안 함
             return
         }
 
         // quit-export
         // 종료 → 확인 → 겹친 종료 요청은 두 번째 확인을 만들지 않음 → 취소
         requestQuit()
-        let q1 = await promptShown("종료할까요")
+        let q1 = await promptShown("저장할까요")
         requestQuit()
         try? await Task.sleep(nanoseconds: 300_000_000)
         let single = s.alerts.queuedCount == 0
-        s.alerts.pressButton(0)
+        s.alerts.pressButton(1)
         let qc = await dismissed()
         check("quit.promptCancelSingle", q1.ok && single && qc && w.isVisible && s.timeline == tl, q1.detail)
         // 앱을 숨긴 채 종료 요청: 확인이 보이도록 앱·창이 다시 나타나야 한다(숨긴 채 영원히 기다리지 않음)
         NSApp.hide(nil)
         _ = await waitUntil(3) { NSApp.isHidden }
         requestQuit()
-        let h1 = await promptShown("종료할까요")
+        let h1 = await promptShown("저장할까요")
         let visibleAgain = !NSApp.isHidden && w.isVisible
-        s.alerts.pressButton(0)
+        s.alerts.pressButton(1)
         _ = await dismissed()
         check("hidden.quitPromptVisible", h1.ok && visibleAgain, h1.detail)
         // 창을 최소화한 채 종료 요청
         w.miniaturize(nil)
         _ = await waitUntil(3) { w.isMiniaturized }
         requestQuit()
-        let m1 = await promptShown("종료할까요")
+        let m1 = await promptShown("저장할까요")
         let restored = !w.isMiniaturized && w.isVisible
-        s.alerts.pressButton(0)
+        s.alerts.pressButton(1)
         _ = await dismissed()
         check("minimized.quitPromptVisible", m1.ok && restored, m1.detail)
         // 내보내기 중 창 닫기 → 확인(내보내기 취소 안내) → 취소하면 내보내기는 계속
@@ -142,9 +141,9 @@ enum CloseSelfTest {
         s.startExport(.fromSavePanel(dest))
         _ = await waitUntil(20) { if case .running(let p) = s.exportPhase { return p > 0.02 } else { return false } }
         w.performClose(nil)
-        let e1 = await promptShown("창을 닫을까요")
+        let e1 = await promptShown("저장할까요")
         let mentionsExport = s.alert?.message.contains("진행 중인 내보내기는 취소") ?? false
-        s.alerts.pressButton(0)
+        s.alerts.pressButton(1)
         _ = await dismissed()
         let stillRunning: Bool = { if case .running = s.exportPhase { return true } else { return false } }()
         check("exporting.closePromptCancelKeepsExport", e1.ok && mentionsExport && stillRunning, e1.detail)
@@ -155,8 +154,8 @@ enum CloseSelfTest {
         r.pendingDiscard = "quit-export"
         save()
         requestQuit()
-        _ = await promptShown("종료할까요")
-        s.alerts.pressButton(1)
+        _ = await promptShown("저장할까요")
+        s.alerts.pressButton(2)   // 저장 안 함
     }
 
     final class TempBox: @unchecked Sendable {   // 안전성: 잠금으로만 접근
