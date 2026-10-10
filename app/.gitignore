@@ -1,0 +1,7 @@
+# 앱·엔진 빌드 산출물과 검증 작업 디렉터리만 무시한다.
+/.build/
+/Engine/.build/
+/Engine/.swiftpm/
+/selftest-work/
+/OnTheFrame.xcodeproj/project.xcworkspace/xcuserdata/
+/OnTheFrame.xcodeproj/xcuserdata/
