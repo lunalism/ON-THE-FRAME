@@ -69,10 +69,25 @@ final class ProjectStore {
     /// 가져오기 진행(표시용). nil이면 진행 중인 가져오기 묶음이 없다.
     /// 가져오기 진행(2026-10-11: 현재 단계·시작 시각 추가 — 첫 파일 확인이 길어도 멈춘 것처럼 보이지 않게). 단계는 진행률이 아니다.
     struct ImportProgress: Equatable { let total: Int; var completed: Int; var currentName: String?; var cancelling = false
-                                       var stage: String? = nil; var startedAt: Double = 0 }
+                                       var stage: String? = nil; var startedAt: Double = 0
+        /// 전체 진행률(2026-10-11): 처리한 파일(받아들임·거부 모두) ÷ 전체. 묶음 반영 전에는 1.0이 되지 않는다
+        /// (마지막 파일을 처리해도 (n−1)/n에 머문다). 1.0은 반영에 성공한 뒤의 완료 카드(ImportDone)에서만 보인다.
+        /// 파일 하나의 진행률은 믿을 만하게 잴 수 없어(검사 단계만 있고 전체 샘플 수를 모름) 넣지 않는다. 시계로 꾸미지 않는다.
+        var fraction: Double { total > 0 ? Double(min(completed, total - 1)) / Double(total) : 0 }
+    }
+    /// 가져오기 완료(2026-10-11): 묶음을 반영하고 하나 이상 추가했을 때만. 100%를 보이는 유일한 상태다.
+    /// 취소·창 닫기·버리기·모두 거부(추가 0)에는 만들지 않는다. 잠깐 보인 뒤 사라지고, 다른 작업이 시작되면 바로 사라진다.
+    struct ImportDone: Equatable { let total: Int; let added: Int; let rejected: Int; let skipped: Int; let elapsed: Double }
+    private(set) var importDone: ImportDone?
+    @ObservationIgnored private var importDoneToken = 0
+    static let importDoneSeconds = 1.2
     /// 프로젝트 열기 진행(2026-10-11): 파일 읽기 → 원본 확인(k/n, 현재 원본 이름·검사 단계). 취소하면 현재 프로젝트 그대로.
     struct OpenProgress: Equatable { var stage: String; var completed = 0; var total = 0; var currentName: String?; var cancelling = false; var startedAt: Double = 0 }
     private(set) var openProgress: OpenProgress?
+    /// 열기 요청부터 끝(적용·실패·취소)까지(2026-10-11 리뷰): 그동안 가져오기·내보내기를 시작하지 않고 대기열에 둔다.
+    /// openProgress는 열기 작업이 실제로 시작될 때에야 생겨, Finder에서 프로젝트와 미디어를 함께 열면 가져오기가 먼저 시작돼 이전 프로젝트에 들어갔다.
+    private(set) var openRequested = false
+    private func endOpenRequest() { openRequested = false; runNextOp() }
     @ObservationIgnored private var openTask: Task<Void, Never>?
     /// 열기 회차. 취소마다 1 늘고, 이전 회차의 늦은 결과는 버린다.
     @ObservationIgnored private var openEpoch = 0
@@ -222,7 +237,7 @@ final class ProjectStore {
 
     var mediaByID: [UUID: MediaAsset] { Dictionary(uniqueKeysWithValues: assets.map { ($0.id, $0) }) }
     var durationFrames: Int { timeline.durationFrames }
-    var canExport: Bool { !timeline.isEmpty && exportPhase == .idle && importProgress == nil && pendingOps.isEmpty && exportBlockReason == nil }
+    var canExport: Bool { !timeline.isEmpty && exportPhase == .idle && importProgress == nil && pendingOps.isEmpty && exportBlockReason == nil && openProgress == nil && !openRequested }
 
     // MARK: 가져오기
 
@@ -242,7 +257,8 @@ final class ProjectStore {
 
     /// 대기열에서 다음 작업을 시작한다(가져오기·내보내기 중 하나만 진행).
     private func runNextOp() {
-        guard openProgress == nil, importProgress == nil, importTask == nil, exportPhase == .idle, exportTask == nil, !pendingOps.isEmpty else { return }
+        guard openProgress == nil, !openRequested, importProgress == nil, importTask == nil, exportPhase == .idle, exportTask == nil, !pendingOps.isEmpty else { return }
+        clearImportDone()
         switch pendingOps.removeFirst() {
         case .importFiles(let urls): runImport(urls)
         case .export(let d): beginExport(d)
@@ -251,6 +267,7 @@ final class ProjectStore {
 
     private func runImport(_ urls: [URL]) {
         let epoch = importEpoch, s = settings, t0 = monoSeconds()
+        clearImportDone()
         importProgress = ImportProgress(total: urls.count, completed: 0, currentName: urls.first?.lastPathComponent, startedAt: t0)
         Self.trace.info("import start files=\(urls.count, privacy: .public)")
         importTask = Task { [weak self] in
@@ -294,6 +311,7 @@ final class ProjectStore {
 
     private func finishImport(epoch: Int, total: Int, results: [(URL, Result<MediaAsset, Error>)]) {
         importTask = nil
+        let startedAt = importProgress?.startedAt
         importProgress = nil
         defer { runNextOp() }
         // 취소·버리기·창 닫기 뒤: 아무것도 반영하지 않는다
@@ -301,24 +319,40 @@ final class ProjectStore {
             if !discardConfirmed && !editorClosedByUser { statusMessage = "가져오기를 취소했습니다. 이번에 고른 파일은 추가하지 않았습니다." }
             return
         }
-        var rejected: [String] = []
+        var rejected: [String] = [], added = 0, skipped = 0
         for (url, r) in results {   // 고른 순서대로 목록에 넣는다
             switch r {
             case .success(let a):
                 if assets.contains(where: { $0.identity.sameFile(as: a.identity) }) {
-                    statusMessage = "이미 가져온 파일입니다: \(url.lastPathComponent)"; continue
+                    statusMessage = "이미 가져온 파일입니다: \(url.lastPathComponent)"; skipped += 1; continue
                 }
                 // 가져오기는 실행 취소로 사라지지 않는다(모든 단계에 등록). 프로젝트 변경이라 저장하지 않은 상태가 된다.
                 assetCache[a.url.standardizedFileURL.path] = a
                 history.mapAll { $0.registering(a) }
+                // 끌기 중이면 저장소의 끌기 시작 상태도 같이(끌기 갱신·놓기가 이 미디어를 지우지 않게, 2026-10-11 리뷰)
+                gestureBase = gestureBase?.registering(a); gestureTimeline = gestureTimeline?.registering(a)
                 refreshAssets()
+                added += 1
                 Self.log.info("imported media frames=\(a.frameCount) timing=\(a.timing.detail, privacy: .public)")
             case .failure(let e):
                 rejected.append("\(url.lastPathComponent): \((e as? ProbeError)?.description ?? e.localizedDescription)")
             }
         }
         if !rejected.isEmpty { presentAlert(AlertInfo(title: Self.rejectTitle, message: rejected.joined(separator: "\n\n"))) }
+        // 반영에 성공하고 하나 이상 추가했을 때만 100% 완료 카드(다음 작업이 대기 중이면 runNextOp가 바로 지운다)
+        if added > 0 {
+            importDoneToken += 1
+            let token = importDoneToken
+            importDone = ImportDone(total: total, added: added, rejected: rejected.count, skipped: skipped, elapsed: monoSeconds() - (startedAt ?? monoSeconds()))
+            Self.trace.info("import applied added=\(added, privacy: .public) rejected=\(rejected.count, privacy: .public) skipped=\(skipped, privacy: .public)")
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(Self.importDoneSeconds * 1_000_000_000))
+                if let self, self.importDoneToken == token { self.importDone = nil }
+            }
+        }
     }
+    /// 완료 카드를 지운다(다음 가져오기·내보내기·열기 시작, 버리기).
+    func clearImportDone() { importDoneToken += 1; importDone = nil }
 
     /// 가져오기 취소(진행 중 묶음과 대기 중 가져오기 묶음). 결과는 버리고, 카드는 검사가 멈출 때까지 "취소하는 중"을 보인다.
     func cancelImport() {
@@ -681,13 +715,18 @@ final class ProjectStore {
         beginStill(before)
         let target = timeline
         generation += 1   // 진행 중인 재구성 결과는 버린다(새 상태로 다시 만든다)
+        stillRequest += 1
+        let request = stillRequest
         interactive.request(target.excludingMedia(missingUsedMedia)) { [weak self] shown in
-            guard let self, self.timeline == target else { return }
-            if shown { self.stillReleaseGeneration = self.generation + 1 }
+            // 더 새 정지 화면 요청이 있으면 그쪽이 다시 만든다. 그 밖에는 그사이 타임라인이 바뀌었어도(예: 가져오기 반영) 지금 상태로 다시 만들고
+            // 정지 화면을 내린다(generation을 이미 올려 진행 중 재구성을 버렸으므로 건너뛰면 프리뷰가 옛 항목·정지 화면에 남았다, 2026-10-11 리뷰).
+            guard let self, request == self.stillRequest else { return }
+            if shown || self.timeline != target { self.stillReleaseGeneration = self.generation + 1 }
             self.timelineChanged()
         }
         return true
     }
+    @ObservationIgnored private var stillRequest = 0
     /// 재구성이 적용된 뒤: 정지 화면을 내릴 차례면 새 항목이 표시될 준비가 됐을 때 내린다
     private func releaseStillIfDue(_ g: Int, item: AVPlayerItem) {
         guard let r = stillReleaseGeneration, g >= r else { return }
@@ -1184,9 +1223,9 @@ extension ProjectStore {
     }
     /// 프로젝트를 바꿀 수 있는가(가져오기·내보내기 중이면 아니다)
     func projectReplaceBlocked() -> Bool {
-        guard openProgress != nil || importProgress != nil || !pendingOps.isEmpty || exportPhase != .idle else { return false }
+        guard openProgress != nil || openRequested || importProgress != nil || !pendingOps.isEmpty || exportPhase != .idle else { return false }
         presentAlert(AlertInfo(title: "프로젝트를 바꿀 수 없습니다",
-                               message: openProgress != nil ? "다른 프로젝트를 여는 중입니다. 끝나거나 취소한 뒤 다시 시도하세요."
+                               message: openProgress != nil || openRequested ? "다른 프로젝트를 여는 중입니다. 끝나거나 취소한 뒤 다시 시도하세요."
                                                             : "가져오기 또는 내보내기가 진행 중입니다. 끝나거나 취소한 뒤 다시 시도하세요."))
         return true
     }
@@ -1352,6 +1391,7 @@ extension ProjectStore {
     func requestOpenProject(_ url: URL?, scoped: Bool = false) {
         guard !projectReplaceBlocked() else { if scoped { url?.stopAccessingSecurityScopedResource() }; return }
         Self.trace.info("open requested fromRecent=\(url != nil, privacy: .public)")
+        openRequested = true
         requestDiscard(.openProject, proceed: { [weak self] in
             guard let self else { return }
             var target = url
@@ -1370,17 +1410,17 @@ extension ProjectStore {
                     target = u
                 }
             }
-            guard let target else { return }
+            guard let target else { self.endOpenRequest(); return }
             self.openTask = Task { @MainActor in
                 let ok = await self.openProject(at: target)
                 if scoped, !ok { target.stopAccessingSecurityScopedResource() }
                 if scoped, ok { self.scopedURLs.append(target) }   // 최근 목록 북마크로 연 프로젝트 파일: 프로젝트가 바뀔 때 멈춘다
                 self.openTask = nil
-                self.runNextOp()
+                self.endOpenRequest()
             }
         }, cancel: { [weak self] in
             Self.trace.info("open cancelled at unsaved-changes prompt")
-            _ = self
+            self?.endOpenRequest()
             if scoped { url?.stopAccessingSecurityScopedResource() }
         })
     }
@@ -1404,7 +1444,8 @@ extension ProjectStore {
     func openProject(at url: URL) async -> Bool {
         guard openProgress == nil else { return false }
         openEpoch += 1
-        let epoch = openEpoch, t0 = monoSeconds(), s = settings
+        let epoch = openEpoch, t0 = monoSeconds(), s = settings, before = timeline
+        clearImportDone()
         openProgress = OpenProgress(stage: "프로젝트 파일 읽는 중", startedAt: t0)
         defer { openProgress = nil }   // 성공·실패·취소 모두(열기는 한 번에 하나: projectReplaceBlocked)
         func cancelled() -> Bool { epoch != openEpoch || Task.isCancelled }
@@ -1479,6 +1520,13 @@ extension ProjectStore {
             Self.trace.info("open media#\(i + 1, privacy: .public) \(found ? "found" : "missing", privacy: .public) in \(self.monoSeconds() - m0, format: .fixed(precision: 3), privacy: .public)s")
         }
         if cancelled() { return abandon(scopes) }
+        // 여는 동안 현재 프로젝트를 편집했으면 바꾸지 않는다(확인 없이 그 편집을 버리지 않게, 2026-10-11 리뷰)
+        if gestureBase != nil || timeline != before {
+            for u in scopes { u.stopAccessingSecurityScopedResource() }
+            Self.trace.info("open abandoned (edited during open)")
+            presentAlert(AlertInfo(title: "프로젝트를 열지 않았습니다", message: "여는 동안 현재 프로젝트가 바뀌었습니다. 변경 사항을 지키려고 \(url.lastPathComponent)을(를) 열지 않았습니다.\n\n현재 프로젝트는 그대로입니다. 다시 열어 주세요."))
+            return false
+        }
         stopAllScopes()
         scopedURLs = scopes
         replaceProject(timeline: t, url: url.standardizedFileURL, id: decoded.document.projectID, cache: cache, bookmarks: bm, missing: missing)
@@ -1544,8 +1592,12 @@ extension ProjectStore {
     /// 재연결 실행(검사 → 실행 취소 가능한 변경). 성공하면 true.
     @discardableResult
     func relinkMedia(_ id: UUID, to url: URL) async -> Bool {
+        let project = projectID
         do {
             let a = try await MediaProbe.inspect(url, settings: settings).withID(id)
+            // 검사 중 시작한 끌기가 끝날 때까지 기다린다(끌기 중 기록 변경은 precondition 실패, 2026-10-11 리뷰). 그사이 프로젝트가 바뀌면 그만둔다.
+            while gestureBase != nil { try? await Task.sleep(nanoseconds: 50_000_000) }
+            guard projectID == project, openProgress == nil else { statusMessage = "프로젝트가 바뀌어 다시 연결하지 않았습니다."; return false }
             let t = try timeline.relinking(media: id, to: MediaRef(a))
             assetCache[a.url.standardizedFileURL.path] = a
             missingMedia[id] = nil

@@ -285,15 +285,18 @@ enum SelfTest {
         } else { check("export.timedSources", false, "timed fixtures not imported") }
 
         // 4l. A-011 가져오기 취소: 첫 파일 검사가 끝난 뒤 취소하면 이번 묶음은 아무것도 추가하지 않고, 늦은 결과도 버린다
+        // 2026-10-11: 검사가 빨라져(샘플 커서) 세 파일이 관찰 전에 끝날 수 있어, 파일마다 Debug 전용 지연을 넣어 첫 파일 뒤에 끼어든다.
         let before = store.assets.map(\.id)
+        store.probeDelayForTest = 400_000_000
         store.importFiles(["otf-TA.mp4", "otf-TB.mp4", "otf-F23976.mp4"].map { src.appendingPathComponent($0) })
         _ = await waitUntil(30) { (store.importProgress?.completed ?? 0) >= 1 }
         let completedAtCancel = store.importProgress?.completed ?? -1
         store.cancelImport()
+        store.probeDelayForTest = 0
         let cancellingShown = store.importProgress?.cancelling == true
         _ = await waitUntil(30) { store.importProgress == nil }
         try? await Task.sleep(nanoseconds: 1_000_000_000)   // 늦게 끝난 검사가 있어도 추가되지 않아야 한다
-        check("import.cancel", completedAtCancel >= 1 && cancellingShown && store.assets.map(\.id) == before && store.importing == 0
+        check("import.cancel", completedAtCancel >= 1 && cancellingShown && store.assets.map(\.id) == before && store.importing == 0 && store.importDone == nil
               && (store.statusMessage ?? "").contains("가져오기를 취소"), "completed at cancel \(completedAtCancel), \(store.statusMessage ?? "")")
         // 4m. 차례 실행: 내보내는 동안 고른 가져오기는 대기열에 들어가고 카드는 하나다. 대기 중 가져오기 취소, 내보내기 취소.
         let e8 = out.appendingPathComponent("queued.mp4")

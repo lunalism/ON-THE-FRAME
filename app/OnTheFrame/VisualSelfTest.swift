@@ -57,11 +57,12 @@ enum VisualSelfTest {
             ("export-hour", .init(title: "내보내는 중", percentText: "61%", infoLines: [], progress: 0.61, timeLine: "경과 1:02:03 · 남은 시간 약 39:10", cancelTitle: "취소", cancelling: false, onCancel: {})),
             ("export-finalizing", .init(title: "내보내는 중", percentText: "99%", infoLines: [], progress: 0.99, timeLine: "경과 00:41 · 마무리 중…", cancelTitle: "취소", cancelling: false, onCancel: {})),
             ("export-cancelling", .init(title: "내보내기 취소하는 중…", percentText: "57%", infoLines: [], progress: 0.57, timeLine: "경과 00:20 · 취소 중", cancelTitle: "취소", cancelling: true, onCancel: {})),
-            ("import", .init(title: "영상 가져오는 중…", percentText: nil, infoLines: ["아주-긴-파일-이름-2026-10-10-여행-영상-원본-촬영본-최종-수정본.mp4", "2/5개 확인 완료"], progress: nil, timeLine: nil, cancelTitle: "취소", cancelling: false, onCancel: {})),
-            ("import-cancelling", .init(title: "가져오기 취소하는 중…", percentText: nil, infoLines: ["2/5개 확인 완료"], progress: nil, timeLine: nil, cancelTitle: "취소", cancelling: true, onCancel: {})),
+            ("import", .init(title: "미디어 가져오는 중…", percentText: "40%", infoLines: ["2/5개 처리"], activity: "아주-긴-파일-이름-2026-10-10-여행-영상-원본-촬영본-최종-수정본.mp4", progress: 0.4, timeLine: "경과 00:07 · 프레임 시각 확인 중", cancelTitle: "취소", cancelling: false, onCancel: {})),
+            ("import-cancelling", .init(title: "가져오기 취소하는 중…", percentText: "40%", infoLines: ["2/5개 처리"], progress: 0.4, timeLine: "경과 00:08 · 취소하는 중", cancelTitle: "취소", cancelling: true, onCancel: {})),
+            ("import-done", .init(title: "가져오기 완료", percentText: "100%", infoLines: ["5/5개 처리 · 추가 4개 · 가져올 수 없음 1개"], progress: 1, timeLine: "경과 00:12", cancelTitle: nil, cancelling: false, onCancel: {})),
         ]
         for (n, v) in states {
-            for (width, wn) in [(CGFloat(460), "wide"), (CGFloat(320), "narrow")] where n.hasPrefix("export-estimate") || n == "import" || wn == "wide" {
+            for (width, wn) in [(CGFloat(460), "wide"), (CGFloat(320), "narrow")] where n.hasPrefix("export-estimate") || n.hasPrefix("import") || wn == "wide" {
                 render(v.frame(width: width).padding(20).background(Color(white: 0.5)), to: vis.appendingPathComponent("card-\(n)-\(wn).png"))
             }
         }

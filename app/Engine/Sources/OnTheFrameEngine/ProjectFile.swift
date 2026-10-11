@@ -91,7 +91,11 @@ public enum ProjectFile {
         if v == 1 {
             guard doc.lanes.count == 2, Set(doc.lanes.map(\.kind)) == [.video, .audio] else { throw LoadError.invalid("레인") }
             lanes = [doc.lanes.first { $0.kind == .video }!, doc.lanes.first { $0.kind == .audio }!]
-        } else { lanes = doc.lanes }
+        } else {
+            // 형식 2 이상도 두 종류 레인이 하나씩은 있어야 한다(레인 없는 클립이 갈 곳이 없으면 잘못된 파일, 2026-10-11 리뷰)
+            guard Set(doc.lanes.map(\.kind)) == [.video, .audio] else { throw LoadError.invalid("레인") }
+            lanes = doc.lanes
+        }
         guard Set(lanes.map(\.id)).count == lanes.count, lanes.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }),
               lanes.allSatisfy({ (0...100).contains($0.volumePercent) }) else { throw LoadError.invalid("레인") }
         let laneKinds = Dictionary(uniqueKeysWithValues: lanes.map { ($0.id, $0.kind) })

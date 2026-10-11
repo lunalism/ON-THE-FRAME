@@ -71,6 +71,12 @@ final class ProjectFileTests: XCTestCase {
         reject(try json { var v = $0["videoClips"] as! [[String: Any]]; v[0]["length"] = 1000; $0["videoClips"] = v }, { if case .invalid = $0 { return true }; return false }, "source range")
         reject(try json { var a = $0["audioClips"] as! [[String: Any]]; a[0].removeValue(forKey: "link"); $0["audioClips"] = a }, { if case .invalid = $0 { return true }; return false }, "half link")
         reject(try json { var l = $0["lanes"] as! [[String: Any]]; l[1]["name"] = "  "; $0["lanes"] = l }, { if case .invalid = $0 { return true }; return false }, "empty lane name")
+        // 2026-10-11 리뷰: 오디오 레인이 없고 레인 없는 소리 클립이 둘 이상이면 Timeline.init의 정렬에서 멈췄다(강제 언래핑) → 잘못된 파일로 거부
+        reject(try json { o in
+            o["lanes"] = (o["lanes"] as! [[String: Any]]).filter { $0["kind"] as? String == "video" }
+            o["audioClips"] = (o["audioClips"] as! [[String: Any]]).map { var c = $0; c.removeValue(forKey: "lane"); return c }
+            XCTAssertGreaterThanOrEqual((o["audioClips"] as! [Any]).count, 2)
+        }, { if case .invalid = $0 { return true }; return false }, "no audio lane, lane-less audio clips")
     }
 
     func testRelinkValidatesRangesAndAudioAndKeepsClips() throws {

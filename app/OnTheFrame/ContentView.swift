@@ -73,6 +73,7 @@ struct ContentView: View {
                 if store.exportPhase != .idle { ExportProgressCard(store: store) }
                 else if let ip = store.importProgress { ImportProgressCard(store: store, progress: ip) { store.cancelImport() } }
                 else if let op = store.openProgress { OpenProgressCard(store: store, progress: op) { store.cancelOpen() } }
+                else if let d = store.importDone { ImportDoneCard(done: d) }
             }
             #if DEBUG
             .background(GeometryReader { g in Color.clear.preference(key: CardFrameKey.self, value: g.frame(in: .named("editorRoot"))) })
@@ -637,6 +638,7 @@ struct AudioLaneAdjust: View {
             Toggle("레인 음소거", isOn: Binding(get: { lane.muted }, set: { store.setLaneMuted(lane.id, $0) }))
                 .toggleStyle(.checkbox).accessibilityLabel("레인 음소거")
             VolumeRow(label: "레인 음량", value: lane.volumePercent, axLabel: "레인 음량") { store.setLaneVolume(lane.id, $0) }
+                .id(lane.id)   // 다른 레인을 고르면 입력 중이던 숫자를 버린다(다음 레인에 적용되지 않게)
                 .disabled(lane.muted)
             Text("이 레인의 모든 클립에 곱해집니다(클립마다 음량은 클립을 골라 따로 바꿉니다). 0%는 무음, 100%는 원래 크기이며, 자동으로 줄이지 않으므로 여러 레인의 합이 크면 소리가 잘릴 수 있습니다.")
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -657,7 +659,8 @@ struct VolumeRow: View {
     var body: some View {
         HStack(spacing: 6) {
             Text(label).font(.caption).foregroundStyle(.secondary).fixedSize()
-            GainSlider(value: value, axLabel: axLabel, onLive: { live = $0; if let v = $0 { text = v } }, onCommit: commit)
+            // 끌기가 끝나거나 Esc로 취소되면 숫자 칸을 저장된 값으로 되돌린다(놓아서 바뀐 값은 onChange(of: value)가 다시 맞춘다)
+            GainSlider(value: value, axLabel: axLabel, onLive: { live = $0; text = $0 ?? value }, onCommit: commit)
                 .frame(minWidth: 50, maxWidth: .infinity, minHeight: 18, maxHeight: 18)
             TextField(label, value: $text, format: .number.grouping(.never))
                 .textFieldStyle(.roundedBorder).font(.caption).monospacedDigit().frame(width: 40)
@@ -671,7 +674,7 @@ struct VolumeRow: View {
 }
 
 /// 소리 클립 음량·음소거·페이드(2026-10-11). 이 클립에만 적용된다(같은 레인의 다른 클립·레인 음량은 그대로).
-/// 페이드 길이는 초(1/30 s 격자로 맞춤), Return 또는 칸을 벗어나면 한 단계. 다른 쪽 페이드와 겹치지 않게 줄인다.
+/// 페이드 길이는 초(1/30 s 격자로 맞춤), Return을 누르면 한 단계(누르지 않고 다른 곳을 고르면 입력은 버린다). 다른 쪽 페이드와 겹치지 않게 줄인다.
 struct ClipAudioAdjust: View {
     @Bindable var store: ProjectStore
     let clip: Clip
@@ -685,6 +688,7 @@ struct ClipAudioAdjust: View {
             Toggle("클립 음소거", isOn: Binding(get: { a.muted }, set: { store.setClipAudio(clip.id, muted: $0) }))
                 .toggleStyle(.checkbox).accessibilityLabel("클립 음소거")
             VolumeRow(label: "클립 음량", value: a.volumePercent, axLabel: "클립 음량") { store.setClipAudio(clip.id, volumePercent: $0) }
+                .id(clip.id)   // 다른 클립을 고르면 입력 중이던 숫자를 버린다(다음 클립에 적용되지 않게)
                 .disabled(a.muted)
             fadeRow("페이드 인", $fadeIn, partial: a.fadeIn.offset > 0 ? "자른 조각: 원래 페이드의 뒷부분(\(Int((a.fadeIn.edgeGain * 100).rounded()))%에서 시작)" : nil) {
                 store.setClipAudio(clip.id, fadeInFrames: frames(fadeIn))
@@ -753,7 +757,7 @@ struct LaneDestinationAdjust: View {
     }
 }
 
-/// 레인 이름·순서·삭제(A-014). 이름은 Return 또는 칸을 벗어나면 한 단계로 바꾸고, 비우면 이전 이름을 유지한다.
+/// 레인 이름·순서·삭제(A-014). 이름은 Return을 누르면 한 단계로 바꾸고(누르지 않고 다른 곳을 고르면 입력은 버린다), 비우면 이전 이름을 유지한다.
 struct LaneSettingsAdjust: View {
     @Bindable var store: ProjectStore
     let lane: Lane
@@ -823,6 +827,19 @@ struct OTFProgressBar: View {
     }
 }
 
+/// 작은 회전 표시(2026-10-11, 가져오기 현재 파일): 순수 SwiftUI 호(시스템 ProgressView는 화면 밖 그림에 빈 표시로 나와 자체 검사로 볼 수 없었다).
+/// 돌아가는 것은 "진행 중"을 뜻할 뿐 진행률이 아니다.
+struct OTFSpinner: View {
+    var body: some View {
+        TimelineView(.animation) { ctx in
+            let a = ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1) * 360
+            Circle().trim(from: 0, to: 0.72).stroke(OTFTheme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .rotationEffect(.degrees(a))
+        }
+        .frame(width: 12, height: 12)
+    }
+}
+
 /// 취소 단추: 보이는 바탕·흰 글자·키보드 초점 표시(전체 키보드 접근에서 Tab으로 올 때)
 struct OTFCardButtonStyle: ButtonStyle {
     var primary = false
@@ -852,9 +869,12 @@ struct TaskProgressCard: View {
     let title: String
     let percentText: String?
     let infoLines: [String]
+    /// 현재 항목(파일 이름 등)과 그 옆의 회전 표시(2026-10-11, 가져오기): 막대의 전체 진행률과 따로, 항목 하나의 진행률을 모를 때.
+    var activity: String? = nil
     let progress: Double?
     let timeLine: String?
-    let cancelTitle: String
+    /// nil이면 취소 단추 없음(끝난 상태 카드)
+    let cancelTitle: String?
     let cancelling: Bool
     let onCancel: () -> Void
 
@@ -869,6 +889,12 @@ struct TaskProgressCard: View {
                 Spacer(minLength: 8)
                 if let percentText {
                     Text(percentText).font(.system(size: 15, weight: .semibold)).monospacedDigit().foregroundStyle(OTFTheme.primaryText)
+                }
+            }
+            if let activity {
+                HStack(spacing: 7) {
+                    OTFSpinner().accessibilityLabel("현재 파일 확인 중(파일 진행률 알 수 없음)")
+                    Text(activity).font(.system(size: 13)).foregroundStyle(OTFTheme.primaryText).lineLimit(1).truncationMode(.middle).help(activity)
                 }
             }
             ForEach(infoLines, id: \.self) { d in
@@ -886,9 +912,11 @@ struct TaskProgressCard: View {
                     Text(timeLine).font(.system(size: 13)).monospacedDigit().foregroundStyle(OTFTheme.secondaryText).lineLimit(1)
                 }
                 Spacer(minLength: 8)
-                Button(cancelling ? "취소하는 중…" : cancelTitle, action: onCancel)
-                    .buttonStyle(OTFCardButtonStyle())
-                    .disabled(cancelling)
+                if let cancelTitle {
+                    Button(cancelling ? "취소하는 중…" : cancelTitle, action: onCancel)
+                        .buttonStyle(OTFCardButtonStyle())
+                        .disabled(cancelling)
+                }
             }
         }
         .padding(.horizontal, 18).padding(.vertical, 16)
@@ -902,21 +930,37 @@ struct TaskProgressCard: View {
     }
 }
 
-/// 가져오기 카드(2026-10-11 갱신): 현재 파일, 끝난 수/전체 수, 현재 단계(파일 여는 중·형식 확인 중·프레임 시각 확인 중), 경과 시간.
-/// 파일 하나의 진행률은 알 수 없어 막대 대신 회전 표시(꾸민 백분율 없음). 1초마다 경과 시간을 다시 그린다(단조 시계).
+/// 가져오기 카드(2026-10-11 갱신): 막대는 묶음 전체 진행률(처리한 파일 ÷ 전체, 받아들임·거부 모두, 반영 전에는 100% 아님).
+/// 파일 하나의 진행률은 잴 수 없어 현재 파일 이름 옆에 회전 표시를 따로 둔다(막대에 움직이는 조각·꾸민 백분율 없음).
+/// 처리한 수/전체 수, 경과 시간·현재 단계. 1초마다 경과 시간을 다시 그린다(단조 시계, 진행률에는 쓰지 않음).
 struct ImportProgressCard: View {
     @Bindable var store: ProjectStore
     let progress: ProjectStore.ImportProgress
     let onCancel: () -> Void
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
-            var lines = ["\(progress.completed)/\(progress.total)개 확인 완료"]
-            if let n = progress.currentName, progress.completed < progress.total, !progress.cancelling { lines.insert(n, at: 0) }
+            let f = progress.fraction
+            let current = progress.completed < progress.total && !progress.cancelling ? progress.currentName : nil
             let stage = progress.cancelling ? "취소하는 중" : (progress.stage ?? "확인 준비 중")
-            return TaskProgressCard(title: progress.cancelling ? "가져오기 취소하는 중…" : "미디어 가져오는 중…", percentText: nil, infoLines: lines,
-                                    progress: nil, timeLine: ClockText.elapsed(store.monoSeconds() - progress.startedAt) + " · " + stage,
+            return TaskProgressCard(title: progress.cancelling ? "가져오기 취소하는 중…" : "미디어 가져오는 중…", percentText: ImportProgressCard.percent(f),
+                                    infoLines: ["\(progress.completed)/\(progress.total)개 처리"], activity: current,
+                                    progress: f, timeLine: ClockText.elapsed(store.monoSeconds() - progress.startedAt) + " · " + stage,
                                     cancelTitle: "취소", cancelling: progress.cancelling, onCancel: onCancel)
         }
+    }
+    /// 내림한 백분율(반올림으로 100%를 미리 보이지 않게)
+    static func percent(_ f: Double) -> String { "\(Int((max(0, min(1, f)) * 100).rounded(.down)))%" }
+}
+
+/// 가져오기 완료 카드(2026-10-11): 묶음을 반영하고 하나 이상 추가한 뒤에만 100%. 잠깐 보인 뒤 사라진다(취소 단추 없음).
+struct ImportDoneCard: View {
+    let done: ProjectStore.ImportDone
+    var body: some View {
+        var parts = ["추가 \(done.added)개"]
+        if done.rejected > 0 { parts.append("가져올 수 없음 \(done.rejected)개") }
+        if done.skipped > 0 { parts.append("이미 있음 \(done.skipped)개") }
+        return TaskProgressCard(title: "가져오기 완료", percentText: "100%", infoLines: ["\(done.total)/\(done.total)개 처리 · " + parts.joined(separator: " · ")],
+                                progress: 1, timeLine: ClockText.elapsed(done.elapsed), cancelTitle: nil, cancelling: false, onCancel: {})
     }
 }
 

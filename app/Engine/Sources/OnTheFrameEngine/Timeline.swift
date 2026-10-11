@@ -348,7 +348,7 @@ public struct Timeline: Sendable, Equatable {
         func normalize(_ cs: [Clip], _ kind: LaneKind) -> [Clip] {
             let first = lanes.first { $0.kind == kind }?.id
             return cs.map { $0.lane == nil ? $0.with(lane: .some(first)) : $0 }
-                .sorted { (order[$0.lane!] ?? Int.max, $0.start) < (order[$1.lane!] ?? Int.max, $1.start) }
+                .sorted { ($0.lane.flatMap { order[$0] } ?? Int.max, $0.start) < ($1.lane.flatMap { order[$0] } ?? Int.max, $1.start) }
         }
         let v = normalize(clips, .video), a = normalize(audioClips, .audio)
         self.clips = v; self.audioClips = a; self.lanes = lanes; self.media = media

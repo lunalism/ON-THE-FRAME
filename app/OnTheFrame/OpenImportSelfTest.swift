@@ -127,6 +127,73 @@ enum OpenImportSelfTest {
         try? await Task.sleep(nanoseconds: 2_500_000_000)
         s.probeDelayForTest = 0; s.importPanelOverrideForTest = nil
         check("import.cancelNoLateResults", importCancelling && s.assets.isEmpty && s.importing == 0 && (s.statusMessage ?? "").contains("가져오기를 취소"), s.statusMessage ?? "")
+        check("import.cancelNotCompleted", s.importDone == nil, "importDone \(String(describing: s.importDone))")
+
+        // 7. 전체 진행률(2026-10-11): 처리한 파일(받아들임·거부) ÷ 전체, 반영 전에는 100% 아님, 100%는 반영 성공 뒤 완료 카드에서만.
+        //    파일마다 Debug 지연을 넣어 중간 상태를 본다(진행률은 지연과 무관하게 처리 수로만 바뀐다).
+        let notMedia = src.appendingPathComponent("not-media.mp4")
+        try? Data("not a video".utf8).write(to: notMedia)
+        func observe(_ urls: [URL]) async -> (fractions: [Double], percents: [String], spinnerNames: Set<String>, done: ProjectStore.ImportDone?, doneSeen: Bool, fullWhileRunning: Bool) {
+            s.probeDelayForTest = 400_000_000
+            s.importPanelOverrideForTest = { urls }
+            _ = await menu("가져오기…")
+            var fr: [Double] = [], pc: [String] = [], names = Set<String>(), full = false, done: ProjectStore.ImportDone?
+            let t0 = Date()
+            while Date().timeIntervalSince(t0) < 20 {
+                if let ip = s.importProgress {
+                    if fr.last != ip.fraction { fr.append(ip.fraction); pc.append(ImportProgressCard.percent(ip.fraction)) }
+                    if ip.fraction >= 1 { full = true }
+                    if let n = ip.currentName, ip.completed < ip.total { names.insert(n) }
+                } else if s.importing == 0 { done = s.importDone; break }
+                try? await Task.sleep(nanoseconds: 5_000_000)
+            }
+            s.probeDelayForTest = 0; s.importPanelOverrideForTest = nil
+            return (fr, pc, names, done, done != nil, full)
+        }
+        let two = await observe([notMedia, src.appendingPathComponent("otf-TB.mp4")])
+        let rejectAlert = await LaneSelfTest.waitUntil(3) { s.alerts.isShowing }
+        if s.alerts.isShowing { await dismissAlert() }
+        check("import.overallProgressTwoFiles", two.fractions == [0, 0.5] && two.percents == ["0%", "50%"] && !two.fullWhileRunning
+              && two.done == ProjectStore.ImportDone(total: 2, added: 1, rejected: 1, skipped: 0, elapsed: two.done?.elapsed ?? 0) && rejectAlert
+              && s.assets.map(\.name) == ["otf-TB.mp4"] && two.spinnerNames == ["not-media.mp4", "otf-TB.mp4"],
+              "fractions \(two.fractions) percents \(two.percents) done \(String(describing: two.done)) alert \(rejectAlert) spinner names \(two.spinnerNames.count)")
+        let doneGone = await LaneSelfTest.waitUntil(ProjectStore.importDoneSeconds + 2) { s.importDone == nil }
+        check("import.doneCardDismisses", doneGone, "")
+        let allBad = await observe([notMedia])
+        if s.alerts.isShowing { await dismissAlert() }
+        check("import.allRejectedNotCompleted", allBad.fractions == [0] && !allBad.doneSeen && s.importDone == nil && s.assets.count == 1,
+              "fractions \(allBad.fractions) done \(String(describing: allBad.done))")
+        try? FileManager.default.removeItem(at: notMedia)
+
+        // 8. 2026-10-11 리뷰: Finder에서 프로젝트와 미디어를 함께 연 경로(열기 요청 직후 가져오기). 가져오기는 열기가 끝난 뒤 새 프로젝트에 들어가야 한다.
+        _ = await menu("새 프로젝트")
+        if s.alerts.isShowing { s.alerts.pressButton(2); _ = await LaneSelfTest.waitUntil(3) { !s.alerts.isShowing } }
+        _ = await LaneSelfTest.waitUntil(3) { s.projectURL == nil }
+        let pv5 = folder.appendingPathComponent("p-v5.ontheframe")
+        s.probeDelayForTest = 300_000_000
+        s.requestOpenProject(pv5)
+        s.importFiles([src.appendingPathComponent("long-180s.mp4")])
+        var importBeforeOpen = false
+        let f0 = Date()
+        while Date().timeIntervalSince(f0) < 20, s.openRequested || s.importProgress != nil || s.importing > 0 {
+            if s.importProgress != nil && s.projectURL != pv5.standardizedFileURL { importBeforeOpen = true }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        s.probeDelayForTest = 0
+        let openedNames = Set(s.assets.map(\.name))
+        check("open.withFinderImportQueued", !importBeforeOpen && s.projectURL == pv5.standardizedFileURL && openedNames.contains("long-180s.mp4") && openedNames.contains("otf-TA.mp4"),
+              "importBeforeOpen \(importBeforeOpen) project \(s.projectURL?.lastPathComponent ?? "nil") assets \(openedNames.sorted())")
+        // 9. 열기 중에는 내보내기를 시작할 수 없다
+        s.probeDelayForTest = 600_000_000
+        s.requestOpenProject(folder.appendingPathComponent("p-v4.ontheframe"))
+        let promptOff = !s.canExport   // 저장하지 않은 변경 확인 중(가져오기로 바뀐 프로젝트)
+        if await LaneSelfTest.waitUntil(2, { s.alerts.isShowing }) { s.alerts.pressButton(2) }   // 저장 안 함
+        _ = await LaneSelfTest.waitUntil(3) { s.openProgress != nil }
+        let exportOff = promptOff && s.openProgress != nil && !s.canExport
+        _ = await LaneSelfTest.waitUntil(20) { !s.openRequested }
+        s.probeDelayForTest = 0
+        if s.alerts.isShowing { await dismissAlert() }
+        check("open.blocksExport", exportOff, "canExport during open \(!exportOff)")
         finish(folder, checks)
     }
 

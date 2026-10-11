@@ -125,7 +125,8 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
     let store: ProjectStore
     var lanes: [Lane] = Lane.defaults
     var selectedLane: UUID?
-    var verticalOffset: CGFloat = 0
+    /// 이름 바꾸는 칸도 세로 스크롤을 따라간다(2026-10-11 리뷰: 칸이 다른 레인 위에 남았다)
+    var verticalOffset: CGFloat = 0 { didSet { if let f = editor, let id = editingLane { f.frame = editorFrame(id) } } }
     private(set) var editor: NSTextField?
     private(set) var editingLane: UUID?
     private var finishing = false
@@ -215,6 +216,7 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
     @objc private func addVideoFromMenu(_ sender: NSMenuItem) { store.addLane(.video) }
     @objc private func addAudioFromMenu(_ sender: NSMenuItem) { store.addLane(.audio) }
 
+    func editorFrame(_ id: UUID) -> NSRect { let r = rowRect(id); return r.insetBy(dx: 4, dy: max(2, (r.height - 22) / 2)) }
     func beginRename(_ id: UUID) {
         guard editor == nil, let l = lanes.first(where: { $0.id == id }), store.gestureBase == nil else { return }
         let f = NSTextField(string: l.name)
@@ -222,8 +224,7 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
         f.delegate = self
         f.focusRingType = .default
         f.setAccessibilityLabel("레인 이름")
-        let r = rowRect(id)
-        f.frame = r.insetBy(dx: 4, dy: max(2, (r.height - 22) / 2))
+        f.frame = editorFrame(id)
         addSubview(f)
         editor = f; editingLane = id; finishing = false
         needsDisplay = true
@@ -502,9 +503,14 @@ final class TimelineNSView: NSView {
     /// 손잡이 사각형(8×8): 페이드 인은 페이드 끝, 페이드 아웃은 페이드 시작 위치의 클립 위쪽
     func fadeHandleRect(_ c: Clip, _ e: ProjectStore.FadeEdge, _ r: NSRect) -> NSRect {
         let a = c.effectiveAudio
-        let hx = e == .fadeIn ? x(c.start + a.fadeIn.visible(in: c.length)) : x(c.end - a.fadeOut.visible(in: c.length))
-        let cx = min(max(hx, r.minX + 4), r.maxX - 4)
+        let cx = min(max(fadeHandleX(c, e), r.minX + 4), r.maxX - 4)
         return NSRect(x: cx - 4, y: r.minY + 2, width: 8, height: 8)
+    }
+    /// 페이드 끝(인)·시작(아웃)의 실제 x. 손잡이는 클립 안쪽 4pt로 당겨 그리지만, 잡은 곳의 거리는 이 값에서 잰다
+    /// (당긴 가운데에서 재면 손잡이를 잡고 조금만 움직여도 페이드가 4pt만큼 생겼다, 2026-10-11 리뷰).
+    func fadeHandleX(_ c: Clip, _ e: ProjectStore.FadeEdge) -> CGFloat {
+        let a = c.effectiveAudio
+        return e == .fadeIn ? x(c.start + a.fadeIn.visible(in: c.length)) : x(c.end - a.fadeOut.visible(in: c.length))
     }
     /// 페이드 손잡이 누름(손잡이 둘레 6pt). 두 손잡이가 겹치면 포인터에 가까운 쪽.
     func fadeHandleHit(_ p: NSPoint) -> (UUID, ProjectStore.FadeEdge, CGFloat)? {
@@ -517,7 +523,7 @@ final class TimelineNSView: NSView {
                 let h = fadeHandleRect(c, e, r).insetBy(dx: -6, dy: -5)
                 guard h.contains(p) else { continue }
                 let d = abs(p.x - h.midX)
-                if best == nil || d < best!.3 { best = (id, e, p.x - h.midX, d) }
+                if best == nil || d < best!.3 { best = (id, e, p.x - fadeHandleX(c, e), d) }
             }
         }
         return best.map { ($0.0, $0.1, $0.2) }
