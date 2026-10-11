@@ -277,7 +277,7 @@ enum ToolSelfTest {
             _ = pressToolbar(0); await LaneSelfTest.settle()
             let direct = s.setTool(.selection)
             let toolHeld = byKey == .cut && s.tool == .cut && !direct
-            await click(pt(v1, 30))
+            s.cutClip(target, atFrame: 30)   // 자르기 진입점 직접(끌기 중 보호). 마우스 누름은 남은 끌기를 먼저 취소한다(D-031, gestureguard-test)
             let noCut = s.history.timeline == g0 && s.history.undoDepth == gd && s.gestureBase != nil
             check("guard.toolSwitchBlockedDuringGesture", toolHeld, "key \(byKey) menuEnabled \(byMenu) direct \(direct) tool \(s.tool)")
             check("guard.cutBlockedDuringGesture", noCut, "depth \(s.history.undoDepth - gd)")

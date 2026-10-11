@@ -190,6 +190,7 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
         if e.clickCount == 2 { beginRename(l.id) } else { store.selectLane(l.id) }
     }
     override func menu(for event: NSEvent) -> NSMenu? {
+        guard store.gestureBase == nil else { return nil }   // 끌기 중에는 메뉴를 띄우지 않는다(메뉴가 놓기를 먹어 끌기가 끝나지 않음, CP-01)
         let m = NSMenu()
         m.autoenablesItems = false
         func add(_ title: String, _ action: Selector, _ id: UUID?, enabled: Bool = true) {
@@ -305,7 +306,26 @@ final class TimelineNSView: NSView {
         self.store = store
         super.init(frame: .zero)
         registerForDraggedTypes([.string])
+        NotificationCenter.default.addObserver(self, selector: #selector(gestureInterrupted), name: ProjectStore.gestureInterruptedNotification, object: nil)
     }
+    /// 끌기 중단(D-031): 저장소가 끌기를 취소했으면 이 보기의 끌기 상태도 지운다(뒤늦게 온 끌기·놓기 이벤트가 아무것도 하지 않게).
+    /// 저장소 끌기가 없어도(창·앱 상태 바뀜) 옮기기 누름 대기를 지운다: 같은 누름의 늦은 끌기가 새 옮기기를 시작하지 않게(2026-10-12).
+    @objc private func gestureInterrupted() {
+        switch drag {
+        case .trim, .free, .fade, .pending:
+            #if DEBUG
+            store.traceGestureDebug("timeline viewDragCleared phase=\(dragNameForTest)")
+            #endif
+            drag = .none; needsDisplay = true
+        default: break
+        }
+    }
+    #if DEBUG
+    /// 자체 검사 전용: 지금 끌기 상태 이름
+    var dragNameForTest: String {
+        switch drag { case .none: "none"; case .scrub: "scrub"; case .pending: "pending"; case .free: "free"; case .trim: "trim"; case .fade: "fade" }
+    }
+    #endif
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -577,7 +597,12 @@ final class TimelineNSView: NSView {
     }
 
     override func mouseDown(with e: NSEvent) {
+        #if DEBUG
+        defer { store.traceGestureDebug("timeline mouseDown phase=\(dragNameForTest)", event: e) }
+        #endif
         window?.makeFirstResponder(self)
+        // 새 왼쪽 누름이 왔는데 끌기가 남아 있으면 그 끌기는 놓기를 받지 못한 것이다: 취소한다(D-031, 다음 끌기와 함께 확정하지 않음)
+        if store.gestureBase != nil { store.interruptGesture() }
         let p = convert(e.locationInWindow, from: nil)
         if p.y < Self.firstLaneY {
             store.pauseForEdit(); drag = .scrub; store.seek(to: frame(atX: p.x)); return
@@ -623,6 +648,9 @@ final class TimelineNSView: NSView {
             guard store.tool == .selection else { drag = .none; return }   // 누른 뒤 도구가 바뀌었으면 옮기지 않는다
             store.beginGesture(select: id)
             drag = .free(id, p0.x)
+            #if DEBUG
+            store.traceGestureDebug("timeline moveStartsFromPress", event: e)
+            #endif
             updateDragMove(id, p, from: p0.x)
         case .free(let id, let x0):
             updateDragMove(id, p, from: x0)
@@ -641,6 +669,9 @@ final class TimelineNSView: NSView {
     }
 
     override func mouseUp(with e: NSEvent) {
+        #if DEBUG
+        store.traceGestureDebug("timeline mouseUp phase=\(dragNameForTest)", event: e)
+        #endif
         switch drag {
         case .trim, .free, .fade: store.commitGesture()
         default: break
@@ -656,6 +687,9 @@ final class TimelineNSView: NSView {
 
     /// 클립 문맥 메뉴: 연결 해제·연결·자르기·삭제(대상과 범위를 제목에 보인다)
     override func menu(for event: NSEvent) -> NSMenu? {
+        // 끌기 중에는 메뉴를 띄우지 않는다(CP-01, 2026-10-11): 메뉴 추적이 왼쪽 놓기를 먹어 끌기가 끝나지 않았고,
+        // 끌기 중에 켜져 있던 "연결 해제"가 편집 기록의 끌기 중 확인에서 앱을 멈췄다.
+        guard store.gestureBase == nil else { return nil }
         let p = convert(event.locationInWindow, from: nil)
         guard let (id, _) = clipHit(p) else { return nil }
         if !store.selectedIDs.contains(id) { store.select(id) }
@@ -665,8 +699,8 @@ final class TimelineNSView: NSView {
             let it = NSMenuItem(title: title, action: action, keyEquivalent: ""); it.target = self; it.isEnabled = enabled; m.addItem(it)
         }
         m.autoenablesItems = false
-        add("연결 해제(영상·소리 따로 편집)", store.canUnlink, #selector(menuUnlink))
-        add("연결(⌘-클릭한 클립과)", store.canLink, #selector(menuLink))
+        add("연결 해제(영상·소리 따로 편집)", store.canUnlink && store.gestureBase == nil, #selector(menuUnlink))
+        add("연결(⌘-클릭한 클립과)", store.canLink && store.gestureBase == nil, #selector(menuLink))
         m.addItem(.separator())
         add(linked ? "재생 헤드에서 자르기(연결된 쌍)" : "재생 헤드에서 자르기", store.gestureBase == nil, #selector(menuSplit))
         add(linked ? "삭제 — 빈틈 남김(연결된 쌍)" : "삭제 — 빈틈 남김", store.gestureBase == nil, #selector(menuLift))

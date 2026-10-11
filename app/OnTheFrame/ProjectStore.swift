@@ -197,6 +197,37 @@ final class ProjectStore {
                 MainActor.assumeIsolated { self?.refreshFocus() }
             }
         }
+        // 끌기 중단(D-031): 편집기 창이 키 상태를 잃거나 앱이 비활성이 되면 진행 중인 끌기를 취소한다(놓기 이벤트를 받지 못할 수 있으므로).
+        // 포인터가 타임라인·창 밖으로 나가는 것만으로는 취소하지 않는다(보통 끌기는 창 밖에서도 놓을 수 있다).
+        focusObservers.append(NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: w, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.interruptGesture(reason: "editorResignKey", clearViewDrags: true) }
+        })
+        focusObservers.append(NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.interruptGesture(reason: "appResignActive", clearViewDrags: true) }
+        })
+        #if DEBUG
+        // 끌기 진단(Debug 전용, CP-01): 앱 활성·편집기 창 키 상태가 돌아온 때와, 왼쪽 버튼을 누른 채 ⌘가 바뀐 때(⌘Tab 전환 화면과 실제 비활성 구분)
+        focusObservers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.traceGestureDebug("lifecycle appBecomeActive") }
+        })
+        focusObservers.append(NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: w, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.traceGestureDebug("lifecycle editorBecomeKey") }
+        })
+        if flagsMonitorForDebug == nil {
+            flagsMonitorForDebug = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { e in
+                let ev = UncheckedEvent(e)
+                MainActor.assumeIsolated {
+                    let cmd = ev.e.modifierFlags.contains(.command)
+                    let s = ProjectStore.shared
+                    if cmd != s.commandDownForDebug {
+                        s.commandDownForDebug = cmd
+                        if (NSEvent.pressedMouseButtons & 1) != 0 { s.traceGestureDebug("key command\(cmd ? "Down" : "Up") whileLeftButtonHeld", event: ev.e) }
+                    }
+                }
+                return e
+            }
+        }
+        #endif
         responderKVO = w.observe(\.firstResponder, options: [.new]) { _, _ in
             DispatchQueue.main.async { MainActor.assumeIsolated { ProjectStore.shared.refreshFocus() } }
         }
@@ -407,7 +438,10 @@ final class ProjectStore {
     // MARK: 편집(실행 취소 대상)
 
     /// rebuild가 false면 프리뷰 재구성은 부르는 쪽이 맡는다(변형 편집의 정지 화면 경로)
+    /// 끌기 중(gestureBase가 있음)에는 아무것도 하지 않는다: 끌기 기준과 기록이 어긋나지 않게 하고, 기록의 끌기 중 확인(precondition)에 닿지 않게 한다
+    /// (CP-01, 2026-10-11: 끌기 중 문맥 메뉴·끝나지 않은 끌기에서 부른 편집이 앱을 멈췄다). 끌기는 놓기(한 단계)나 Esc(취소)로만 끝난다.
     private func commit(_ make: (Timeline) throws -> Timeline, focus: UUID?, select: UUID? = nil, rebuild: Bool = true) {
+        guard gestureBase == nil else { return }
         pauseForEdit()
         do {
             let t = try make(timeline)
@@ -499,6 +533,7 @@ final class ProjectStore {
     /// 레인 이름 바꾸기(실행 취소 한 단계). 비었거나 같으면 바꾸지 않는다(이전 이름 유지). 바꿨으면 true.
     @discardableResult
     func renameLane(_ id: UUID, to name: String) -> Bool {
+        guard gestureBase == nil else { return false }   // 끌기 중에는 기록을 바꾸지 않는다(CP-01)
         let old = timeline.lanes.first { $0.id == id }?.name
         do {
             let t = try timeline.renamingLane(id, to: name)
@@ -670,9 +705,13 @@ final class ProjectStore {
     }
     /// 페이드 손잡이 끌기 시작(선택은 그대로: 영상 클립을 골랐으면 연결된 소리의 페이드를 바꾼다)
     func beginFadeGesture() {
+        interruptGesture()   // D-031
         pauseForEdit()
         history.beginGesture()
         gestureBase = timeline
+        #if DEBUG
+        gestureSerialForDebug += 1; traceGestureDebug("begin kind=fade")
+        #endif
     }
 
     /// 끌어 놓기(A-014, 2026-10-11 갱신): 미디어를 고른 레인의 놓은 시각(frame)에 놓는다(한 단계, 리플·끼워 넣기 없음, 겹치면 거부).
@@ -841,10 +880,14 @@ final class ProjectStore {
     private(set) var liveTransform: (clip: UUID, transform: ClipTransform)?
     /// 프리뷰 끌기 시작(선택은 그대로 둔다: 소리 클립을 골랐어도 연결된 영상의 변형을 바꾼다)
     func beginTransformGesture() {
+        interruptGesture()   // D-031
         pauseForEdit()
         history.beginGesture()
         gestureBase = timeline
         transformGesture = true
+        #if DEBUG
+        gestureSerialForDebug += 1; traceGestureDebug("begin kind=transform")
+        #endif
         #if DEBUG
         if legacyTransformPreviewForTest { return }
         #endif
@@ -856,10 +899,14 @@ final class ProjectStore {
 
     enum TrimEdge { case start, end }
     func beginGesture(select id: UUID) {
+        interruptGesture()   // 끝나지 않은 끌기가 남아 있으면 먼저 취소(새 끌기에 섞어 확정하지 않음, D-031)
         pauseForEdit()
         selection = id
         history.beginGesture()
         gestureBase = timeline
+        #if DEBUG
+        gestureSerialForDebug += 1; traceGestureDebug("begin kind=timeline")
+        #endif
     }
     func updateTrim(_ id: UUID, edge: TrimEdge, delta: Int) {
         guard let base = gestureBase else { return }
@@ -899,6 +946,9 @@ final class ProjectStore {
     /// 끌기 끝(한 단계). 바뀐 것이 없으면 프리뷰를 다시 만들지 않는다(항목을 바꾸지 않아 깜박이지 않음).
     /// 변형 끌기는 정지 화면을 띄운 채 최종 상태로 다시 만들고, 새 항목이 표시될 준비가 되면 정지 화면을 내린다.
     func commitGesture() {
+        #if DEBUG
+        traceGestureDebug("commit")
+        #endif
         guard let base = gestureBase else { return }
         if transformGesture, let g = gestureTimeline { history.updateGesture(g, focus: selection) }   // 마지막(놓은 위치) 값 그대로
         gestureTimeline = nil; liveTransform = nil
@@ -916,8 +966,48 @@ final class ProjectStore {
         }
         timelineChanged()
     }
+    /// 끌기 중단(D-031, 2026-10-11): 놓기 이벤트를 받지 못할 수 있는 상황(편집기 창이 키 상태를 잃음, 앱 비활성, 끝나지 않은 끌기 위의 새 누름)에서
+    /// 진행 중인 끌기를 Esc와 같이 취소하고(끌기 전 타임라인·기록·저장 상태, 재생은 다시 시작하지 않음), 타임라인·프리뷰 보기의 끌기 상태도 지우게 알린다.
+    /// 끌기가 없으면 취소하지 않는다(알림이 여러 번 와도 한 번만 취소). 끝나지 않은 끌기를 다음 끌기와 함께 확정하지 않는다.
+    /// clearViewDrags(창·앱 상태 바뀜, 프로젝트 교체): 저장소 끌기가 없어도 보기에 알린다. 타임라인 옮기기는 4 pt를 넘겨 끌 때 저장소 끌기를 시작하므로,
+    /// 그 전(누름 대기)에 초점을 잃으면 저장소 끌기가 없다. 그 대기 상태를 지우지 않으면 같은 누름의 늦은 끌기가 새 옮기기를 시작하고 놓기가 확정했다
+    /// (2026-10-12 소유자 로그 조사). 끌기 시작 직전의 확인(인자 없음)은 보기에 알리지 않는다(프리뷰는 끌기 상태를 정한 뒤 끌기를 시작한다).
+    static let gestureInterruptedNotification = Notification.Name("dev.ontheframe.gestureInterrupted")
+    func interruptGesture(reason: String = "staleGesture", clearViewDrags: Bool = false) {
+        let active = gestureBase != nil
+        #if DEBUG
+        traceGestureDebug("interrupt reason=\(reason) hadGesture=\(active) clearViews=\(clearViewDrags)")
+        #endif
+        guard active || clearViewDrags else { return }
+        if active {
+            cancelGesture()
+            #if DEBUG
+            interruptCountForTest += 1
+            #endif
+        }
+        NotificationCenter.default.post(name: Self.gestureInterruptedNotification, object: self)
+    }
+    #if DEBUG
+    /// 끌기 진단(Debug 전용, CP-01 2026-10-12): 끌기 번호·이벤트(종류, 시스템 시각)·저장소 끌기·앱 활성·편집기 창 키·왼쪽 버튼 상태를 `trace`에 남긴다.
+    /// 누름·놓기·끌기 시작·확정·취소·중단·창/앱 상태 바뀜에서만 부른다(포인터 움직임마다 남기지 않음). 경로·이름은 남기지 않는다.
+    @ObservationIgnored private(set) var gestureSerialForDebug = 0
+    @ObservationIgnored private var flagsMonitorForDebug: Any?
+    @ObservationIgnored var commandDownForDebug = false
+    func traceGestureDebug(_ what: String, event: NSEvent? = nil) {
+        let ev = event.map { " ev=\($0.type.rawValue) t=\(String(format: "%.3f", $0.timestamp))" } ?? ""
+        let g = gestureBase != nil ? "#\(gestureSerialForDebug)\(transformGesture ? "(transform)" : "")" : "none"
+        let line = "dbg \(what)\(ev) gesture=\(g) appActive=\(NSApp.isActive) editorKey=\(editorWindow?.isKeyWindow == true) leftButton=\((NSEvent.pressedMouseButtons & 1) != 0)"
+        Self.trace.info("\(line, privacy: .public)")
+    }
+    @ObservationIgnored var interruptCountForTest = 0
+    /// 자체 검사 전용: 프리뷰가 정지 화면(무대)을 보이는 중인가
+    var previewHostShowingStillForTest: Bool { previewHost?.isShowingStill == true }
+    #endif
     /// 끌기 취소(Esc): 끌기 전 상태로. 끌기 중에는 프리뷰 항목을 바꾸지 않았으므로 다시 만들지 않고 정지 화면만 내린다.
     func cancelGesture() {
+        #if DEBUG
+        traceGestureDebug("cancel")
+        #endif
         guard gestureBase != nil else { return }
         gestureTimeline = nil; liveTransform = nil
         history.cancelGesture(); gestureBase = nil; moveInsertionIndex = nil; freeMoveProposal = nil; snapGuide = nil
@@ -1372,7 +1462,7 @@ extension ProjectStore {
     }
     private func replaceProject(timeline t: Timeline, url: URL?, id: UUID, cache: [String: MediaAsset], bookmarks bm: [UUID: Data], missing: [UUID: String]) {
         pauseForEdit()
-        if gestureBase != nil { cancelGesture() }
+        interruptGesture(reason: "replaceProject", clearViewDrags: true)   // 끌기 중이면 취소하고 보기의 끌기 상태(옮기기 누름 대기 포함)도 지운다(D-031)
         dropStill()
         history = EditHistory(t)
         savedTimeline = t

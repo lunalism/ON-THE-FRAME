@@ -131,6 +131,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await ProjectSelfTest.run(folder: folder) }
             return
         }
+        if args.contains("-OTFGestureSwitchExperiment"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await GestureSwitchExperiment.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFGestureGuardTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await GestureGuardSelfTest.run(folder: folder) }
+            return
+        }
         if args.contains("-OTFToolTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await ToolSelfTest.run(folder: folder) }
             return

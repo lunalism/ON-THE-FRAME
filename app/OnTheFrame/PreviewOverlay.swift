@@ -28,7 +28,24 @@ final class PreviewOverlayView: NSView {
     private enum Drag { case none, move(UUID, ClipTransform, NSPoint), resize(UUID, ClipTransform, Corner, CGRect) }
     private var drag: Drag = .none
 
-    init(store: ProjectStore) { self.store = store; super.init(frame: .zero) }
+    init(store: ProjectStore) {
+        self.store = store; super.init(frame: .zero)
+        NotificationCenter.default.addObserver(self, selector: #selector(gestureInterrupted), name: ProjectStore.gestureInterruptedNotification, object: nil)
+    }
+    /// 끌기 중단(D-031): 저장소가 끌기를 취소했으면 이 보기의 끌기 상태(대기 값·화면 갱신·테두리)도 지운다
+    @objc private func gestureInterrupted() {
+        if case .none = drag { return }
+        #if DEBUG
+        store.traceGestureDebug("preview viewDragCleared")
+        #endif
+        drag = .none; pending = nil; liveRect = nil; dragAsset = nil
+        link?.isPaused = true
+        needsDisplay = true
+    }
+    #if DEBUG
+    /// 자체 검사 전용: 끌기 중인가
+    var isDraggingForTest: Bool { if case .none = drag { return false }; return true }
+    #endif
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -106,6 +123,10 @@ final class PreviewOverlayView: NSView {
     var currentRect: CGRect? { liveRect ?? state.rect }
 
     override func mouseDown(with e: NSEvent) {
+        #if DEBUG
+        defer { store.traceGestureDebug("preview mouseDown dragging=\(isDraggingForTest)", event: e) }
+        #endif
+        if store.gestureBase != nil { store.interruptGesture() }   // 놓기를 받지 못한 끌기가 남아 있으면 취소(D-031)
         guard let id = state.clipID, let cr = state.rect, store.gestureBase == nil else { return }
         window?.makeFirstResponder(self)
         let p = convert(e.locationInWindow, from: nil)
@@ -183,6 +204,9 @@ final class PreviewOverlayView: NSView {
         return ClipTransform(scale: sq, x: cx - render.width / 2, y: cy - render.height / 2)
     }
     override func mouseUp(with e: NSEvent) {
+        #if DEBUG
+        store.traceGestureDebug("preview mouseUp dragging=\(isDraggingForTest)", event: e)
+        #endif
         if case .none = drag { return }
         if let v = value(at: convert(e.locationInWindow, from: nil)) { pending = v }   // 놓은 위치의 값(마지막 끌기 이벤트 뒤에 움직였어도)
         flush()
