@@ -536,6 +536,47 @@ final class ProjectStore {
     }
     /// 새 레인의 기본 이름: "영상"·"오디오". 번호(V2·A2)는 위치에서 따로 보이므로 이름에 넣지 않는다(순서를 바꿔도 어긋나지 않게).
     func newLaneName(_ kind: LaneKind) -> String { kind == .video ? "영상" : "오디오" }
+
+    // MARK: 복사·붙여넣기(2026-10-11)
+
+    /// 앱 안 클립 클립보드: 복사한 프로젝트 ID, 내용(클립 값), 복사할 때 고른 클립. 시스템 클립보드와 따로다(텍스트 복사·붙여넣기는 그대로).
+    /// 프로젝트를 바꾸면(새 프로젝트·열기) 비운다. 다른 프로젝트의 미디어 ID는 쓰지 않는다(붙여넣기 때 이 프로젝트 ID와 미디어로 다시 확인).
+    struct ClipClipboard: Equatable { let project: UUID; let content: ClipboardContent; let selected: UUID }
+    private(set) var clipClipboard: ClipClipboard?
+    var canCopy: Bool { selection.flatMap { timeline.clip($0) } != nil && gestureBase == nil }
+    var canPaste: Bool { clipClipboard?.project == projectID && gestureBase == nil && openProgress == nil && !openRequested }
+    /// 복사(⌘C): 고른 클립과 연결된 짝. 프로젝트를 바꾸지 않고 실행 취소 기록도 없다.
+    func copySelection() {
+        guard gestureBase == nil, let id = selection, let c = try? timeline.copying(clip: id) else { statusMessage = "복사할 클립을 먼저 고르세요."; return }
+        clipClipboard = ClipClipboard(project: projectID, content: c, selected: id)
+        statusMessage = c.all.count > 1 ? "연결된 클립 \(c.all.count)개를 복사했습니다." : "클립을 복사했습니다."
+    }
+    /// 붙여넣기(⌘V): 재생 헤드에 복사한 묶음의 가장 이른 시작을 둔다. 한 단계(필요한 새 레인 포함). 붙여 넣은 클립(복사할 때 고른 클립의 복제)을 고른다.
+    func pasteAtPlayhead() {
+        guard gestureBase == nil, openProgress == nil, !openRequested else { return }
+        guard let cb = clipClipboard, cb.project == projectID else { statusMessage = EditError.clipboardEmpty.description; return }
+        pauseForEdit()
+        do {
+            let r = try timeline.pasting(cb.content, at: playhead, newLaneName: newLaneName)
+            let focus = r.ids[cb.selected]
+            history.apply(r.timeline, focus: focus)
+            selection = focus
+            linkCandidate = nil
+            statusMessage = r.createdLanes.isEmpty ? nil : "겹치지 않도록 새 레인 \(r.createdLanes.count)개에 붙여 넣었습니다."
+            timelineChanged()
+        } catch let e as EditError {
+            statusMessage = e.description
+        } catch { statusMessage = error.localizedDescription }
+    }
+    /// 메뉴 "복사하기"·"붙여넣기": 편집기에 초점이 있으면 클립, 텍스트 입력·다른 창이면 응답자 체인(표준 텍스트 복사·붙여넣기)
+    func menuCopy() {
+        if KeyRouting.menuTargetsEditor(self) { if canCopy { copySelection() } else { NSSound.beep() } }
+        else { NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil) }
+    }
+    func menuPaste() {
+        if KeyRouting.menuTargetsEditor(self) { if canPaste { pasteAtPlayhead() } else { NSSound.beep(); if clipClipboard == nil { statusMessage = EditError.clipboardEmpty.description } } }
+        else { NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil) }
+    }
     /// 레인 추가: 경계에서 바깥쪽 끝(영상은 맨 위 새 Vn, 오디오는 맨 아래 새 An)
     func addLane(_ kind: LaneKind) {
         let id = UUID()
@@ -1301,6 +1342,7 @@ extension ProjectStore {
         history = EditHistory(t)
         savedTimeline = t
         projectURL = url; projectID = id
+        clipClipboard = nil   // 복사한 클립은 그 프로젝트에만(다른 프로젝트 미디어·권한을 다루지 않는다)
         assetCache = cache; bookmarks = bm; missingMedia = missing
         selection = nil; linkCandidate = nil; selectedLane = nil; statusMessage = nil
         seek(to: 0)

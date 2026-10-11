@@ -276,6 +276,10 @@ public enum EditError: Error, Equatable, CustomStringConvertible {
     case transformRange
     /// 클립 음량·페이드: 소리 클립만
     case audioNotAudioClip
+    /// 붙여넣기(2026-10-11): 복사한 클립이 없음
+    case clipboardEmpty
+    /// 붙여넣기: 복사한 클립이 이 프로젝트의 미디어·원본 범위와 맞지 않음
+    case clipboardMismatch
     public var description: String {
         switch self {
         case .unknownClip: return "클립을 찾을 수 없습니다."
@@ -302,6 +306,8 @@ public enum EditError: Error, Equatable, CustomStringConvertible {
         case .transformNotVideo: return "크기·위치는 영상 클립에만 있습니다."
         case .transformRange: return "크기는 1%–1000%, 위치는 가로 ±7680·세로 ±4320 픽셀 안이어야 합니다."
         case .audioNotAudioClip: return "클립 음량·음소거·페이드는 소리 클립에만 있습니다. 연결된 쌍이면 소리 클립 쪽에 적용합니다."
+        case .clipboardEmpty: return "붙여 넣을 클립이 없습니다. 먼저 클립을 골라 복사하세요."
+        case .clipboardMismatch: return "복사한 클립을 이 프로젝트에 붙여 넣을 수 없습니다(미디어가 없거나 원본 범위가 맞지 않음)."
         }
     }
 }
@@ -910,5 +916,86 @@ public struct EditHistory: Sendable {
         guard canRedo, let next = redoStack.popLast() else { return nil }
         undoStack.append(current); current = next
         return next.focus
+    }
+}
+
+// MARK: 복사·붙여넣기(2026-10-11)
+
+/// 복사한 클립 묶음(앱 안 클립보드의 내용). 같은 프로젝트의 Clip 값을 그대로 담는다(원본 ID·레인·연결·변형·소리 설정 포함).
+/// 영상·소리를 나눠 담는 것은 Clip이 자기 종류를 갖지 않기 때문이다(종류는 타임라인의 어느 배열에 있는지로 정해진다).
+public struct ClipboardContent: Sendable, Equatable {
+    public let video: [Clip]
+    public let audio: [Clip]
+    public init(video: [Clip], audio: [Clip]) { self.video = video; self.audio = audio }
+    public var isEmpty: Bool { video.isEmpty && audio.isEmpty }
+    public var all: [Clip] { video + audio }
+}
+
+extension Timeline {
+    /// 복사: 클립 하나와 그 연결된 짝(기존 연결 선택 의미, group(of:)). 타임라인은 바꾸지 않는다.
+    public func copying(clip id: UUID) throws -> ClipboardContent {
+        let g = group(of: id)
+        guard !g.isEmpty else { throw EditError.unknownClip }
+        return ClipboardContent(video: g.filter { lane(of: $0.id) == .video }, audio: g.filter { lane(of: $0.id) == .audio })
+    }
+
+    /// 붙여넣기 결과: 새 타임라인, 원래 클립 ID → 새 클립 ID, 새로 만든 레인 ID(있으면).
+    public struct PasteResult: Sendable { public let timeline: Timeline; public let ids: [UUID: UUID]; public let createdLanes: [UUID] }
+
+    /// 붙여넣기(2026-10-11): 복사한 묶음의 가장 이른 시작을 at에 두고 상대 위치를 그대로 지킨 복제를 넣는다(리플·덮어쓰기 없음, 기존 클립은 그대로).
+    /// - 새 클립 ID, 연결 묶음은 새 연결 ID(원래 클립과 연결되지 않음). 미디어·원본 구간·길이·변형·음량·음소거·페이드(자른 페이드의 offset 포함)는 그대로.
+    /// - 레인: 원래 레인별로 한 대상 레인을 고른다. 차례: 원래 레인 → 같은 종류의 다른 레인(가운데 경계에서 가까운 순서) → 새 레인(경계 바깥쪽 끝).
+    ///   그 레인의 기존 클립과 하나라도 겹치면 다음 레인을 본다. 원래 레인이 다르면 같은 대상 레인을 쓰지 않는다. 새 레인은 이 편집에 함께 들어간다.
+    /// - 미디어가 이 타임라인에 없거나 원본 범위를 넘으면 거부(clipboardMismatch). 일부만 넣지 않는다.
+    public func pasting(_ content: ClipboardContent, at: Int, newLaneName: (LaneKind) -> String) throws -> PasteResult {
+        guard !content.isEmpty else { throw EditError.clipboardEmpty }
+        guard at >= 0 else { throw EditError.badIndex }
+        for c in content.all {
+            guard let n = mediaFrames[c.mediaID], c.sourceIn >= 0, c.length >= 1, c.sourceOut <= n else { throw EditError.clipboardMismatch }
+        }
+        for c in content.video { guard mediaHasVideo[c.mediaID] ?? true else { throw EditError.clipboardMismatch } }
+        for c in content.audio { guard mediaHasAudio[c.mediaID] ?? false else { throw EditError.clipboardMismatch } }
+        // 연결: 묶음 안에서 영상 1 + 소리 1인 연결만 새 ID로 잇는다(짝이 묶음에 없으면 연결 없이 — 복사는 늘 짝을 함께 담는다)
+        var linkCount: [UUID: (v: Int, a: Int)] = [:]
+        for c in content.video { if let l = c.link { linkCount[l, default: (0, 0)].v += 1 } }
+        for c in content.audio { if let l = c.link { linkCount[l, default: (0, 0)].a += 1 } }
+        let newLink = Dictionary(uniqueKeysWithValues: linkCount.filter { $0.value == (1, 1) }.map { ($0.key, UUID()) })
+        let d = at - (content.all.map(\.start).min() ?? 0)
+        var t = self
+        var created: [UUID] = [], ids: [UUID: UUID] = [:]
+        var placedVideo: [Clip] = [], placedAudio: [Clip] = []
+        for kind in [LaneKind.video, .audio] {
+            let src = kind == .video ? content.video : content.audio
+            var used = Set<UUID>()
+            // 원래 레인별 묶음(원래 레인 순서를 지킨다)
+            var order: [UUID?] = []
+            for c in src where !order.contains(c.lane) { order.append(c.lane) }
+            for original in order {
+                let members = src.filter { $0.lane == original }.map { $0.with(start: $0.start + d) }
+                func fits(_ lane: UUID) -> Bool {
+                    let existing = t.clips(inLane: lane)
+                    return members.allSatisfy { m in !existing.contains { $0.start < m.end && m.start < $0.end } }
+                }
+                var candidates: [UUID] = []
+                if let o = original, t.laneInfo(o)?.kind == kind { candidates.append(o) }
+                candidates += t.lanesFromBoundary(kind).map(\.id).filter { !candidates.contains($0) }
+                var target = candidates.first { !used.contains($0) && fits($0) }
+                if target == nil {
+                    let id = UUID()
+                    t = try t.addingLane(kind, name: newLaneName(kind), id: id, outward: true)
+                    created.append(id); target = id
+                }
+                used.insert(target!)
+                for m in members {
+                    let nid = UUID(); ids[m.id] = nid
+                    let c = m.with(id: nid, link: .some(m.link.flatMap { newLink[$0] }), lane: .some(target!))
+                    if kind == .video { placedVideo.append(c) } else { placedAudio.append(c) }
+                }
+            }
+        }
+        let end = (placedVideo + placedAudio).map(\.end).max() ?? 0
+        let out = t.rebuilt(video: t.clips + placedVideo, audio: t.audioClips + placedAudio, duration: max(t.durationFrames, end))
+        guard out.isValid else { throw EditError.overlap }
+        return PasteResult(timeline: out, ids: ids, createdLanes: created)
     }
 }

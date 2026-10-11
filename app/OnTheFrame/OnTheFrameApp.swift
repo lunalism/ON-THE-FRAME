@@ -41,6 +41,15 @@ struct OnTheFrameApp: App {
                 Button("실행 취소") { store.menuUndo() }.keyboardShortcut("z").disabled(!store.undoMenuEnabled)
                 Button("다시 실행") { store.menuRedo() }.keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!store.redoMenuEnabled)
             }
+            // 편집 > 복사하기·붙여넣기(2026-10-11): 편집기에 초점이 있으면 타임라인 클립(앱 안 클립보드), 텍스트 입력 중이면 표준 텍스트 동작.
+            // 키 입력은 KeyRouting이 판단한다(텍스트 입력 중에는 이 메뉴 키 등가물 → 응답자 체인). 텍스트에서 늘 쓰도록 항목을 끄지 않는다.
+            // 오려두기·모두 선택은 텍스트 전용(타임라인 잘라내기는 없음).
+            CommandGroup(replacing: .pasteboard) {
+                Button("오려두기") { NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil) }.keyboardShortcut("x")
+                Button("복사하기") { store.menuCopy() }.keyboardShortcut("c")
+                Button("붙여넣기") { store.menuPaste() }.keyboardShortcut("v")
+                Button("모두 선택") { NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil) }.keyboardShortcut("a")
+            }
             CommandMenu("타임라인") {
                 Button("재생 헤드에서 자르기") { store.menuSplit() }.keyboardShortcut("k").disabled(!store.canSplit)
                 // 일반 삭제는 빈틈을 남기고, 리플 삭제는 뒤 클립을 당긴다(D-020, ON THE FRAME 기본값)
@@ -113,6 +122,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if args.contains("-OTFProjectTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await ProjectSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFCopyPasteTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await CopyPasteSelfTest.run(folder: folder) }
             return
         }
         if args.contains("-OTFOpenFlowTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
