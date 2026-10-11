@@ -51,6 +51,8 @@ struct TimelineDrawState: Equatable {
     var snap: Int?
     /// 찾을 수 없는 원본(미디어 id)
     var missing: Set<UUID>
+    /// 편집 도구(선택·자르기, D-030)
+    var tool: ProjectStore.EditTool
     @MainActor init(store: ProjectStore) {
         timeline = store.timeline
         names = Dictionary(uniqueKeysWithValues: store.assets.map { ($0.id, $0.name) })
@@ -62,6 +64,7 @@ struct TimelineDrawState: Equatable {
         snap = store.snapGuide
         proposalStart = store.freeMoveProposal?.start; proposalOK = store.freeMoveProposal?.ok ?? true; proposalID = store.freeMoveProposal?.id; proposalLane = store.freeMoveProposal?.lane
         missing = Set(store.missingMedia.keys)
+        tool = store.tool
         names = Dictionary(uniqueKeysWithValues: store.timeline.media.map { ($0.id, $0.name) })
     }
 }
@@ -288,7 +291,7 @@ final class TimelineNSView: NSView {
         k == .video ? NSRect(x: 0, y: videoY, width: 0, height: videoHeight) : NSRect(x: 0, y: audioY, width: 0, height: audioHeight)
     }
     let store: ProjectStore
-    var state: TimelineDrawState?
+    var state: TimelineDrawState? { didSet { refreshCutHover() } }
     var pixelsPerFrame: CGFloat = 2
     /// 미디어를 끌고 있는 중(빈 곳 안내 표시)과 놓일 위치(보기 좌표)
     private var dropHover = false
@@ -378,6 +381,10 @@ final class TimelineNSView: NSView {
             NSColor.secondaryLabelColor.setStroke(); p.stroke()
             NSString(string: "여기에 놓으면 파일 이름의 새 레인(영상은 맨 위, 소리는 맨 아래)").draw(at: NSPoint(x: r.minX + 10, y: r.midY - 7),
                                                        withAttributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor])
+        }
+        if let h = cutHover, st.tool == .cut {   // 자를 위치 안내선(D-030): 대상 클립의 레인과 연결된 짝의 레인에만
+            NSColor.controlAccentColor.setFill()
+            for m in t.group(of: h.id) { if let r = laneRect(m.lane) { NSRect(x: x(h.frame) - 1, y: r.minY - 2, width: 2, height: r.height + 4).fill() } }
         }
         let ph = x(min(st.playhead, t.durationFrames))
         NSColor.systemRed.setFill()
@@ -497,7 +504,7 @@ final class TimelineNSView: NSView {
     }
     /// 페이드 손잡이를 보일 소리 클립: 고른 클립의 묶음(연결된 쌍이면 소리 쪽) 가운데 소리 클립
     func fadeHandleClips(_ st: TimelineDrawState) -> Set<UUID> {
-        guard let sel = st.selection else { return [] }
+        guard st.tool == .selection, let sel = st.selection else { return [] }   // 자르기 도구에서는 손잡이 없음(페이드 끌기 안 함)
         return Set(st.timeline.group(of: sel).filter { st.timeline.lane(of: $0.id) == .audio }.map(\.id))
     }
     /// 손잡이 사각형(8×8): 페이드 인은 페이드 끝, 페이드 아웃은 페이드 시작 위치의 클립 위쪽
@@ -575,6 +582,14 @@ final class TimelineNSView: NSView {
         if p.y < Self.firstLaneY {
             store.pauseForEdit(); drag = .scrub; store.seek(to: frame(atX: p.x)); return
         }
+        if store.tool == .cut {
+            // 자르기 도구(D-030): 수정 키 없는 왼쪽 누름이 클립 본문에 있으면 그 프레임에서 한 번 자른다. 이어지는 끌기는 무시한다
+            // (옮기기·트림·페이드·연속 자르기 없음). 빈 곳·수정 키 누름은 아무것도 하지 않는다(선택 그대로).
+            drag = .none
+            guard e.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty, let (id, f) = cutTarget(p) else { return }
+            store.cutClip(id, atFrame: f)
+            return
+        }
         if store.gestureBase == nil, let (id, edge, grab) = fadeHandleHit(p) {   // 페이드 손잡이(트림·옮기기보다 먼저)
             store.beginFadeGesture()
             drag = .fade(id, edge, grab)
@@ -605,6 +620,7 @@ final class TimelineNSView: NSView {
         case .pending(let id, let p0):
             // 일반 끌기 = 옮기기(2026-10-11): 연결된 쌍·연결되지 않은 클립 모두 위치(와 같은 종류 레인)만 바꾼다. 리플·끼워 넣기 없음.
             guard abs(p.x - p0.x) > 4 || abs(p.y - p0.y) > 4 else { return }
+            guard store.tool == .selection else { drag = .none; return }   // 누른 뒤 도구가 바뀌었으면 옮기지 않는다
             store.beginGesture(select: id)
             drag = .free(id, p0.x)
             updateDragMove(id, p, from: p0.x)
@@ -678,7 +694,43 @@ final class TimelineNSView: NSView {
     }
 
 
+    // MARK: 자르기 도구(D-030)
+
+    /// 자르기 대상: 레인 영역의 클립 본문(가장자리 포함, 트림·페이드로 보지 않음)과 포인터의 가장 가까운 프레임. 안내선과 실제 자르기가 같은 변환을 쓴다.
+    func cutTarget(_ p: NSPoint) -> (UUID, Int)? {
+        guard p.y >= Self.firstLaneY, let (id, _) = clipHit(p) else { return nil }
+        return (id, frame(atX: p.x))
+    }
+    /// 안내선(보이는 것은 자를 수 있는 위치뿐): 클립과 프레임. 포인터가 나가거나 도구가 바뀌거나 대상이 자를 수 없게 되면 nil.
+    private(set) var cutHover: (id: UUID, frame: Int)?
+    private var hoverPoint: NSPoint?
+    private var hoverArea: NSTrackingArea?
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let a = hoverArea { removeTrackingArea(a) }
+        let a = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(a); hoverArea = a
+    }
+    override func mouseMoved(with e: NSEvent) { hoverPoint = convert(e.locationInWindow, from: nil); refreshCutHover() }
+    override func mouseExited(with e: NSEvent) { hoverPoint = nil; refreshCutHover() }
+    /// 안내선 다시 판정(포인터 이동·상태 변화 때). 자를 수 없는 위치(경계·클립 밖·짝이 덮지 않음)는 보이지 않는다.
+    func refreshCutHover() {
+        var next: (id: UUID, frame: Int)?
+        if state?.tool == .cut, store.gestureBase == nil, let p = hoverPoint, let (id, f) = cutTarget(p), store.cutCheck(id, atFrame: f) == .valid { next = (id, f) }
+        if next?.id != cutHover?.id || next?.frame != cutHover?.frame { cutHover = next; needsDisplay = true }
+    }
+    /// 가위 커서(SF Symbol). 만들 수 없으면 십자 커서.
+    static let cutCursor: NSCursor = {
+        guard let img = NSImage(systemSymbolName: "scissors", accessibilityDescription: "자르기")?
+                .withSymbolConfiguration(.init(pointSize: 16, weight: .regular)) else { return .crosshair }
+        return NSCursor(image: img, hotSpot: NSPoint(x: img.size.width / 2, y: img.size.height / 2))
+    }()
+
     override func resetCursorRects() {
+        if let st = state, st.tool == .cut {   // 자르기 도구: 클립 본문 위에서 가위 커서(트림·페이드 커서 없음)
+            for c in st.timeline.clips + st.timeline.audioClips { addCursorRect(rect(c).intersection(visibleRect), cursor: Self.cutCursor) }
+            return
+        }
         guard let st = state, let sel = st.selection else { return }
         for id in fadeHandleClips(st) {   // 페이드 손잡이(트림 커서보다 위)
             guard let c = st.timeline.clip(id) else { continue }

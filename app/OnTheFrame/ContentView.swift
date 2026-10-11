@@ -55,6 +55,15 @@ struct ContentView: View {
                 Button { layout.toggleInspector() } label: { Label(layout.inspectorCollapsed ? "정보 펼치기" : "정보 접기", systemImage: "sidebar.right") }
                     .help(layout.inspectorCollapsed ? "클립 정보 펼치기" : "클립 정보 접기")
             }
+            // 편집 도구(D-030): 선택(V)·자르기(C). 도구만 바꾼다(끌기 중에는 바꾸지 않음).
+            ToolbarItem(placement: .principal) {
+                Picker("편집 도구", selection: Binding(get: { store.tool }, set: { store.setTool($0) })) {
+                    Label("선택 도구", systemImage: "cursorarrow").tag(ProjectStore.EditTool.selection).help("선택 도구 (V)")
+                    Label("자르기 도구", systemImage: "scissors").tag(ProjectStore.EditTool.cut).help("자르기 도구 (C): 클립을 누른 위치에서 자르기")
+                }
+                .pickerStyle(.segmented).labelStyle(.iconOnly).fixedSize()
+                .help("편집 도구: 선택 (V) · 자르기 (C)")
+            }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { store.presentImportPanel() } label: { Label("가져오기", systemImage: "square.and.arrow.down") }
                     .help("영상·소리 파일 가져오기(⌘I)")

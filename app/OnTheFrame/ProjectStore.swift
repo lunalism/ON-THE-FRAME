@@ -577,6 +577,41 @@ final class ProjectStore {
         if KeyRouting.menuTargetsEditor(self) { if canPaste { pasteAtPlayhead() } else { NSSound.beep(); if clipClipboard == nil { statusMessage = EditError.clipboardEmpty.description } } }
         else { NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil) }
     }
+    // MARK: 편집 도구(2026-10-11, D-030): 선택(V)·자르기(C)
+
+    /// 타임라인 편집 도구. 앱을 열 때 선택 도구이고, 새 프로젝트·열기에서도 그대로이며 프로젝트 파일에 저장하지 않는다.
+    enum EditTool: Equatable { case selection, cut }
+    private(set) var tool: EditTool = .selection
+    /// 도구 바꾸기(키·툴바·메뉴 모두 이 길). 끌기 중이면 바꾸지 않는다. 재생·재생 헤드·선택·타임라인·기록·저장 상태는 그대로다.
+    @discardableResult func setTool(_ t: EditTool) -> Bool {
+        guard gestureBase == nil else { return false }
+        if tool != t { tool = t }
+        return true
+    }
+    /// 자르기 도구 판정(안내선과 실제 자르기가 같은 판정을 쓴다): 기존 분할 규칙(연결된 짝도 같은 원본 위치)으로 자를 수 있는가
+    enum CutCheck: Equatable { case valid, rejected, linkedOutside }
+    func cutCheck(_ id: UUID, atFrame f: Int) -> CutCheck {
+        do { _ = try timeline.splitting(clip: id, atFrame: f); return .valid }
+        catch EditError.linkedSplitOutside { return .linkedOutside }
+        catch { return .rejected }
+    }
+    /// 자르기 도구로 클립을 누름: 재생을 멈추고 누른 클립(과 연결된 짝)을 그 프레임에서 한 번 자른다(기존 commit·분할 경로, 한 단계,
+    /// 오른쪽 조각 선택, 재생 헤드 그대로). 경계·클립 밖은 조용히 무시하고, 짝이 그 위치를 덮지 않으면 상태 줄에 이유만 보인다.
+    /// 거부되면 타임라인·선택·기록·저장 상태가 그대로다. 끌기 중에는 아무것도 하지 않는다(commit에 닿기 전 국소 보호).
+    func cutClip(_ id: UUID, atFrame f: Int) {
+        guard gestureBase == nil, timeline.clip(id) != nil else { return }
+        pauseForEdit()
+        switch cutCheck(id, atFrame: f) {
+        case .valid:
+            let right = UUID()
+            commit({ try $0.splitting(clip: id, atFrame: f, newIDs: (UUID(), right)) }, focus: right)
+        case .linkedOutside:
+            statusMessage = EditError.linkedSplitOutside.description
+        case .rejected:
+            break
+        }
+    }
+
     /// 레인 추가: 경계에서 바깥쪽 끝(영상은 맨 위 새 Vn, 오디오는 맨 아래 새 An)
     func addLane(_ kind: LaneKind) {
         let id = UUID()

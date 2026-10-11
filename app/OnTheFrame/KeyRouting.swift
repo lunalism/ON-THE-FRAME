@@ -1,7 +1,7 @@
 import AppKit
 import OnTheFrameEngine
 
-/// 편집기 단축키 경로(Premiere 방식 기본값, D-019. 완전한 Premiere 호환이 아니다).
+/// 편집기 단축키 경로(흔히 쓰는 기본 단축키, D-019·D-027. 다른 편집기와의 완전 호환을 주장하지 않는다).
 /// 처리 층(2026-10-10 한국어 입력 소스 대응):
 /// 1. 로컬 키 감시(ProjectStore.attachEditorWindow): 이벤트 큐에서 꺼낸 모든 키 이벤트를 먼저 본다. 키 창이 없어도 본다.
 /// 2. 보조: 편집기 창 보기의 performKeyEquivalent(⌘ 조합, WindowAccessor)와 타임라인 보기의 keyDown(수정 키 없는 키).
@@ -10,7 +10,7 @@ import OnTheFrameEngine
 /// 모든 층은 같은 판단(route)을 쓰고, 이미 처리한 이벤트는 다시 처리하지 않는다(한 번 누름 = 한 번 동작).
 /// `-OTFKeyTrace` 실행 인수를 주면 층별 경로를 기록한다(KeyTrace).
 ///
-/// - 수정 키 없는 키(Space, ←/→, Home/End, Delete·⌫)는 메뉴 키 등가물로 두지 않는다. 메뉴 키 등가물은 텍스트 입력보다 먼저
+/// - 수정 키 없는 키(Space, ←/→, Home/End, Delete·⌫, 도구 V·C)는 메뉴 키 등가물로 두지 않는다. 메뉴 키 등가물은 텍스트 입력보다 먼저
 ///   처리되어 글자 입력·커서 이동·삭제를 가로채기 때문이다. 대신 이 라우터(위 처리 층)에서만 처리하고,
 ///   다음 조건을 모두 만족할 때만 실행한다. 아니면 이벤트를 건드리지 않고 그대로 보낸다.
 ///   편집기 창이 키 창 · 시트·모달 없음 · 텍스트 입력에 초점 없음 · 드래그 중 아님 · 동작이 켜져 있음.
@@ -22,11 +22,12 @@ import OnTheFrameEngine
 /// - Esc(드래그 취소)는 타임라인 보기가 직접 처리한다(TimelineNSView.cancelOperation).
 @MainActor
 enum KeyRouting {
-    enum BareKeyAction: Equatable { case playPause, stepBackward, stepForward, toStart, toEnd, deleteSelection, rippleDelete }
+    enum BareKeyAction: Equatable { case playPause, stepBackward, stepForward, toStart, toEnd, deleteSelection, rippleDelete, selectionTool, cutTool }
 
     /// 키 코드(가상 키) → 동작. 수정 키(⌘⌥⌃⇧)가 있으면 nil(예: ⇧← 등은 처리하지 않음).
     /// 예외: ⇧Delete·⇧⌫·⇧⌦는 리플 삭제(D-020). 수정 키 없는 Delete·⌫·⌦는 빈틈을 남기는 삭제.
-    /// 반복 입력은 프레임 이동에만 허용한다(누르고 있으면 계속 이동). Space·Delete 반복은 동작하지 않는다.
+    /// 반복 입력은 프레임 이동에만 허용한다(누르고 있으면 계속 이동). Space·Delete·V·C 반복은 동작하지 않는다.
+    /// 도구 V·C(2026-10-11, D-030)는 물리 키 코드(V=9, C=8)로 맞춰 한국어 입력 소스(ㅍ·ㅊ)에서도 같다.
     static func bareKeyAction(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, isRepeat: Bool) -> BareKeyAction? {
         let mods = modifiers.intersection([.command, .option, .control, .shift])
         if mods == [.shift], keyCode == 51 || keyCode == 117 { return isRepeat ? nil : .rippleDelete }
@@ -39,6 +40,8 @@ enum KeyRouting {
         case 115: a = .toStart             // Home
         case 119: a = .toEnd               // End
         case 51, 117: a = .deleteSelection // ⌫(Delete), ⌦(Forward Delete)
+        case 9: a = .selectionTool         // V(한국어 ㅍ)
+        case 8: a = .cutTool               // C(한국어 ㅊ)
         default: a = nil
         }
         if isRepeat, a != .stepBackward, a != .stepForward { return nil }
@@ -126,7 +129,7 @@ enum KeyRouting {
         }
         guard let action = bareKeyAction(keyCode: e.keyCode, modifiers: e.modifierFlags, isRepeat: e.isARepeat) else {
             // 반복된 Space·Delete는 편집기 문맥이면 조용히 버린다(한 번 누름 = 한 번 동작).
-            if e.isARepeat, [49, 51, 117].contains(e.keyCode),
+            if e.isARepeat, [49, 51, 117, 8, 9].contains(e.keyCode),
                e.modifierFlags.intersection([.command, .option, .control]).isEmpty,
                editorAcceptsShortcuts(store), eventWindowOK(e, store) { return nil }
             return e
@@ -147,6 +150,8 @@ enum KeyRouting {
         case .deleteSelection, .rippleDelete:
             guard store.selection != nil else { return e }
             store.deleteSelection(ripple: action == .rippleDelete)
+        case .selectionTool: store.setTool(.selection)   // 도구만 바꾼다(재생·재생 헤드·선택·편집 그대로)
+        case .cutTool: store.setTool(.cut)
         }
         return nil
     }

@@ -34,7 +34,7 @@ struct OnTheFrameApp: App {
                 Button("프로젝트 저장") { store.saveProject() }.keyboardShortcut("s")
                 Button("다른 이름으로 저장…") { store.saveProject(saveAs: true) }.keyboardShortcut("s", modifiers: [.command, .shift])
             }
-            // 단축키는 Premiere 방식 기본값(D-019, 완전 호환 아님). 키 입력은 KeyRouting이 실제 상태로 판단해 처리하고,
+            // 단축키는 흔히 쓰는 기본값(D-019·D-027, 완전 호환을 주장하지 않음). 키 입력은 KeyRouting이 실제 상태로 판단해 처리하고,
             // 메뉴는 표시·마우스 선택용이다(SwiftUI 메뉴 항목 상태는 메뉴를 열 때만 갱신되어 키 등가물로는 믿을 수 없었다).
             // 수정 키 없는 키(Space, ←/→, Home/End, Delete)는 메뉴 키 등가물로 두지 않고 제목에 키를 적는다.
             CommandGroup(replacing: .undoRedo) {
@@ -51,6 +51,13 @@ struct OnTheFrameApp: App {
                 Button("모두 선택") { NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil) }.keyboardShortcut("a")
             }
             CommandMenu("타임라인") {
+                // 편집 도구(D-030): 체크 표시는 지금 도구. 수정 키 없는 V·C는 메뉴 키 등가물로 두지 않고 제목에만 적는다(키는 KeyRouting).
+                Picker("편집 도구", selection: Binding(get: { store.tool }, set: { store.setTool($0) })) {
+                    Text("선택 도구  V").tag(ProjectStore.EditTool.selection)
+                    Text("자르기 도구  C").tag(ProjectStore.EditTool.cut)
+                }
+                .pickerStyle(.inline).labelsHidden().disabled(store.gestureBase != nil)
+                Divider()
                 Button("재생 헤드에서 자르기") { store.menuSplit() }.keyboardShortcut("k").disabled(!store.canSplit)
                 // 일반 삭제는 빈틈을 남기고, 리플 삭제는 뒤 클립을 당긴다(D-020, ON THE FRAME 기본값)
                 Button("선택한 클립 삭제(빈틈 남김)  Delete") { store.deleteSelection(ripple: false) }
@@ -122,6 +129,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if args.contains("-OTFProjectTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await ProjectSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFToolTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await ToolSelfTest.run(folder: folder) }
             return
         }
         if args.contains("-OTFCopyPasteTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
