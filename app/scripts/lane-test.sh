@@ -11,7 +11,7 @@ DEV=Engine/.build/debug/otf-dev
 RUN=selftest-work/lane-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p $RUN/sources
 for f in otf-TA.mp4 otf-TB.mp4 otf-hevc.mp4; do cp -c .build/test-work/fixtures/$f $RUN/sources/; done
-( open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout -OTFLaneTest ) &
+( open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout ${=EXTRA_ARGS:-} -OTFLaneTest ) &
 OPENPID=$!
 for i in {1..240}; do [[ -f $RUN/lane-result.json ]] && break; sleep 1; done
 wait $OPENPID || true

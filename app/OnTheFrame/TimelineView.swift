@@ -2,10 +2,9 @@ import AppKit
 import OnTheFrameEngine
 import SwiftUI
 
-/// 아래 영역: 상태 줄·확대 조절 + AppKit 타임라인(왼쪽 고정 레인 머리, 눈금자, 영상 레인·원본 소리 레인, 재생 헤드). A-012.
+/// 아래 영역: 상태 줄·확대 조절 + AppKit 타임라인(왼쪽 고정 레인 머리, 눈금자, 영상 레인들·오디오 레인들, 재생 헤드). A-012, A-014.
 struct TimelinePane: View {
     @Bindable var store: ProjectStore
-    @State private var pixelsPerFrame: Double = 2
 
     var body: some View {
         VStack(spacing: 0) {
@@ -13,17 +12,24 @@ struct TimelinePane: View {
                 Text("타임라인").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
                 if let m = store.statusMessage { Text(m).font(.callout).foregroundStyle(.orange).lineLimit(1) }
                 Spacer()
+                Menu {
+                    Button("영상·소리 레인 쌍 추가") { store.addLanePair() }
+                    Button("영상 레인 추가") { store.addLane(.video) }
+                    Button("오디오 레인 추가") { store.addLane(.audio) }
+                } label: { Label("레인 추가", systemImage: "plus.rectangle.on.rectangle") }
+                    .menuStyle(.borderlessButton).fixedSize().help("새 영상 레인은 맨 위(V 번호 증가), 새 오디오 레인은 맨 아래(A 번호 증가)에 추가")
+                    .disabled(store.gestureBase != nil)
                 Image(systemName: "minus.magnifyingglass").foregroundStyle(.secondary)
-                Slider(value: $pixelsPerFrame, in: 0.2...12).frame(width: 120).help("타임라인 확대")
+                Slider(value: $store.timelineZoom, in: 0.2...12).frame(width: 120).help("타임라인 확대")
                 Image(systemName: "plus.magnifyingglass").foregroundStyle(.secondary)
             }
             .padding(.horizontal, 10).padding(.vertical, 5)
             Divider()
             ZStack {
-                TimelineRepresentable(store: store, state: TimelineDrawState(store: store), pixelsPerFrame: pixelsPerFrame)
+                TimelineRepresentable(store: store, state: TimelineDrawState(store: store), pixelsPerFrame: store.timelineZoom)
                 if store.timeline.isEmpty && store.durationFrames == 0 {
-                    Text(store.assets.isEmpty ? "영상을 가져온 뒤 여기로 끌어 놓거나 목록의 + 단추를 누르세요"
-                                              : "왼쪽 목록의 영상을 여기로 끌어 놓거나 + 단추를 누르세요")
+                    Text(store.assets.isEmpty ? "영상·소리 파일을 가져온 뒤 여기로 끌어 놓거나 목록의 + 단추를 누르세요"
+                                              : "왼쪽 목록의 미디어를 레인에 끌어 놓거나 + 단추를 누르세요")
                         .foregroundStyle(.secondary).allowsHitTesting(false)
                 }
             }
@@ -38,9 +44,11 @@ struct TimelineDrawState: Equatable {
     var selection: UUID?
     var selected: Set<UUID>
     var candidate: UUID?
+    var selectedLane: UUID?
     var playhead: Int
-    var insertion: Int?
-    var proposalStart: Int?, proposalOK: Bool, proposalID: UUID?
+    var proposalStart: Int?, proposalOK: Bool, proposalID: UUID?, proposalLane: UUID?
+    /// 끌어 옮기기에서 붙은 위치(안내선)
+    var snap: Int?
     /// 찾을 수 없는 원본(미디어 id)
     var missing: Set<UUID>
     @MainActor init(store: ProjectStore) {
@@ -49,9 +57,10 @@ struct TimelineDrawState: Equatable {
         selection = store.selection
         selected = store.selectedIDs
         candidate = store.linkCandidate
+        selectedLane = store.selectedLane
         playhead = store.playhead
-        insertion = store.moveInsertionIndex
-        proposalStart = store.freeMoveProposal?.start; proposalOK = store.freeMoveProposal?.ok ?? true; proposalID = store.freeMoveProposal?.id
+        snap = store.snapGuide
+        proposalStart = store.freeMoveProposal?.start; proposalOK = store.freeMoveProposal?.ok ?? true; proposalID = store.freeMoveProposal?.id; proposalLane = store.freeMoveProposal?.lane
         missing = Set(store.missingMedia.keys)
         names = Dictionary(uniqueKeysWithValues: store.timeline.media.map { ($0.id, $0.name) })
     }
@@ -68,10 +77,11 @@ struct TimelineRepresentable: NSViewRepresentable {
         v.state = state
         v.pixelsPerFrame = CGFloat(pixelsPerFrame)
         let w = max(sv.contentSize.width, TimelineNSView.inset * 2 + CGFloat(state.timeline.durationFrames) * v.pixelsPerFrame + 200)
-        v.setFrameSize(NSSize(width: w, height: max(sv.contentSize.height, TimelineNSView.contentHeight)))
+        v.setFrameSize(NSSize(width: w, height: max(sv.contentSize.height, TimelineNSView.contentHeight(state.timeline.lanes))))
         v.needsDisplay = true
         v.window?.invalidateCursorRects(for: v)
         c.header.lanes = state.timeline.lanes
+        c.header.selectedLane = state.selectedLane
         c.header.needsDisplay = true
     }
 }
@@ -107,12 +117,14 @@ final class TimelineContainerView: NSView {
     }
 }
 
-/// 레인 머리: 레인 이름. 두 번 클릭하거나 문맥 메뉴로 이름을 바꾼다(Return 확정, Esc 취소, 빈 이름은 이전 이름 유지, 실행 취소 한 단계).
+/// 레인 머리: 레인 이름·종류, 오디오 레인 음소거·음량 표시. 누르면 레인을 고르고(정보 패널에 레인 설정), 두 번 누르거나 문맥 메뉴로 이름을 바꾼다
+/// (Return 확정, Esc 취소, 빈 이름은 이전 이름 유지, 실행 취소 한 단계). 문맥 메뉴: 이름 바꾸기·위로·아래로·음소거·삭제·레인 추가(A-014).
 /// 편집 중에는 텍스트 칸(필드 편집기)이 첫 응답자라 타임라인 단축키가 입력을 가로채지 않는다(KeyRouting.isTextInput).
 final class LaneHeaderView: NSView, NSTextFieldDelegate {
     static let width: CGFloat = 112
     let store: ProjectStore
     var lanes: [Lane] = Lane.defaults
+    var selectedLane: UUID?
     var verticalOffset: CGFloat = 0
     private(set) var editor: NSTextField?
     private(set) var editingLane: UUID?
@@ -121,42 +133,87 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
 
-    func rowRect(_ kind: LaneKind) -> NSRect {
-        let r = TimelineNSView.laneRect(kind)
+    func rowRect(_ id: UUID) -> NSRect {
+        let r = TimelineNSView.layout(lanes).first { $0.lane.id == id }?.rect ?? .zero
         return NSRect(x: 0, y: r.minY - verticalOffset, width: bounds.width, height: r.height)
     }
-    func lane(at p: NSPoint) -> Lane? { lanes.first { rowRect($0.kind).contains(p) } }
+    /// 그 종류의 첫 레인 줄(이전 자체 검사 호환)
+    func rowRect(_ kind: LaneKind) -> NSRect { lanes.first { $0.kind == kind }.map { rowRect($0.id) } ?? .zero }
+    func lane(at p: NSPoint) -> Lane? { lanes.first { rowRect($0.id).contains(p) } }
 
     override func draw(_ dirtyRect: NSRect) {
         NSColor.windowBackgroundColor.setFill(); bounds.fill()
         NSColor.separatorColor.setFill()
         NSRect(x: bounds.width - 1, y: 0, width: 1, height: bounds.height).fill()
-        NSRect(x: 0, y: TimelineNSView.rulerHeight - 1, width: bounds.width, height: 1).fill()
+        let numbering = Timeline(lanes: lanes)   // 번호(V1·A1…)는 레인 배열에서 계산한다(가운데 경계에서 바깥쪽)
         for l in lanes where l.id != editingLane {
-            let r = rowRect(l.kind)
-            (l.kind == .video ? NSColor.systemTeal : NSColor.systemGreen).withAlphaComponent(0.12).setFill()
-            NSBezierPath(roundedRect: r.insetBy(dx: 4, dy: 2), xRadius: 4, yRadius: 4).fill()
-            let icon = NSImage(systemSymbolName: l.kind == .video ? "film" : "waveform", accessibilityDescription: nil)
-            icon?.draw(in: NSRect(x: r.minX + 8, y: r.midY - 7, width: 14, height: 14))
-            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.labelColor]
-            NSString(string: l.name).draw(with: NSRect(x: r.minX + 28, y: r.midY - 8, width: r.width - 34, height: 16),
+            let r = rowRect(l.id)
+            let selected = l.id == selectedLane
+            (l.kind == .video ? NSColor.systemTeal : NSColor.systemGreen).withAlphaComponent(selected ? 0.32 : 0.12).setFill()
+            let bg = NSBezierPath(roundedRect: r.insetBy(dx: 4, dy: 2), xRadius: 4, yRadius: 4)
+            bg.fill()
+            if selected { NSColor.controlAccentColor.setStroke(); bg.lineWidth = 1.5; bg.stroke() }
+            // 번호 표(위치에서 정함, 이름과 따로)
+            let badge = NSRect(x: r.minX + 8, y: r.midY - 8, width: 24, height: 16)
+            (l.kind == .video ? NSColor.systemTeal : NSColor.systemGreen).withAlphaComponent(0.8).setFill()
+            NSBezierPath(roundedRect: badge, xRadius: 3, yRadius: 3).fill()
+            let label = NSString(string: numbering.laneLabel(l.id))
+            let battrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .bold), .foregroundColor: NSColor.white]
+            let lsz = label.size(withAttributes: battrs)
+            label.draw(at: NSPoint(x: badge.midX - lsz.width / 2, y: badge.midY - lsz.height / 2), withAttributes: battrs)
+            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+                                                        .foregroundColor: l.muted ? NSColor.secondaryLabelColor : NSColor.labelColor]
+            let hasSub = l.kind == .audio && (l.muted || l.volumePercent != 100) && r.height >= 34
+            NSString(string: l.name).draw(with: NSRect(x: r.minX + 38, y: r.midY - (hasSub ? 14 : 8), width: r.width - 44, height: 16),
                                           options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attrs)
+            if hasSub {
+                let sub = l.muted ? "음소거" : "음량 \(l.volumePercent)%"
+                NSString(string: sub).draw(at: NSPoint(x: r.minX + 38, y: r.midY + 2),
+                                           withAttributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: l.muted ? NSColor.systemOrange : NSColor.secondaryLabelColor])
+            }
         }
+        if let by = TimelineNSView.boundaryY(lanes) { TimelineNSView.drawBoundary(y: by - verticalOffset, from: 0, to: bounds.width - 1) }
+        // 눈금자 줄(세로 스크롤해도 머리 위에 남는다)
+        NSColor.windowBackgroundColor.setFill()
+        NSRect(x: 0, y: 0, width: bounds.width - 1, height: TimelineNSView.rulerHeight - 1).fill()
+        NSColor.separatorColor.setFill()
+        NSRect(x: 0, y: TimelineNSView.rulerHeight - 1, width: bounds.width, height: 1).fill()
     }
 
     override func mouseDown(with e: NSEvent) {
         let p = convert(e.locationInWindow, from: nil)
-        if e.clickCount == 2, let l = lane(at: p) { beginRename(l.id) }
+        guard let l = lane(at: p), p.y >= TimelineNSView.rulerHeight else { return }
+        if e.clickCount == 2 { beginRename(l.id) } else { store.selectLane(l.id) }
     }
     override func menu(for event: NSEvent) -> NSMenu? {
-        guard let l = lane(at: convert(event.locationInWindow, from: nil)) else { return nil }
         let m = NSMenu()
-        let item = NSMenuItem(title: "레인 이름 바꾸기…", action: #selector(renameFromMenu(_:)), keyEquivalent: "")
-        item.target = self; item.representedObject = l.id
-        m.addItem(item)
+        m.autoenablesItems = false
+        func add(_ title: String, _ action: Selector, _ id: UUID?, enabled: Bool = true) {
+            let it = NSMenuItem(title: title, action: action, keyEquivalent: ""); it.target = self; it.representedObject = id; it.isEnabled = enabled && store.gestureBase == nil
+            m.addItem(it)
+        }
+        if let l = lane(at: convert(event.locationInWindow, from: nil)) {
+            store.selectLane(l.id)
+            add("레인 이름 바꾸기…", #selector(renameFromMenu(_:)), l.id)
+            add("위로", #selector(upFromMenu(_:)), l.id, enabled: store.canMoveLane(l.id, by: -1))
+            add("아래로", #selector(downFromMenu(_:)), l.id, enabled: store.canMoveLane(l.id, by: 1))
+            if l.kind == .audio { add(l.muted ? "음소거 해제" : "음소거", #selector(muteFromMenu(_:)), l.id) }
+            add("레인 삭제…", #selector(deleteFromMenu(_:)), l.id, enabled: store.timeline.lanes(l.kind).count > 1)
+            m.addItem(.separator())
+        }
+        add("영상 레인 추가", #selector(addVideoFromMenu(_:)), nil)
+        add("오디오 레인 추가", #selector(addAudioFromMenu(_:)), nil)
         return m
     }
     @objc private func renameFromMenu(_ sender: NSMenuItem) { if let id = sender.representedObject as? UUID { beginRename(id) } }
+    @objc private func upFromMenu(_ sender: NSMenuItem) { if let id = sender.representedObject as? UUID { store.moveLane(id, by: -1) } }
+    @objc private func downFromMenu(_ sender: NSMenuItem) { if let id = sender.representedObject as? UUID { store.moveLane(id, by: 1) } }
+    @objc private func muteFromMenu(_ sender: NSMenuItem) {
+        if let id = sender.representedObject as? UUID, let l = store.timeline.laneInfo(id) { store.setLaneMuted(id, !l.muted) }
+    }
+    @objc private func deleteFromMenu(_ sender: NSMenuItem) { if let id = sender.representedObject as? UUID { store.requestRemoveLane(id) } }
+    @objc private func addVideoFromMenu(_ sender: NSMenuItem) { store.addLane(.video) }
+    @objc private func addAudioFromMenu(_ sender: NSMenuItem) { store.addLane(.audio) }
 
     func beginRename(_ id: UUID) {
         guard editor == nil, let l = lanes.first(where: { $0.id == id }), store.gestureBase == nil else { return }
@@ -165,7 +222,8 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
         f.delegate = self
         f.focusRingType = .default
         f.setAccessibilityLabel("레인 이름")
-        f.frame = rowRect(l.kind).insetBy(dx: 4, dy: max(2, (rowRect(l.kind).height - 22) / 2))
+        let r = rowRect(id)
+        f.frame = r.insetBy(dx: 4, dy: max(2, (r.height - 22) / 2))
         addSubview(f)
         editor = f; editingLane = id; finishing = false
         needsDisplay = true
@@ -194,9 +252,36 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
 
 final class TimelineNSView: NSView {
     static let inset: CGFloat = 12, rulerHeight: CGFloat = 24, edgeGrab: CGFloat = 6
-    static let videoY: CGFloat = 30, videoHeight: CGFloat = 54, audioY: CGFloat = 92, audioHeight: CGFloat = 40
-    static let contentHeight: CGFloat = audioY + audioHeight + 12
-    /// 이전 이름(영상 레인), 자체 검사 호환
+    /// 레인 줄 배치(A-014): 눈금자 아래 위에서부터 레인 순서대로. 영상 레인 54pt, 오디오 레인 40pt, 사이 8pt.
+    static let firstLaneY: CGFloat = 30, laneGap: CGFloat = 8, videoHeight: CGFloat = 54, audioHeight: CGFloat = 40
+    /// 마지막 레인 아래 빈 곳(여기에 놓으면 파일 이름의 새 레인)
+    static let dropZoneHeight: CGFloat = 44
+    /// 영상 레인 묶음과 오디오 레인 묶음 사이 가운데 경계(2026-10-11): 레인 사이보다 넓은 틈과 경계선
+    static let boundaryGap: CGFloat = 18
+    /// 끌어 옮기기 붙음 거리(화면 포인트, 확대 배율과 무관)
+    static let snapDistance: CGFloat = 8
+    static func height(_ k: LaneKind) -> CGFloat { k == .video ? videoHeight : audioHeight }
+    static func layout(_ lanes: [Lane]) -> [(lane: Lane, rect: NSRect)] {
+        var y = firstLaneY
+        return lanes.enumerated().map { i, l in
+            let boundaryNext = l.kind == .video && i + 1 < lanes.count && lanes[i + 1].kind == .audio
+            defer { y += height(l.kind) + (boundaryNext ? boundaryGap : laneGap) }
+            return (l, NSRect(x: 0, y: y, width: 0, height: height(l.kind)))
+        }
+    }
+    /// 가운데 경계선 위치(V1 아래와 A1 위의 가운데)
+    static func boundaryY(_ lanes: [Lane]) -> CGFloat? {
+        let l = layout(lanes)
+        guard let v = l.last(where: { $0.lane.kind == .video }), let a = l.first(where: { $0.lane.kind == .audio }) else { return nil }
+        return (v.rect.maxY + a.rect.minY) / 2
+    }
+    static func drawBoundary(y: CGFloat, from x0: CGFloat, to x1: CGFloat) {
+        NSColor.secondaryLabelColor.withAlphaComponent(0.7).setFill()
+        NSRect(x: x0, y: y - 1, width: max(0, x1 - x0), height: 2).fill()
+    }
+    static func contentHeight(_ lanes: [Lane]) -> CGFloat { (layout(lanes).last?.rect.maxY ?? firstLaneY) + 12 + dropZoneHeight }
+    /// 기본 레인 2개(영상 1·오디오 1)일 때의 위치(이전 자체 검사 호환)
+    static let videoY: CGFloat = firstLaneY, audioY: CGFloat = firstLaneY + videoHeight + boundaryGap
     static let trackY = videoY, trackHeight = videoHeight
     static func laneRect(_ k: LaneKind) -> NSRect {
         k == .video ? NSRect(x: 0, y: videoY, width: 0, height: videoHeight) : NSRect(x: 0, y: audioY, width: 0, height: audioHeight)
@@ -204,8 +289,12 @@ final class TimelineNSView: NSView {
     let store: ProjectStore
     var state: TimelineDrawState?
     var pixelsPerFrame: CGFloat = 2
+    /// 미디어를 끌고 있는 중(빈 곳 안내 표시)과 놓일 위치(보기 좌표)
+    private var dropHover = false
+    private var dropPoint: NSPoint?
 
-    private enum Drag { case none, scrub, pending(UUID, NSPoint), move(UUID), free(UUID, CGFloat), trim(UUID, ProjectStore.TrimEdge, CGFloat) }
+    private enum Drag { case none, scrub, pending(UUID, NSPoint), free(UUID, CGFloat), trim(UUID, ProjectStore.TrimEdge, CGFloat),
+                        fade(UUID, ProjectStore.FadeEdge, CGFloat) }
     private var drag: Drag = .none
 
     init(store: ProjectStore) {
@@ -217,10 +306,21 @@ final class TimelineNSView: NSView {
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
 
+    var lanes: [Lane] { state?.timeline.lanes ?? Lane.defaults }
+    func laneRect(_ id: UUID?) -> NSRect? { Self.layout(lanes).first { $0.lane.id == id }?.rect }
+    /// y 위치의 레인(레인 사이 틈·경계 틈은 가까운 레인)
+    func lane(atY y: CGFloat) -> Lane? {
+        let l = Self.layout(lanes)
+        guard let first = l.first, let last = l.last, y >= first.rect.minY - Self.laneGap / 2, y <= last.rect.maxY + Self.laneGap / 2 else { return nil }
+        func dist(_ r: NSRect) -> CGFloat { y < r.minY ? r.minY - y : (y > r.maxY ? y - r.maxY : 0) }
+        return l.min { dist($0.rect) < dist($1.rect) }?.lane
+    }
+    var lanesBottom: CGFloat { Self.layout(lanes).last?.rect.maxY ?? Self.firstLaneY }
     func x(_ frame: Int) -> CGFloat { Self.inset + CGFloat(frame) * pixelsPerFrame }
-    private func frame(atX px: CGFloat) -> Int { Int(((px - Self.inset) / pixelsPerFrame).rounded()) }
-    private func rect(_ c: Clip, _ k: LaneKind, start: Int? = nil) -> NSRect {
-        let l = Self.laneRect(k)
+    /// 보기 x → 타임라인 프레임(가장 가까운 프레임 경계). 문서 보기 좌표라 가로 스크롤·확대와 무관하게 같은 식이다.
+    func frame(atX px: CGFloat) -> Int { Int(((px - Self.inset) / pixelsPerFrame).rounded()) }
+    private func rect(_ c: Clip, lane: UUID? = nil, start: Int? = nil) -> NSRect {
+        let l = laneRect(lane ?? c.lane) ?? .zero
         return NSRect(x: x(start ?? c.start), y: l.minY, width: max(1, CGFloat(c.length) * pixelsPerFrame), height: l.height)
     }
 
@@ -231,26 +331,52 @@ final class TimelineNSView: NSView {
         NSColor.underPageBackgroundColor.setFill(); bounds.fill()
         drawRuler(st)
         let t = st.timeline
-        for (k, gaps) in [(LaneKind.video, t.gaps), (.audio, t.audioGaps)] {
-            let l = Self.laneRect(k)
-            for g in gaps { drawGap(NSRect(x: x(g.lowerBound), y: l.minY, width: CGFloat(g.count) * pixelsPerFrame, height: l.height), label: k == .video ? "빈틈" : "무음") }
+        let rows = Self.layout(t.lanes)
+        for (l, r) in rows {
+            for g in t.gaps(inLane: l.id) {
+                drawGap(NSRect(x: x(g.lowerBound), y: r.minY, width: CGFloat(g.count) * pixelsPerFrame, height: r.height), label: l.kind == .video ? "빈틈" : "무음")
+            }
         }
+        let top = rows.first?.rect.minY ?? Self.firstLaneY, bottom = rows.last?.rect.maxY ?? Self.firstLaneY
+        if let by = Self.boundaryY(t.lanes) { Self.drawBoundary(y: by, from: 0, to: bounds.width) }
         if t.durationFrames > 0 {   // 타임라인 끝(길이)
             NSColor.tertiaryLabelColor.setFill()
-            NSRect(x: x(t.durationFrames) - 0.5, y: Self.videoY - 6, width: 1, height: Self.audioY + Self.audioHeight - Self.videoY + 12).fill()
+            NSRect(x: x(t.durationFrames) - 0.5, y: top - 6, width: 1, height: bottom - top + 12).fill()
         }
-        for c in t.clips { drawClip(c, .video, st) }
-        for c in t.audioClips { drawClip(c, .audio, st) }
-        // 자유 이동 제안 위치(놓을 수 없으면 빨강)
-        if let id = st.proposalID, let s = st.proposalStart, !st.proposalOK, let base = store.gestureBase, let c = base.clip(id), let k = base.lane(of: id) {
-            let r = rect(c, k, start: s)
-            NSColor.systemRed.withAlphaComponent(0.25).setFill(); r.fill()
-            NSColor.systemRed.setStroke(); let p = NSBezierPath(rect: r.insetBy(dx: 1, dy: 1)); p.lineWidth = 2; p.stroke()
+        for c in t.clips + t.audioClips { drawClip(c, st) }
+        // 음소거한 오디오 레인: 클립 위를 어둡게
+        for (l, r) in rows where l.muted && l.kind == .audio {
+            NSColor.windowBackgroundColor.withAlphaComponent(0.55).setFill()
+            NSRect(x: 0, y: r.minY, width: bounds.width, height: r.height).fill()
         }
-        if let ins = st.insertion, case .move = drag, let base = store.gestureBase {   // 끼워 넣을 자리(두 레인)
-            let bx = x(ins < base.clips.count ? base.starts[ins] : base.durationFrames)
+        // 끌어 옮기기(묶음 전체): 놓을 수 있으면 원래 자리를 점선으로(클립은 이미 새 자리에 그려짐), 놓을 수 없으면 제안 위치를 빨갛게
+        if let id = st.proposalID, let s = st.proposalStart, let base = store.gestureBase, let c = base.clip(id) {
+            for m in base.group(of: id) {
+                if st.proposalOK {
+                    let p = NSBezierPath(roundedRect: rect(m).insetBy(dx: 1, dy: 1), xRadius: 4, yRadius: 4)
+                    p.setLineDash([4, 3], count: 2, phase: 0); p.lineWidth = 1
+                    NSColor.secondaryLabelColor.setStroke(); p.stroke()
+                } else {
+                    let r = rect(m, lane: m.id == id ? st.proposalLane : m.lane, start: m.start + (s - c.start))
+                    NSColor.systemRed.withAlphaComponent(0.25).setFill(); r.fill()
+                    NSColor.systemRed.setStroke(); let p = NSBezierPath(rect: r.insetBy(dx: 1, dy: 1)); p.lineWidth = 2; p.stroke()
+                }
+            }
+        }
+        if let f = st.snap {   // 붙은 위치 안내선(0 또는 다른 클립 경계)
             NSColor.systemYellow.setFill()
-            NSRect(x: bx - 1.5, y: Self.videoY - 4, width: 3, height: Self.audioY + Self.audioHeight - Self.videoY + 8).fill()
+            NSRect(x: x(f) - 1, y: top - 6, width: 2, height: bottom - top + 12).fill()
+        }
+        if dropHover, let dp = dropPoint, let l = lane(atY: dp.y), let r = laneRect(l.id) {   // 놓일 시각(놓은 위치 그대로)
+            NSColor.controlAccentColor.setFill()
+            NSRect(x: x(max(0, frame(atX: dp.x))) - 1, y: r.minY - 3, width: 2, height: r.height + 6).fill()
+        }
+        if dropHover {   // 빈 곳에 놓으면 새 레인
+            let r = NSRect(x: Self.inset, y: bottom + 10, width: max(0, bounds.width - Self.inset * 2), height: Self.dropZoneHeight - 12)
+            let p = NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6); p.setLineDash([5, 4], count: 2, phase: 0)
+            NSColor.secondaryLabelColor.setStroke(); p.stroke()
+            NSString(string: "여기에 놓으면 파일 이름의 새 레인(영상은 맨 위, 소리는 맨 아래)").draw(at: NSPoint(x: r.minX + 10, y: r.midY - 7),
+                                                       withAttributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor])
         }
         let ph = x(min(st.playhead, t.durationFrames))
         NSColor.systemRed.setFill()
@@ -275,8 +401,9 @@ final class TimelineNSView: NSView {
         }
     }
 
-    private func drawClip(_ c: Clip, _ k: LaneKind, _ st: TimelineDrawState) {
-        let r = rect(c, k)
+    private func drawClip(_ c: Clip, _ st: TimelineDrawState) {
+        let k = st.timeline.lane(of: c.id) ?? .video
+        let r = rect(c)
         let selected = st.selected.contains(c.id), candidate = c.id == st.candidate
         let base = k == .video ? NSColor.systemTeal : NSColor.systemGreen
         let path = NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
@@ -317,11 +444,83 @@ final class TimelineNSView: NSView {
             NSColor.systemRed.setFill(); NSBezierPath(roundedRect: b, xRadius: b.height / 2, yRadius: b.height / 2).fill()
             text.draw(at: NSPoint(x: b.minX + 4, y: b.minY + 1), withAttributes: attrs)
         }
+        if k == .audio { drawAudioEnvelope(c, r, st) }
         if c.id == st.selection || (selected && !candidate && st.selection.map { st.timeline.group(of: $0).contains { $0.id == c.id } } == true) {   // 트림 손잡이
             NSColor.controlAccentColor.setFill()
             NSRect(x: r.minX, y: r.minY + 6, width: 3, height: r.height - 12).fill()
             NSRect(x: r.maxX - 3, y: r.minY + 6, width: 3, height: r.height - 12).fill()
         }
+    }
+
+    // MARK: 소리 클립 음량·페이드(2026-10-11)
+
+    /// 음량 선이 오가는 높이: 클립 아래(0%)에서 위 여백(100%)까지
+    private func envelopeY(_ g: Double, _ r: NSRect) -> CGFloat { r.maxY - 4 - CGFloat(g) * (r.height - 12) }
+    /// 소리 클립 위: 클립 음량 × 페이드 모양의 선(레인 음량 제외), 줄어든 부분은 어둡게, 클립 음소거·음량 표시,
+    /// 고른 소리 클립(연결된 쌍의 소리 포함)에는 페이드 손잡이(위쪽 모서리, 페이드 끝 위치).
+    private func drawAudioEnvelope(_ c: Clip, _ r: NSRect, _ st: TimelineDrawState) {
+        let a = c.effectiveAudio
+        let pts = a.breakpoints(length: c.length).map { b in
+            NSPoint(x: x(c.start + b), y: envelopeY(a.gain * a.envelope(at: Double(b), length: c.length), r))
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4).addClip()
+        let shade = NSBezierPath()
+        shade.move(to: NSPoint(x: r.minX, y: r.minY)); pts.forEach { shade.line(to: $0) }; shade.line(to: NSPoint(x: r.maxX, y: r.minY)); shade.close()
+        NSColor.black.withAlphaComponent(0.28).setFill(); shade.fill()
+        let line = NSBezierPath(); line.lineWidth = 1.5
+        if let f = pts.first { line.move(to: f); pts.dropFirst().forEach { line.line(to: $0) } }
+        NSColor.systemYellow.withAlphaComponent(0.9).setStroke(); line.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+        let tag = a.muted ? "클립 음소거" : (a.volumePercent != 100 ? "클립 \(a.volumePercent)%" : nil)
+        if let tag, r.width > 60 {
+            NSString(string: tag).draw(at: NSPoint(x: r.minX + 6, y: r.maxY - 15), withAttributes: [.font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+                                                                                                    .foregroundColor: a.muted ? NSColor.systemOrange : NSColor.labelColor])
+        }
+        if fadeHandleClips(st).contains(c.id) {
+            for e in [ProjectStore.FadeEdge.fadeIn, .fadeOut] {
+                let h = fadeHandleRect(c, e, r)
+                let p = NSBezierPath(rect: h); NSColor.white.setFill(); p.fill()
+                NSColor.systemYellow.setStroke(); p.lineWidth = 1.5; p.stroke()
+            }
+            if case .fade(let id, let e, _) = drag, id == c.id {   // 끌기 중 길이 표시
+                let f = e == .fadeIn ? a.fadeIn.visible(in: c.length) : a.fadeOut.visible(in: c.length)
+                let text = NSString(string: (e == .fadeIn ? "페이드 인 " : "페이드 아웃 ") + FadeText.seconds(f) + "초")
+                let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .bold), .foregroundColor: NSColor.white]
+                let sz = text.size(withAttributes: attrs), h = fadeHandleRect(c, e, r)
+                let b = NSRect(x: min(max(r.minX, h.midX - sz.width / 2 - 4), max(r.minX, r.maxX - sz.width - 8)), y: r.minY - sz.height - 4, width: sz.width + 8, height: sz.height + 2)
+                NSColor.black.withAlphaComponent(0.75).setFill(); NSBezierPath(roundedRect: b, xRadius: 3, yRadius: 3).fill()
+                text.draw(at: NSPoint(x: b.minX + 4, y: b.minY + 1), withAttributes: attrs)
+            }
+        }
+    }
+    /// 페이드 손잡이를 보일 소리 클립: 고른 클립의 묶음(연결된 쌍이면 소리 쪽) 가운데 소리 클립
+    func fadeHandleClips(_ st: TimelineDrawState) -> Set<UUID> {
+        guard let sel = st.selection else { return [] }
+        return Set(st.timeline.group(of: sel).filter { st.timeline.lane(of: $0.id) == .audio }.map(\.id))
+    }
+    /// 손잡이 사각형(8×8): 페이드 인은 페이드 끝, 페이드 아웃은 페이드 시작 위치의 클립 위쪽
+    func fadeHandleRect(_ c: Clip, _ e: ProjectStore.FadeEdge, _ r: NSRect) -> NSRect {
+        let a = c.effectiveAudio
+        let hx = e == .fadeIn ? x(c.start + a.fadeIn.visible(in: c.length)) : x(c.end - a.fadeOut.visible(in: c.length))
+        let cx = min(max(hx, r.minX + 4), r.maxX - 4)
+        return NSRect(x: cx - 4, y: r.minY + 2, width: 8, height: 8)
+    }
+    /// 페이드 손잡이 누름(손잡이 둘레 6pt). 두 손잡이가 겹치면 포인터에 가까운 쪽.
+    func fadeHandleHit(_ p: NSPoint) -> (UUID, ProjectStore.FadeEdge, CGFloat)? {
+        guard let st = state else { return nil }
+        var best: (UUID, ProjectStore.FadeEdge, CGFloat, CGFloat)?
+        for id in fadeHandleClips(st) {
+            guard let c = st.timeline.clip(id) else { continue }
+            let r = rect(c)
+            for e in [ProjectStore.FadeEdge.fadeIn, .fadeOut] {
+                let h = fadeHandleRect(c, e, r).insetBy(dx: -6, dy: -5)
+                guard h.contains(p) else { continue }
+                let d = abs(p.x - h.midX)
+                if best == nil || d < best!.3 { best = (id, e, p.x - h.midX, d) }
+            }
+        }
+        return best.map { ($0.0, $0.1, $0.2) }
     }
 
     private func drawRuler(_ st: TimelineDrawState) {
@@ -350,10 +549,9 @@ final class TimelineNSView: NSView {
 
     func clipHit(_ p: NSPoint) -> (UUID, ProjectStore.TrimEdge?)? {
         guard let st = state else { return nil }
-        for (k, cs) in [(LaneKind.video, st.timeline.clips), (.audio, st.timeline.audioClips)] {
-            let l = Self.laneRect(k)
+        for (lane, l) in Self.layout(st.timeline.lanes) {
             guard p.y >= l.minY, p.y <= l.maxY else { continue }
-            for c in cs {
+            for c in st.timeline.clips(inLane: lane.id) {
                 let x0 = x(c.start), x1 = x(c.end)
                 guard p.x >= x0 - 1, p.x <= x1 + 1 else { continue }
                 let grab = min(Self.edgeGrab, (x1 - x0) / 3)
@@ -368,8 +566,14 @@ final class TimelineNSView: NSView {
     override func mouseDown(with e: NSEvent) {
         window?.makeFirstResponder(self)
         let p = convert(e.locationInWindow, from: nil)
-        if p.y < Self.videoY {
+        if p.y < Self.firstLaneY {
             store.pauseForEdit(); drag = .scrub; store.seek(to: frame(atX: p.x)); return
+        }
+        if store.gestureBase == nil, let (id, edge, grab) = fadeHandleHit(p) {   // 페이드 손잡이(트림·옮기기보다 먼저)
+            store.beginFadeGesture()
+            drag = .fade(id, edge, grab)
+            needsDisplay = true
+            return
         }
         if let (id, edge) = clipHit(p) {
             if e.modifierFlags.contains(.command) { store.select(id, extend: true); drag = .none; return }   // 연결 후보
@@ -382,7 +586,7 @@ final class TimelineNSView: NSView {
                 drag = .pending(id, p)
             }
         } else {
-            store.select(nil); drag = .none
+            store.select(nil); store.selectLane(nil); drag = .none
         }
     }
 
@@ -393,22 +597,22 @@ final class TimelineNSView: NSView {
         case .scrub:
             store.seek(to: frame(atX: p.x))
         case .pending(let id, let p0):
-            guard abs(p.x - p0.x) > 4 else { return }
+            // 일반 끌기 = 옮기기(2026-10-11): 연결된 쌍·연결되지 않은 클립 모두 위치(와 같은 종류 레인)만 바꾼다. 리플·끼워 넣기 없음.
+            guard abs(p.x - p0.x) > 4 || abs(p.y - p0.y) > 4 else { return }
             store.beginGesture(select: id)
-            if store.timeline.movesFreely(id) {   // 연결을 해제한 클립: 같은 레인 안 자유 이동(빈틈에 놓기)
-                drag = .free(id, p0.x)
-                store.updateFreeMove(id, delta: Int(((p.x - p0.x) / pixelsPerFrame).rounded()))
-            } else {
-                drag = .move(id)
-                store.updateMove(id, toIndex: insertionIndex(p.x))
-            }
-        case .move(let id):
-            store.updateMove(id, toIndex: insertionIndex(p.x))
+            drag = .free(id, p0.x)
+            updateDragMove(id, p, from: p0.x)
         case .free(let id, let x0):
-            store.updateFreeMove(id, delta: Int(((p.x - x0) / pixelsPerFrame).rounded()))
+            updateDragMove(id, p, from: x0)
         case .trim(let id, let edge, let x0):
             let d = Int(((p.x - x0) / pixelsPerFrame).rounded())
             store.updateTrim(id, edge: edge, delta: d)
+        case .fade(let id, let edge, let grab):
+            // 손잡이를 잡은 곳 그대로(누른 곳과 손잡이 가운데의 거리를 뺀다): 페이드 인은 클립 시작에서, 페이드 아웃은 클립 끝에서 잰 프레임
+            guard let c = store.gestureBase?.clip(id) else { return }
+            let hx = p.x - grab
+            let f = edge == .fadeIn ? (hx - x(c.start)) / pixelsPerFrame : (x(c.end) - hx) / pixelsPerFrame
+            store.updateFade(id, edge: edge, frames: Int(max(0, f).rounded()))
         case .none:
             break
         }
@@ -416,10 +620,16 @@ final class TimelineNSView: NSView {
 
     override func mouseUp(with e: NSEvent) {
         switch drag {
-        case .move, .trim, .free: store.commitGesture()
+        case .trim, .free, .fade: store.commitGesture()
         default: break
         }
         drag = .none
+        needsDisplay = true
+    }
+    /// 끌어 옮기기 갱신: 문서 보기 좌표의 가로 거리 → 프레임(확대 배율), 붙음 거리는 화면 8pt를 프레임으로 바꾼다
+    private func updateDragMove(_ id: UUID, _ p: NSPoint, from x0: CGFloat) {
+        store.updateFreeMove(id, delta: Double((p.x - x0) / pixelsPerFrame), lane: lane(atY: p.y)?.id,
+                             snapFrames: Double(Self.snapDistance / pixelsPerFrame))
     }
 
     /// 클립 문맥 메뉴: 연결 해제·연결·자르기·삭제(대상과 범위를 제목에 보인다)
@@ -438,7 +648,7 @@ final class TimelineNSView: NSView {
         m.addItem(.separator())
         add(linked ? "재생 헤드에서 자르기(연결된 쌍)" : "재생 헤드에서 자르기", store.gestureBase == nil, #selector(menuSplit))
         add(linked ? "삭제 — 빈틈 남김(연결된 쌍)" : "삭제 — 빈틈 남김", store.gestureBase == nil, #selector(menuLift))
-        add(linked ? "리플 삭제(연결된 쌍, 두 레인)" : "리플 삭제(두 레인)", store.gestureBase == nil, #selector(menuRipple))
+        add(linked ? "리플 삭제(연결된 쌍, 모든 레인)" : "리플 삭제(모든 레인)", store.gestureBase == nil, #selector(menuRipple))
         return m
     }
     @objc private func menuUnlink() { store.unlinkSelection() }
@@ -456,37 +666,55 @@ final class TimelineNSView: NSView {
     }
     override func cancelOperation(_ sender: Any?) {
         switch drag {
-        case .move, .trim, .free: store.cancelGesture(); drag = .none
+        case .trim, .free, .fade: store.cancelGesture(); drag = .none; needsDisplay = true
         default: break
         }
     }
 
-    /// 드래그 시작 시점 타임라인에서 끼워 넣을 자리(영상 레인 클립 가운데를 기준으로)
-    private func insertionIndex(_ px: CGFloat) -> Int {
-        guard let base = store.gestureBase ?? state?.timeline else { return 0 }
-        let f = CGFloat(frame(atX: px))
-        return base.clips.filter { CGFloat($0.start) + CGFloat($0.length) / 2 < f }.count
-    }
 
     override func resetCursorRects() {
         guard let st = state, let sel = st.selection else { return }
+        for id in fadeHandleClips(st) {   // 페이드 손잡이(트림 커서보다 위)
+            guard let c = st.timeline.clip(id) else { continue }
+            for e in [ProjectStore.FadeEdge.fadeIn, .fadeOut] { addCursorRect(fadeHandleRect(c, e, rect(c)).insetBy(dx: -6, dy: -5), cursor: .crosshair) }
+        }
         for c in st.timeline.group(of: sel) {
-            guard let k = st.timeline.lane(of: c.id) else { continue }
-            let r = rect(c, k)
+            let r = rect(c)
             addCursorRect(NSRect(x: r.minX - 2, y: r.minY, width: Self.edgeGrab + 2, height: r.height), cursor: .resizeLeftRight)
             addCursorRect(NSRect(x: r.maxX - Self.edgeGrab, y: r.minY, width: Self.edgeGrab + 2, height: r.height), cursor: .resizeLeftRight)
         }
     }
 
-    // MARK: 영상 목록에서 끌어 놓기
+    // MARK: 미디어 목록에서 끌어 놓기(A-014: 레인과 위치를 고른다)
 
-    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { mediaID(sender) != nil ? .copy : [] }
-    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { mediaID(sender) != nil ? .copy : [] }
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { draggingUpdated(sender) }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let ok = mediaID(sender) != nil
+        setHover(ok); dropPoint = ok ? convert(sender.draggingLocation, from: nil) : nil; needsDisplay = true
+        return ok ? .copy : []
+    }
+    override func draggingExited(_ sender: NSDraggingInfo?) { setHover(false) }
+    override func draggingEnded(_ sender: NSDraggingInfo) { setHover(false) }
+    private func setHover(_ h: Bool) { if !h { dropPoint = nil }; if dropHover != h { dropHover = h; needsDisplay = true } }
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        setHover(false)
         guard let id = mediaID(sender) else { return false }
-        let p = convert(sender.draggingLocation, from: nil)
-        store.addToTimeline(id, at: insertionIndex(p.x))
+        drop(id, windowPoint: sender.draggingLocation)
         return true
+    }
+    /// 창 좌표의 놓은 위치(NSDraggingInfo.draggingLocation) → 문서 보기 좌표(가로·세로 스크롤 반영) → 레인·프레임
+    func drop(_ id: UUID, windowPoint: NSPoint) { drop(id, at: convert(windowPoint, from: nil)) }
+    /// 놓은 위치 해석(2026-10-11): 시각은 놓은 x 그대로(문서 보기 좌표 → 프레임, 끼워 넣기 없음).
+    /// 레인 위는 그 레인, 눈금자 위는 그 종류의 기본 레인(V1·A1), 레인 아래 빈 곳은 바깥쪽 새 레인.
+    func drop(_ id: UUID, at p: NSPoint) {
+        let target: UUID?
+        if p.y < Self.firstLaneY {
+            let video = store.timeline.media.first { $0.id == id }?.hasVideo ?? true
+            target = store.timeline.baseLane(video ? .video : .audio)?.id
+        }
+        else if p.y > lanesBottom + Self.laneGap / 2 { target = nil }
+        else { target = lane(atY: p.y)?.id }
+        store.placeMedia(id, atFrame: frame(atX: p.x), lane: target)
     }
     private func mediaID(_ s: NSDraggingInfo) -> UUID? {
         guard let str = s.draggingPasteboard.string(forType: .string), let id = UUID(uuidString: str),

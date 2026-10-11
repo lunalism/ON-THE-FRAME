@@ -38,9 +38,9 @@ enum LayoutSelfTest {
                 // 접기·펼치기(보기 메뉴): 접으면 0, 남는 폭(패널 + 나눔선)은 프리뷰, 펼치면 이전 너비
                 let frame0 = w.frame
                 func current() async -> EditorLayout.Split? { try? await Task.sleep(nanoseconds: 300_000_000); return L.lastSplit }
-                _ = menu("영상 목록 접기")
+                _ = menu("왼쪽 패널 접기")
                 let mc = await current()
-                _ = menu("영상 목록 펼치기")
+                _ = menu("왼쪽 패널 펼치기")
                 let me = await current()
                 check("collapse.media", mc?.media == 0 && mc.map { near($0.preview, sp.preview + sp.media + EditorLayout.divider) } == true && me == sp && L.mediaCollapsed == false,
                       "collapsed media \(mc?.media ?? -1) preview \(mc?.preview ?? -1) → expanded media \(me?.media ?? -1)")
@@ -50,7 +50,7 @@ enum LayoutSelfTest {
                 let ie = await current()
                 check("collapse.inspector", ic?.inspector == 0 && ic.map { near($0.preview, sp.preview + sp.inspector + EditorLayout.divider) } == true && ie == sp,
                       "collapsed inspector \(ic?.inspector ?? -1) preview \(ic?.preview ?? -1) → expanded \(ie?.inspector ?? -1)")
-                _ = menu("영상 목록 접기"); _ = menu("클립 정보 접기")
+                _ = menu("왼쪽 패널 접기"); _ = menu("클립 정보 접기")
                 let both = await current()
                 check("collapse.both", both.map { $0.media == 0 && $0.inspector == 0 && near($0.preview, L.lastContentSize.width) } == true, "preview \(both?.preview ?? -1)")
                 // 바꾼 상태에서 "기본 배치로 재설정": 비율·펼침만, 창 위치·크기는 그대로

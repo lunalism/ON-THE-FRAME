@@ -42,7 +42,7 @@ enum SelfTest {
         do { try fm.createDirectory(at: out, withIntermediateDirectories: false); check("sandbox.grantedFolderWritable", true) }
         catch { check("sandbox.grantedFolderWritable", false, error.localizedDescription) }
 
-        let names = ["otf-A.mp4", "otf-B.mp4", "otf-rot90.mp4", "reject-prores.mov", "reject-500fps.mp4", "reject-audio-only.m4a", "reject-2video.mov",
+        let names = ["otf-A.mp4", "otf-B.mp4", "otf-rot90.mp4", "reject-prores.mov", "reject-500fps.mp4", "reject-4ch.wav", "reject-2video.mov",
                      "otf-hevc.mp4", "reject-uhd.mp4", "otf-N2997.mp4", "otf-P25.mp4", "otf-VFR.mp4"]
         let hashesBefore = Dictionary(uniqueKeysWithValues: names.map { ($0, sha(src.appendingPathComponent($0))) })
         check("fixtures.present", hashesBefore.values.allSatisfy { $0 != nil })
@@ -75,9 +75,9 @@ enum SelfTest {
         }
         _ = await waitUntil(5) { store.alert != nil }   // 묶음 처리가 끝난 뒤 알림 하나
         let msg = store.alert?.message ?? ""
-        check("import.rejectionsReported", ["reject-prores.mov", "reject-500fps.mp4", "reject-audio-only.m4a", "reject-2video.mov", "reject-uhd.mp4"].allSatisfy { msg.contains($0) })
+        check("import.rejectionsReported", ["reject-prores.mov", "reject-500fps.mp4", "reject-4ch.wav", "reject-2video.mov", "reject-uhd.mp4"].allSatisfy { msg.contains($0) })
         await dismissAlert()
-        for (n, want) in [("reject-prores.mov", "unsupportedCodec"), ("reject-500fps.mp4", "frameRate"), ("reject-audio-only.m4a", "noVideo"), ("reject-2video.mov", "multipleVideoTracks"), ("reject-uhd.mp4", "dimensions")] {
+        for (n, want) in [("reject-prores.mov", "unsupportedCodec"), ("reject-500fps.mp4", "frameRate"), ("reject-4ch.wav", "audioChannels"), ("reject-2video.mov", "multipleVideoTracks"), ("reject-uhd.mp4", "dimensions")] {
             do { _ = try await MediaProbe.inspect(src.appendingPathComponent(n)); check("probe.\(n)", false, "accepted") }
             catch let e as ProbeError { check("probe.\(n)", e.kind == want, "\(e.kind): \(e)") }
             catch { check("probe.\(n)", false, "\(error)") }

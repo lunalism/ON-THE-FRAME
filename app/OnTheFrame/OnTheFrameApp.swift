@@ -52,10 +52,15 @@ struct OnTheFrameApp: App {
                 // 연결(A-012): 연결된 영상·소리는 함께 선택·편집된다. 연결 해제 뒤 따로 옮기거나 다듬을 수 있다.
                 Button("연결 해제(영상·소리 따로 편집)") { store.unlinkSelection() }.disabled(!store.canUnlink || store.gestureBase != nil)
                 Button("연결(⌘-클릭한 클립과)") { store.linkSelection() }.disabled(!store.canLink || store.gestureBase != nil)
+                Divider()
+                // 레인(A-014): 추가·순서·삭제는 레인 머리 문맥 메뉴와 정보 패널에도 있다. 새 영상 레인은 맨 위, 새 오디오 레인은 맨 아래(가운데 경계에서 바깥쪽)
+                Button("영상·소리 레인 쌍 추가") { store.addLanePair() }.disabled(store.gestureBase != nil)
+                Button("영상 레인 추가") { store.addLane(.video) }.disabled(store.gestureBase != nil)
+                Button("오디오 레인 추가") { store.addLane(.audio) }.disabled(store.gestureBase != nil)
             }
             // 보기: 패널 접기·펼치기와 기본 배치(창 위치·크기는 바꾸지 않음)
             CommandGroup(before: .toolbar) {
-                Button(EditorLayout.shared.mediaCollapsed ? "영상 목록 펼치기" : "영상 목록 접기") { EditorLayout.shared.toggleMedia() }
+                Button(EditorLayout.shared.mediaCollapsed ? "왼쪽 패널 펼치기" : "왼쪽 패널 접기") { EditorLayout.shared.toggleMedia() }
                 Button(EditorLayout.shared.inspectorCollapsed ? "클립 정보 펼치기" : "클립 정보 접기") { EditorLayout.shared.toggleInspector() }
                 Button("기본 배치로 재설정") { EditorLayout.shared.resetToDefault() }
                 Divider()
@@ -101,12 +106,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
+        if args.contains("-OTFForceDirect") { LaneSelfTest.direct = true }   // 자체 검사를 직접 경로로(앱이 앞에 오지 못할 때의 경로를 재현)
         if args.contains("-OTFSavePanelTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await SavePanelSelfTest.run(folder: folder) }
             return
         }
         if args.contains("-OTFProjectTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await ProjectSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFOpenImportTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await OpenImportSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFClipAudioTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await ClipAudioSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFPanelTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await PanelSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFTransformPerfTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await TransformPerfSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFEditFixTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await EditFixSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFTransformTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await TransformSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFMultiLaneTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await MultiLaneSelfTest.run(folder: folder) }
             return
         }
         if args.contains("-OTFLaneTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {

@@ -122,9 +122,12 @@ enum CloseSelfTest {
         requestQuit()
         let h1 = await promptShown("저장할까요")
         let visibleAgain = !NSApp.isHidden && w.isVisible
+        let state0 = "hidden \(NSApp.isHidden) visible \(w.isVisible) active \(NSApp.isActive) sheet \(w.attachedSheet != nil)"
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        let state1 = "hidden \(NSApp.isHidden) visible \(w.isVisible) active \(NSApp.isActive)"   // 진단용(판정에는 쓰지 않음)
         s.alerts.pressButton(1)
         _ = await dismissed()
-        check("hidden.quitPromptVisible", h1.ok && visibleAgain, h1.detail)
+        check("hidden.quitPromptVisible", h1.ok && visibleAgain, h1.detail + " | at check: " + state0 + " | +1s: " + state1)
         // 창을 최소화한 채 종료 요청
         w.miniaturize(nil)
         _ = await waitUntil(3) { w.isMiniaturized }

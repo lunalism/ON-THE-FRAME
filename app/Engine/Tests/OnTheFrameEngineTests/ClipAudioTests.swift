@@ -1,0 +1,287 @@
+import AVFoundation
+import Foundation
+@testable import OnTheFrameEngine
+import OTFDevSupport
+import XCTest
+
+/// 소리 클립 음량·음소거·페이드(2026-10-11). 기대값은 구현 함수를 쓰지 않고 손으로 쓴 구간식에서 계산한다
+/// (선형 진폭 페이드: 페이드 인 F 프레임이면 클립 시작에서 t 프레임 지난 곳 t/F, 페이드 아웃 G 프레임이면 끝까지 r 프레임 남은 곳 r/G).
+/// 소리 판정은 클릭 없는 1000 Hz 사인(진폭 0.2) WAV를 원본 위치 = 타임라인 위치로 놓아 위상이 이어지게 하고,
+/// 48표본(1 ms = 한 주기) 창의 사인 진폭으로 잰다.
+final class ClipAudioTests: XCTestCase {
+    let m = UUID()
+    func base(_ len: Int = 90, audio: ClipAudio? = nil, id: UUID = UUID()) -> (Timeline, UUID) {
+        (Timeline(audioClips: [Clip(id: id, mediaID: m, start: 0, sourceIn: 0, length: len, lane: Lane.audioID, audio: audio)], mediaFrames: [m: 1_000],
+                  mediaHasAudio: [m: true]), id)
+    }
+    func gain(_ t: Timeline, atFrame f: Double, lane: UUID = Lane.audioID) -> Double {
+        let l = t.laneInfo(lane)!
+        return t.clips(inLane: lane).map { CompositionPlanner.gain(of: $0, lane: l, atFrame: f) }.reduce(0, +)
+    }
+
+    // MARK: 모델
+
+    func testDefaultsAndPiecesAreIndependent() throws {
+        let (t0, id) = base()
+        XCTAssertEqual(t0.audioClips[0].effectiveAudio, ClipAudio(volumePercent: 100, muted: false, fadeIn: .none, fadeOut: .none))
+        let r = UUID()
+        let t1 = try t0.splitting(clip: id, atFrame: 45, newIDs: (UUID(), r))
+        let left = t1.audioClips.first { $0.id != r }!.id
+        let t2 = try t1.settingClipAudio(clip: r, volumePercent: 40)
+        XCTAssertEqual(t2.clip(r)?.effectiveAudio.volumePercent, 40)
+        XCTAssertEqual(t2.clip(left), t1.clip(left), "다른 조각은 그대로")
+        let t3 = try t2.settingClipAudio(clip: left, muted: true)
+        XCTAssertEqual(t3.clip(r), t2.clip(r))
+        XCTAssertEqual(gain(t3, atFrame: 10), 0); XCTAssertEqual(gain(t3, atFrame: 60), 0.4, accuracy: 1e-12)
+        XCTAssertEqual(t3.lanes, t0.lanes, "레인 음량·음소거는 그대로")
+        XCTAssertThrowsError(try t3.settingClipAudio(clip: r, volumePercent: 101)) { XCTAssertEqual($0 as? EditError, .volumeRange) }
+    }
+
+    func testCombinedGainAndBothMuteScopes() throws {
+        var (t, id) = base()
+        t = try t.settingLaneAudio(Lane.audioID, volumePercent: 80)
+        t = try t.settingClipAudio(clip: id, volumePercent: 50, fadeInFrames: 30, fadeOutFrames: 20)
+        // 손 계산: 0.8 × 0.5 = 0.4. 페이드 인 [0,30), 페이드 아웃 [70,90)
+        for (f, e) in [(0.0, 0.0), (15, 0.2), (29.25, 0.4 * 29.25 / 30), (30, 0.4), (50, 0.4), (70, 0.4), (80, 0.2), (89.5, 0.4 * 0.5 / 20), (90, 0)] {
+            XCTAssertEqual(gain(t, atFrame: f), e, accuracy: 1e-12, "frame \(f)")
+        }
+        XCTAssertEqual(gain(try t.settingClipAudio(clip: id, muted: true), atFrame: 50), 0)
+        XCTAssertEqual(gain(try t.settingLaneAudio(Lane.audioID, muted: true), atFrame: 50), 0)
+        // 두 범위는 따로: 레인 음소거를 풀어도 클립 음소거는 남는다
+        let both = try t.settingClipAudio(clip: id, muted: true).settingLaneAudio(Lane.audioID, muted: true).settingLaneAudio(Lane.audioID, muted: false)
+        XCTAssertEqual(gain(both, atFrame: 50), 0)
+        XCTAssertEqual(both.clip(id)?.effectiveAudio.muted, true)
+    }
+
+    /// 자르기: 페이드 안·밖 어디서 잘라도 두 조각의 소리 모양이 원래 모양과 같다(새 페이드 없음, 페이드 복사 없음)
+    func testSplitPreservesEnvelopeInsideAndOutsideFades() throws {
+        let L = 90, F = 40, G = 30
+        func hand(_ f: Double) -> Double { 0.6 * min(1, f / Double(F)) * min(1, (Double(L) - f) / Double(G)) }
+        var (t0, id) = base(L)
+        t0 = try t0.settingClipAudio(clip: id, volumePercent: 60, fadeInFrames: F, fadeOutFrames: G)
+        for k in 1..<L {
+            let r = UUID()
+            let t = try t0.splitting(clip: id, atFrame: k, newIDs: (UUID(), r))
+            XCTAssertTrue(t.isValid, "split \(k)")
+            for q in 0..<(L * 4) { let f = Double(q) / 4; XCTAssertEqual(gain(t, atFrame: f), hand(f), accuracy: 1e-12, "split \(k) frame \(f)") }
+            let left = t.audioClips.first { $0.id != r }!.effectiveAudio, right = t.clip(r)!.effectiveAudio
+            if k >= F { XCTAssertEqual(right.fadeIn, .none, "split \(k) after fade-in: no new fade-in") }
+            if k <= L - G { XCTAssertEqual(left.fadeOut, .none, "split \(k) before fade-out: no new fade-out") }
+            XCTAssertEqual(left.volumePercent, 60); XCTAssertEqual(right.volumePercent, 60)
+        }
+        // 페이드 안에서 두 번 자르기
+        let r1 = UUID(), r2 = UUID(), mid = UUID()
+        let t2 = try t0.splitting(clip: id, atFrame: 10, newIDs: (UUID(), r1)).splitting(clip: r1, atFrame: 25, newIDs: (UUID(), r2))
+            .splitting(clip: r2, atFrame: 80, newIDs: (mid, UUID()))
+        for q in 0..<(L * 4) { let f = Double(q) / 4; XCTAssertEqual(gain(t2, atFrame: f), hand(f), accuracy: 1e-12, "3 splits frame \(f)") }
+        XCTAssertEqual(t2.clip(mid)?.effectiveAudio.fadeIn, ClipAudio.Fade(length: 40, offset: 25))
+    }
+
+    /// 트림: 페이드는 자기 가장자리에 붙어 따라가고 길이는 그대로, 짧아져 겹치면 페이드 인을 두고 페이드 아웃을 남은 길이로 줄인다
+    func testTrimKeepsFadesAttachedAndClamps() throws {
+        var (t, id) = base(90)
+        t = try t.settingClipAudio(clip: id, fadeInFrames: 40, fadeOutFrames: 30)
+        let a = try t.trimmingStart(clip: id, by: 10)
+        XCTAssertEqual(a.clip(id)?.length, 80)
+        XCTAssertEqual(a.clip(id)?.effectiveAudio.fadeIn, .init(length: 40)); XCTAssertEqual(a.clip(id)?.effectiveAudio.fadeOut, .init(length: 30))
+        let b = try t.trimmingEnd(clip: id, by: -40)   // 길이 50: 페이드 인 40, 페이드 아웃 10
+        XCTAssertEqual(b.clip(id)?.effectiveAudio.fadeIn, .init(length: 40)); XCTAssertEqual(b.clip(id)?.effectiveAudio.fadeOut, .init(length: 10))
+        XCTAssertTrue(b.isValid)
+        let c = try t.trimmingEnd(clip: id, by: -85)   // 길이 5: 페이드 인이 클립 전체(보이는 5), 페이드 아웃 없음
+        XCTAssertEqual(c.clip(id)?.effectiveAudio.fadeOut, ClipAudio.Fade.none)
+        XCTAssertEqual(gain(c, atFrame: 4), 4.0 / 40, accuracy: 1e-12)
+        // 페이드 안에서 자른 왼쪽 조각을 다시 늘리면 원래 경사가 이어진다
+        let r = UUID()
+        let s = try t.splitting(clip: id, atFrame: 20, newIDs: (UUID(), r))
+        let l = s.audioClips.first { $0.id != r }!.id
+        let s2 = try s.lifting(clip: r).trimmingEnd(clip: l, by: 10)
+        XCTAssertEqual(gain(s2, atFrame: 25), 25.0 / 40, accuracy: 1e-12)
+        // 입력 제한: 다른 쪽 페이드와 겹치지 않게 줄인다
+        let d = try t.settingClipAudio(clip: id, fadeInFrames: 100)
+        XCTAssertEqual(d.clip(id)?.effectiveAudio.fadeIn, .init(length: 60))
+        XCTAssertEqual(try d.settingClipAudio(clip: id, fadeOutFrames: 50).clip(id)?.effectiveAudio.fadeOut, .init(length: 30))
+        XCTAssertEqual(try d.settingClipAudio(clip: id, fadeInFrames: 0).clip(id)?.effectiveAudio.fadeIn, ClipAudio.Fade.none)
+    }
+
+    func testLinkedPairMoveUndoRedo() throws {
+        let v = UUID(), a = UUID(), other = UUID(), link = UUID()
+        let t0 = Timeline(clips: [Clip(id: v, mediaID: m, start: 0, sourceIn: 0, length: 60, link: link)],
+                          audioClips: [Clip(id: a, mediaID: m, start: 0, sourceIn: 0, length: 60, link: link),
+                                       Clip(id: other, mediaID: m, start: 70, sourceIn: 0, length: 20)],
+                          mediaFrames: [m: 1_000], mediaHasAudio: [m: true])
+        XCTAssertEqual(t0.audioTarget(of: v), a)
+        let t1 = try t0.settingClipAudio(clip: v, volumePercent: 30, fadeOutFrames: 12)
+        XCTAssertEqual(t1.clip(a)?.effectiveAudio, ClipAudio(volumePercent: 30, fadeOut: .init(length: 12)))
+        XCTAssertNil(t1.clip(v)?.audio); XCTAssertEqual(t1.clip(other), t0.clip(other))
+        let moved = try t1.relocating(clip: v, toStart: 100)
+        XCTAssertEqual(moved.clip(a)?.audio, t1.clip(a)?.audio)
+        XCTAssertEqual(moved.clip(a)?.start, 100)
+        var h = EditHistory(t0)
+        h.apply(t1, focus: v); h.apply(moved, focus: v)
+        h.undo(); XCTAssertEqual(h.timeline, t1)
+        h.undo(); XCTAssertEqual(h.timeline, t0)
+        h.redo(); h.redo(); XCTAssertEqual(h.timeline, moved)
+        // 소리 없는 영상 클립만이면 거부
+        let lone = Timeline(clips: [Clip(id: v, mediaID: m, start: 0, sourceIn: 0, length: 10)], mediaFrames: [m: 100])
+        XCTAssertThrowsError(try lone.settingClipAudio(clip: v, volumePercent: 10)) { XCTAssertEqual($0 as? EditError, .audioNotAudioClip) }
+    }
+
+    func testProjectRoundTripAndOlderFiles() throws {
+        let ref = MediaRef(id: m, name: "s.wav", path: "/tmp/s.wav", frameCount: 1_000, hasAudio: true, size: 1, modifiedNs: 1, codec: "lpcm", width: 0, height: 0,
+                           hasVideo: false, sampleRate: 48_000, sampleCount: 1, channels: 2)
+        let a = UUID(), b = UUID()
+        var t = Timeline(audioClips: [Clip(id: a, mediaID: m, start: 0, sourceIn: 0, length: 90, lane: Lane.audioID),
+                                      Clip(id: b, mediaID: m, start: 90, sourceIn: 90, length: 30, lane: Lane.audioID)], media: [ref],
+                         mediaFrames: [m: 1_000], mediaHasAudio: [m: true], mediaHasVideo: [m: false])
+        t = try t.settingLaneAudio(Lane.audioID, volumePercent: 70)
+        let r = UUID()
+        t = try t.settingClipAudio(clip: a, volumePercent: 55, muted: true, fadeInFrames: 40).splitting(clip: a, atFrame: 15, newIDs: (UUID(), r))
+        let data = try ProjectFile.encode(t, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)
+        let (back, doc) = try ProjectFile.decode(data)
+        XCTAssertEqual(doc.version, 5); XCTAssertEqual(ProjectFile.currentVersion, 5)
+        XCTAssertEqual(back, t)
+        XCTAssertEqual(back.clip(r)?.effectiveAudio, ClipAudio(volumePercent: 55, muted: true, fadeIn: .init(length: 40, offset: 15)))
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertEqual(json.components(separatedBy: "\"audio\" :").count - 1, 2, "기본값 클립(b)에는 audio를 쓰지 않는다")
+        // 형식 4 파일(클립 audio 없음): 기본 클립 값, 레인 음량 그대로
+        var obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        obj["version"] = 4
+        obj["audioClips"] = (obj["audioClips"] as! [[String: Any]]).map { var c = $0; c.removeValue(forKey: "audio"); return c }
+        let (old, _) = try ProjectFile.decode(try JSONSerialization.data(withJSONObject: obj))
+        XCTAssertTrue(old.audioClips.allSatisfy { $0.audio == nil })
+        XCTAssertEqual(old.laneInfo(Lane.audioID)?.volumePercent, 70)
+        // 잘못된 값: 겹치는 페이드·영상 클립의 audio
+        obj["version"] = 5
+        obj["audioClips"] = [[ "id": UUID().uuidString, "mediaID": m.uuidString, "start": 0, "sourceIn": 0, "length": 10, "lane": Lane.audioID.uuidString,
+                               "audio": ["volumePercent": 100, "muted": false, "fadeIn": ["length": 6, "offset": 0], "fadeOut": ["length": 6, "offset": 0]]] as [String: Any]]
+        XCTAssertThrowsError(try ProjectFile.decode(try JSONSerialization.data(withJSONObject: obj)))
+    }
+
+    /// 이전 파일(모든 클립 기본값): 트랙 나눔 없음, 음량은 레인 음량 그대로(이전 구성과 같음). 끊어지는 맞닿은 클립만 트랙을 번갈아 쓴다.
+    func testDefaultClipsKeepPreviousMixStructure() throws {
+        let lane = Lane(id: Lane.audioID, kind: .audio, name: "A1", volumePercent: 70)
+        let cs = [Clip(mediaID: m, start: 0, sourceIn: 0, length: 30), Clip(mediaID: m, start: 30, sourceIn: 30, length: 30), Clip(mediaID: m, start: 80, sourceIn: 0, length: 10)]
+        XCTAssertEqual(CompositionPlanner.volumeTracks(cs, lane: lane).count, 1)
+        XCTAssertTrue(CompositionPlanner.volumeRamps(cs, lane: lane).allSatisfy { $0.from == 0.7 && $0.to == 0.7 })
+        let changed = [cs[0], cs[1].with(audio: .some(ClipAudio(volumePercent: 50))), cs[2]]
+        XCTAssertEqual(CompositionPlanner.volumeTracks(changed, lane: lane).map { $0.map(\.start) }, [[0], [30, 80]])   // 80은 맞닿지 않아 현재 트랙에 남는다(무음 구간에서 값을 옮김)
+    }
+
+    // MARK: 프리뷰·내보내기 소리
+
+    var fixtures: URL { ExportEndToEndTests.root.appendingPathComponent("fixtures") }
+    func steady() async throws -> MediaAsset {
+        try await DevFixtures.ensureAll(in: fixtures)
+        return try await MediaProbe.inspect(fixtures.appendingPathComponent(AudioFixture.steady.file))
+    }
+    static func amp(_ x: [Float], at n: Int, half: Int = 24) -> Double { MultiLaneJudge.toneAmplitude(x, hz: 1_000, from: n - half, to: n + half) }
+
+    /// 배치(원본 위치 = 타임라인 위치):
+    /// - A1(레인 80%): [0,90) 페이드 인 30을 45에서 자름 → 오른쪽 조각 [45,90) 음량 50%·페이드 아웃 15.
+    /// - A2(레인 음소거): [0,60) — 들리지 않아야 한다.
+    /// - A3(레인 50%): [100,160) 클립 음량 60%, [160,180) 클립 음소거.
+    /// 손 계산 진폭(0.2 × 배율): [0,30) 0.16·f/30, [30,45) 0.16, [45,75) 0.08, [75,90) 0.08·(90−f)/15, [90,100) 0, [100,160) 0.06, [160,180) 0.
+    func expected(_ f: Double) -> Double {
+        switch f {
+        case ..<30: return 0.16 * f / 30
+        case ..<45: return 0.16
+        case ..<75: return 0.08
+        case ..<90: return 0.08 * (90 - f) / 15
+        case 100..<160: return 0.06
+        default: return 0
+        }
+    }
+    func layout(_ s: MediaAsset) throws -> Timeline {
+        let x = UUID(), a2 = UUID(), a3 = UUID(), right = UUID(), m3 = UUID()
+        var t = Timeline(audioClips: [Clip(id: x, mediaID: s.id, start: 0, sourceIn: 0, length: 90, lane: Lane.audioID),
+                                      Clip(mediaID: s.id, start: 0, sourceIn: 0, length: 60, lane: a2),
+                                      Clip(mediaID: s.id, start: 100, sourceIn: 100, length: 60, lane: a3, audio: ClipAudio(volumePercent: 60)),
+                                      Clip(id: m3, mediaID: s.id, start: 160, sourceIn: 160, length: 20, lane: a3)],
+                         lanes: [Lane.defaults[0], Lane(id: Lane.audioID, kind: .audio, name: "A1", volumePercent: 80),
+                                 Lane(id: a2, kind: .audio, name: "A2", muted: true), Lane(id: a3, kind: .audio, name: "A3", volumePercent: 50)]).registering(s)
+        t = try t.settingClipAudio(clip: x, fadeInFrames: 30).splitting(clip: x, atFrame: 45, newIDs: (UUID(), right))
+        t = try t.settingClipAudio(clip: right, volumePercent: 50, fadeOutFrames: 15).settingClipAudio(clip: m3, muted: true)
+        XCTAssertTrue(t.isValid)
+        return t
+    }
+    func judge(_ x: [Float], _ label: String, half: Int, tol: Double, avoid: Int) {
+        XCTAssertGreaterThanOrEqual(x.count, 180 * 1_600 - 2, label)
+        var worst = 0.0
+        for n in stride(from: half, to: 180 * 1_600 - half, by: 200) {
+            // 경계(계단) 근처 창은 건너뛴다(그 자리는 아래 표본 단위 검사가 본다)
+            if [0, 45, 90, 100, 160].contains(where: { abs(n - $0 * 1_600) < avoid }) { continue }
+            let e = 0.2 * expected(Double(n) / 1_600) / 0.2
+            let d = abs(Self.amp(x, at: n, half: half) - e)
+            worst = max(worst, d)
+            if d > tol { XCTFail(String(format: "%@ sample %d (frame %.2f): %.5f vs %.5f", label, n, Double(n) / 1_600, Self.amp(x, at: n, half: half), e)); return }
+        }
+        print(String(format: "%@: worst envelope error %.5f", label, worst))
+    }
+
+    func testPreviewAndExportFollowHandEnvelope() async throws {
+        let s = try await steady()
+        let t = try layout(s)
+        let plan = try await CompositionPlanner.plan(t, media: [s.id: s])
+        // 프리뷰 입력(같은 composition·오디오 믹스, 무손실 PCM)
+        let pv = try await AudioMixExportTests.decodePreview(plan)
+        for (name, x) in [("preview L", pv.l), ("preview R", pv.r)] { judge(x, name, half: 24, tol: 0.002, avoid: 48) }
+        // 자른 곳(45프레임 = 72000표본): 앞 96표본은 0.16, 바로 다음 표본부터 0.08 이하(표본 단위 계단, 경사·틈 없음)
+        let before = pv.l[(72_000 - 96)..<72_000].map { abs($0) }.max()!, after = pv.l[72_000..<(72_000 + 96)].map { abs($0) }.max()!
+        print("cut 72000: before peak \(before) after peak \(after)")
+        XCTAssertEqual(Double(before), 0.16, accuracy: 0.002); XCTAssertEqual(Double(after), 0.08, accuracy: 0.002)
+        XCTAssertEqual(Self.amp(pv.l, at: 72_000 - 24), 0.16, accuracy: 0.002); XCTAssertEqual(Self.amp(pv.l, at: 72_000 + 24), 0.08, accuracy: 0.002)
+        // 끝(90프레임 = 144000): 페이드 아웃이 0으로 끝나 그 뒤 무음, 음소거 클립 [160,180)·음소거 레인도 무음
+        XCTAssertLessThan(pv.l[144_000..<160_000].map { abs($0) }.max()!, 0.0005)
+        XCTAssertLessThan(pv.l[(160 * 1_600)..<(180 * 1_600 - 10)].map { abs($0) }.max()!, 0.0005)
+        // 내보내기: 섞인 소리 트랙 하나, AAC라 넓은 창·허용 오차
+        let out = ExportEndToEndTests.root.appendingPathComponent("out-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: out) }
+        let dest = out.appendingPathComponent("clipaudio.mp4")
+        // 영상이 없는 타임라인은 내보낼 수 없으므로 검정 판 영상 레인을 더한다(소리 판정과 무관)
+        let plate = try await MediaProbe.inspect(fixtures.appendingPathComponent(PlateFixture.blue.file))
+        let tv = try t.registering(plate).placing(media: plate.id, at: 0, videoLane: Lane.videoID, audioLane: nil)
+            .placing(media: plate.id, at: 90, videoLane: Lane.videoID, audioLane: nil)
+        let vplan = try await CompositionPlanner.plan(tv, media: [s.id: s, plate.id: plate])
+        let outcome = await ExportService.export(vplan, to: .fromSavePanel(dest), sources: [s, plate]) { _ in }
+        XCTAssertEqual(outcome, .completed(dest))
+        let d = try await AudioMixExportTests.decodeMP4(dest)
+        XCTAssertEqual(d.audioTracks, 1)
+        for (name, x) in [("export L", d.pcm.l), ("export R", d.pcm.r)] { judge(x, name, half: 240, tol: 0.006, avoid: 600) }
+        XCTAssertEqual(Self.amp(d.pcm.l, at: 72_000 - 600, half: 240), 0.16, accuracy: 0.006)
+        XCTAssertEqual(Self.amp(d.pcm.l, at: 72_000 + 600, half: 240), 0.08, accuracy: 0.006)
+        // 저장·다시 열기 뒤 같은 소리(같은 오디오 믹스 경사)
+        let (back, _) = try ProjectFile.decode(try ProjectFile.encode(tv, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil))
+        let bplan = try await CompositionPlanner.plan(back, media: [s.id: s, plate.id: plate])
+        let bp = try await AudioMixExportTests.decodePreview(bplan)
+        let vp = try await AudioMixExportTests.decodePreview(vplan)
+        XCTAssertEqual(bp.l, vp.l, "reopened mix identical")
+    }
+
+    /// 자르기 전·뒤 소리가 표본 단위로 같다(페이드 안 자르기 두 곳, 트림·옮기기 뒤 설정 유지)
+    func testSplitAudioIdenticalToUnsplit() async throws {
+        let s = try await steady()
+        let id = UUID()
+        var t = Timeline(audioClips: [Clip(id: id, mediaID: s.id, start: 0, sourceIn: 0, length: 90, lane: Lane.audioID)]).registering(s)
+        t = try t.settingClipAudio(clip: id, volumePercent: 70, fadeInFrames: 60, fadeOutFrames: 20)
+        let r0 = UUID(), r = UUID()
+        let split = try t.splitting(clip: id, atFrame: 30, newIDs: (UUID(), r0)).splitting(clip: r0, atFrame: 80, newIDs: (r, UUID()))
+        XCTAssertEqual(split.audioClips.count, 3)
+        let a = try await AudioMixExportTests.decodePreview(try await CompositionPlanner.plan(t, media: [s.id: s]))
+        let b = try await AudioMixExportTests.decodePreview(try await CompositionPlanner.plan(split, media: [s.id: s]))
+        XCTAssertEqual(a.l.count, b.l.count)
+        let diff = zip(a.l, b.l).map { abs($0 - $1) }.max() ?? 1
+        print("split vs unsplit max sample diff \(diff)")
+        XCTAssertLessThan(diff, 1e-4)
+        // 손 계산: 0.2 × 0.7 × min(1, f/60) × min(1, (90 − f)/20)
+        for f in [15.0, 29.5, 30.5, 45, 70, 79.5, 80.5, 85] {
+            XCTAssertEqual(Self.amp(b.l, at: Int(f * 1_600)), 0.14 * min(1, f / 60) * min(1, (90 - f) / 20), accuracy: 0.002, "frame \(f)")
+        }
+        // 옮기기: 같은 모양이 옮긴 위치에서
+        let moved = try split.relocating(clip: r, toStart: 120)
+        let c = try await AudioMixExportTests.decodePreview(try await CompositionPlanner.plan(moved, media: [s.id: s]))
+        let rc = moved.clip(r)!   // 원래 [30,80), 이제 [120,170), 원본 위치 그대로(위상은 원본 기준이라 진폭만 본다)
+        XCTAssertEqual(rc.effectiveAudio.fadeIn, .init(length: 60, offset: 30))
+        XCTAssertEqual(Self.amp(c.l, at: Int(130.0 * 1_600)), 0.14 * 40 / 60, accuracy: 0.002)
+    }
+}

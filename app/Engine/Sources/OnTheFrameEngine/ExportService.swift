@@ -98,6 +98,8 @@ public enum ExportService {
                               options: Options = Options(), stage: @escaping @Sendable (ExportStage) async -> Void = { _ in },
                               progress: @escaping @Sendable (Double) async -> Void) async -> ExportOutcome {
         if let f = validate(d, sources: sources) { return .failed(f) }
+        // A-014: 영상 원본이 하나도 없으면(소리 파일만) 영상 트랙을 만들 수 없다 — 내보내지 않는다(앱은 미리 막는다)
+        guard p.hasVideo else { return .failed(.export("영상이 있는 원본이 없습니다. 영상 파일을 하나 이상 가져오세요.")) }
         let tempDir: URL
         do {
             tempDir = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: d.url, create: true)
@@ -111,6 +113,7 @@ public enum ExportService {
             return .failed(.export("export session"))
         }
         session.videoComposition = p.videoComposition
+        session.audioMix = p.audioMix   // 오디오 레인 음량(A-014)
         session.shouldOptimizeForNetworkUse = false
         let injected = OSAllocatedUnfairLock(initialState: false)
         let box = SessionBox(session: session)
@@ -155,6 +158,9 @@ public enum ExportService {
             let r = try await v[0].load(.timeRange)
             let frames = p.settings.nearestFrame(r.duration)
             guard frames == p.durationFrames else { return .failed(.verification("frames \(frames) != \(p.durationFrames)")) }
+            // 소리는 섞인 트랙 하나(여러 레인을 따로 쓴 파일은 첫 트랙만 들리므로 승격하지 않는다)
+            let au = try await a.loadTracks(withMediaType: .audio)
+            guard au.count == (p.hasAudio ? 1 : 0) else { return .failed(.verification("audio tracks \(au.count)")) }
         } catch { return .failed(.verification(error.localizedDescription)) }
         options.beforePromotion?()
         let outcome = promote(tempFile, to: d, sources: sources)

@@ -70,10 +70,16 @@ public struct MediaAsset: Sendable, Identifiable, Equatable {
     public let hasAudio: Bool
     public let codec: String
     public let identity: FileIdentity
+    /// A-014: 영상 트랙이 있는가(소리 파일은 false)와 소리 파일의 정확한 길이(표본율·표본 수)·채널 수·소리 형식
+    public var hasVideo: Bool = true
+    public var audioSampleRate: Int? = nil
+    public var audioSampleCount: Int64? = nil
+    public var audioChannels: Int? = nil
     /// 같은 검사 결과에 프로젝트의 미디어 id를 붙인다(프로젝트를 다시 열 때 저장된 id를 유지, A-013)
     public func withID(_ newID: UUID) -> MediaAsset {
         MediaAsset(id: newID, url: url, name: name, frameCount: frameCount, timing: timing, naturalSize: naturalSize, displaySize: displaySize,
-                   preferredTransform: preferredTransform, hasAudio: hasAudio, codec: codec, identity: identity)
+                   preferredTransform: preferredTransform, hasAudio: hasAudio, codec: codec, identity: identity,
+                   hasVideo: hasVideo, audioSampleRate: audioSampleRate, audioSampleCount: audioSampleCount, audioChannels: audioChannels)
     }
 }
 
@@ -90,6 +96,9 @@ public enum ProbeError: Error, Equatable, CustomStringConvertible {
     case orientation
     case dimensions(Int, Int)
     case audioCodec(String)
+    /// 소리 파일(A-014): 채널 수·표본율이 범위 밖
+    case audioChannels(Int)
+    case audioSampleRate(Double)
 
     /// 기록·검사용 종류 이름
     public var kind: String {
@@ -106,6 +115,8 @@ public enum ProbeError: Error, Equatable, CustomStringConvertible {
         case .orientation: return "orientation"
         case .dimensions: return "dimensions"
         case .audioCodec: return "audioCodec"
+        case .audioChannels: return "audioChannels"
+        case .audioSampleRate: return "audioSampleRate"
         }
     }
 
@@ -123,7 +134,9 @@ public enum ProbeError: Error, Equatable, CustomStringConvertible {
         case .tooLong(let s, let l): return String(format: "길이 %.0f초가 M1에서 확인한 범위(%.0f초)를 넘습니다.", s, l)
         case .orientation: return "회전 정보가 90도 단위가 아닙니다."
         case .dimensions(let w, let h): return "화면 크기 \(w)×\(h)가 M1에서 확인한 범위(긴 변 1920·짧은 변 1080 이하)를 벗어납니다. 4K 원본은 아직 지원하지 않습니다."
-        case .audioCodec(let c): return "오디오 형식(\(c))을 M1에서 확인하지 않았습니다. AAC만 지원합니다."
+        case .audioCodec(let c): return "소리 형식(\(c))을 지원하지 않습니다. 영상 파일의 소리는 AAC, 소리 파일은 PCM(WAV·AIFF)·MP3·AAC·ALAC만 받습니다."
+        case .audioChannels(let n): return "소리 채널이 \(n)개입니다. 모노·스테레오만 받습니다."
+        case .audioSampleRate(let r): return String(format: "표본율 %.0f Hz는 지원 범위(8–192 kHz) 밖입니다.", r)
         }
     }
 }
@@ -139,15 +152,34 @@ public enum ProbeError: Error, Equatable, CustomStringConvertible {
 public enum MediaProbe {
     public static let maxSeconds = 600.0
 
-    public static func inspect(_ url: URL, settings: RenderSettings = .m1) async throws -> MediaAsset {
+    /// 검사 단계(2026-10-11 진단·진행 표시): 파일 열기(트랙 불러오기) → 형식 확인 → 프레임 표시 시각 확인(읽은 샘플 수) → 끝.
+    /// 진행률이 아니다(전체 샘플 수는 다 읽기 전에는 모른다). 경로는 담지 않는다.
+    public enum Stage: Sendable, Equatable {
+        case opening, checkingFormat, scanningFrames(Int), finished
+        public var label: String {
+            switch self {
+            case .opening: return "파일 여는 중"
+            case .checkingFormat: return "형식 확인 중"
+            case .scanningFrames(let n): return n == 0 ? "프레임 시각 확인 중" : "프레임 시각 확인 중 · \(n.formatted())프레임"
+            case .finished: return "확인 끝"
+            }
+        }
+    }
+    public typealias StageHandler = @Sendable (Stage) -> Void
+
+    public static func inspect(_ url: URL, settings: RenderSettings = .m1, stage: StageHandler? = nil) async throws -> MediaAsset {
         try Task.checkCancellation()
+        stage?(.opening)
         let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
         let videos: [AVAssetTrack], audios: [AVAssetTrack]
         do {
             videos = try await asset.loadTracks(withMediaType: .video)
             audios = try await asset.loadTracks(withMediaType: .audio)
         } catch { throw ProbeError.unreadable(error.localizedDescription) }
-        guard let v = videos.first else { throw ProbeError.noVideo }
+        try Task.checkCancellation()
+        stage?(.checkingFormat)
+        // A-014: 영상 트랙이 없으면 소리 파일로 검사한다
+        guard let v = videos.first else { let a = try await inspectAudio(url, asset: asset, audios: audios); stage?(.finished); return a }
         guard videos.count == 1 else { throw ProbeError.multipleVideoTracks(videos.count) }
         guard audios.count <= 1 else { throw ProbeError.multipleAudioTracks(audios.count) }
 
@@ -179,7 +211,13 @@ public enum MediaProbe {
 
         // 모든 압축 샘플의 표시 시각 분석(디코딩 없음)
         try Task.checkCancellation()
-        let timing = try scanTiming(asset: asset, track: v, duration: range.duration)
+        stage?(.scanningFrames(0))
+        let timing: SourceTiming
+        if let pts = cursorTimes(v, source: real[0].timeMapping.source) {
+            timing = try analyzeTiming(pts, duration: range.duration)
+        } else {
+            timing = try scanTiming(asset: asset, track: v, duration: range.duration) { stage?(.scanningFrames($0)) }
+        }
         // 원본 길이 안에 들어가는 타임라인 프레임 수(정확한 정수 계산, 내림)
         let d = range.duration
         guard d.isNumeric, d.timescale > 0 else { throw ProbeError.unreadable("duration") }
@@ -187,9 +225,34 @@ public enum MediaProbe {
         guard frames >= 1 else { throw ProbeError.variableTiming("타임라인 1프레임보다 짧음") }
         let attrs = FileIdentity.of(url)
         guard let identity = attrs else { throw ProbeError.unreadable("stat") }
+        stage?(.finished)
         return MediaAsset(id: UUID(), url: url, name: url.lastPathComponent, frameCount: frames, timing: timing, naturalSize: natural,
                           displaySize: CGSize(width: dw, height: dh), preferredTransform: transform, hasAudio: !audios.isEmpty,
                           codec: codec, identity: identity)
+    }
+
+    /// 소리 파일(A-014): 소리 트랙 1개, PCM(WAV·AIFF)·MP3·AAC·ALAC, 모노·스테레오, 8–192 kHz, 10분 이하.
+    /// 길이는 정확한 표본 수·표본율로 기록하고, 편집 격자 길이(frameCount)는 1/30 s로 올림한다(끝을 잘라 내지 않음).
+    static func inspectAudio(_ url: URL, asset: AVURLAsset, audios: [AVAssetTrack]) async throws -> MediaAsset {
+        guard let au = audios.first else { throw ProbeError.noVideo }
+        guard audios.count == 1 else { throw ProbeError.multipleAudioTracks(audios.count) }
+        let (fds, range) = try await au.load(.formatDescriptions, .timeRange)
+        guard let asbd = fds.first.flatMap({ CMAudioFormatDescriptionGetStreamBasicDescription($0)?.pointee }) else { throw ProbeError.unreadable("audio format") }
+        let allowed: [AudioFormatID] = [kAudioFormatLinearPCM, kAudioFormatMPEGLayer3, kAudioFormatMPEG4AAC, kAudioFormatAppleLossless]
+        guard allowed.contains(asbd.mFormatID) else { throw ProbeError.audioCodec(fourCC(asbd.mFormatID)) }
+        guard (1...2).contains(Int(asbd.mChannelsPerFrame)) else { throw ProbeError.audioChannels(Int(asbd.mChannelsPerFrame)) }
+        guard (8_000...192_000).contains(asbd.mSampleRate) else { throw ProbeError.audioSampleRate(asbd.mSampleRate) }
+        let d = range.duration
+        guard d.isNumeric, d.timescale > 0, d.value > 0 else { throw ProbeError.unreadable("duration") }
+        guard d.seconds <= maxSeconds + 1e-6 else { throw ProbeError.tooLong(seconds: d.seconds, limit: maxSeconds) }
+        let rate = Int64(asbd.mSampleRate.rounded())
+        let samples = (Int64(d.value) * rate + Int64(d.timescale) / 2) / Int64(d.timescale)
+        let frames = Int((Int64(d.value) * 30 + Int64(d.timescale) - 1) / Int64(d.timescale))   // 올림
+        guard let identity = FileIdentity.of(url) else { throw ProbeError.unreadable("stat") }
+        let timing = SourceTiming(sampleCount: 0, isVariable: false, frameDurationValue: nil, frameDurationTimescale: nil, averageFPS: 0, minInterval: 0, maxInterval: 0)
+        return MediaAsset(id: UUID(), url: url, name: url.lastPathComponent, frameCount: frames, timing: timing, naturalSize: .zero, displaySize: .zero,
+                          preferredTransform: .identity, hasAudio: true, codec: fourCC(asbd.mFormatID), identity: identity,
+                          hasVideo: false, audioSampleRate: Int(rate), audioSampleCount: samples, audioChannels: Int(asbd.mChannelsPerFrame))
     }
 
     static func fourCC(_ v: UInt32) -> String {
@@ -198,7 +261,22 @@ public enum MediaProbe {
 
     /// 압축 샘플의 표시 시각을 모아 정렬하고 간격을 정확한 유리수로 비교한다(고정·가변 판정).
     /// 같은 표시 시각의 샘플(간격 0)과 1~240 fps 밖의 평균 프레임레이트는 거부한다.
-    static func scanTiming(asset: AVAsset, track: AVAssetTrack, duration: CMTime) throws -> SourceTiming {
+    /// 표시 시각 모으기(2026-10-11 가져오기 멈춤 수정): 샘플 커서로 샘플 표(트랙의 미디어 시각)를 걸어가며 표시 시각만 모은다(샘플 데이터를 읽지 않음).
+    /// 이 Mac에서 3분 1080p MP4(5 400샘플): AVAssetReader로 압축 샘플을 모두 읽으면 47–66 s, 샘플 커서는 0.001 s였고 모은 시각은 같았다.
+    /// 편집 목록 구간(source, 미디어 시각) 안의 샘플만 센다(읽기 출력과 같은 범위). 커서를 줄 수 없는 트랙이면 nil(읽기로 되돌아감).
+    static func cursorTimes(_ track: AVAssetTrack, source: CMTimeRange) -> [CMTime]? {
+        guard track.canProvideSampleCursors, let c = track.makeSampleCursorAtFirstSampleInDecodeOrder() else { return nil }
+        var pts: [CMTime] = []
+        repeat {
+            let t = c.presentationTimeStamp
+            if !source.isValid || source.duration == .zero || (CMTimeCompare(t, source.start) >= 0 && CMTimeCompare(t, source.end) < 0) { pts.append(t) }
+            if pts.count % 4096 == 0, Task.isCancelled { return nil }
+        } while c.stepInDecodeOrder(byCount: 1) == 1
+        return pts.isEmpty ? nil : pts
+    }
+
+    /// progress: 읽은 샘플 수(약 300개마다, 진단·진행 표시용). 샘플 커서를 쓸 수 없을 때만 쓴다.
+    static func scanTiming(asset: AVAsset, track: AVAssetTrack, duration: CMTime, progress: ((Int) -> Void)? = nil) throws -> SourceTiming {
         let reader: AVAssetReader
         do { reader = try AVAssetReader(asset: asset) } catch { throw ProbeError.unreadable(error.localizedDescription) }
         let out = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
@@ -211,13 +289,20 @@ public enum MediaProbe {
             if Task.isCancelled { reader.cancelReading(); throw CancellationError() }
             let n = CMSampleBufferGetNumSamples(sb)
             guard n > 0 else { continue }
-            if n == 1 { pts.append(CMSampleBufferGetPresentationTimeStamp(sb)); continue }
+            if n == 1 { pts.append(CMSampleBufferGetPresentationTimeStamp(sb)); if pts.count % 300 == 0 { progress?(pts.count) }; continue }
             var timing = [CMSampleTimingInfo](repeating: CMSampleTimingInfo(), count: n)
             var got = 0
             CMSampleBufferGetSampleTimingInfoArray(sb, entryCount: n, arrayToFill: &timing, entriesNeededOut: &got)
             pts.append(contentsOf: timing.prefix(got).map(\.presentationTimeStamp))
+            if pts.count / 300 != (pts.count - got) / 300 { progress?(pts.count) }
         }
         if reader.status == .failed { throw ProbeError.unreadable(reader.error?.localizedDescription ?? "reader failed") }
+        return try analyzeTiming(pts, duration: duration)
+    }
+
+    /// 모은 표시 시각 → 고정·가변 판정(같은 시각 거부, 평균 1–240 fps 밖 거부)
+    static func analyzeTiming(_ unsorted: [CMTime], duration: CMTime) throws -> SourceTiming {
+        var pts = unsorted
         guard !pts.isEmpty else { throw ProbeError.noVideo }
         guard pts.allSatisfy(\.isNumeric) else { throw ProbeError.variableTiming("숫자가 아닌 표시 시각") }
         pts.sort { CMTimeCompare($0, $1) < 0 }

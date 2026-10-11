@@ -58,6 +58,8 @@ final class ProjectStore {
         return s
     }
     private(set) var playhead = 0              // 0…durationFrames(끝 위치 포함)
+    /// 타임라인 확대(프레임당 포인트). 보기를 다시 만들어도 유지한다.
+    var timelineZoom: Double = 2
     private(set) var isPlaying = false
     var statusMessage: String?
     /// 표시 중인 알림(관찰·검사용 사본). 실제 표시는 AlertPresenter(AppKit 시트)가 맡고,
@@ -65,7 +67,24 @@ final class ProjectStore {
     private(set) var alert: AlertInfo?
     let alerts = AlertPresenter()
     /// 가져오기 진행(표시용). nil이면 진행 중인 가져오기 묶음이 없다.
-    struct ImportProgress: Equatable { let total: Int; var completed: Int; var currentName: String?; var cancelling = false }
+    /// 가져오기 진행(2026-10-11: 현재 단계·시작 시각 추가 — 첫 파일 확인이 길어도 멈춘 것처럼 보이지 않게). 단계는 진행률이 아니다.
+    struct ImportProgress: Equatable { let total: Int; var completed: Int; var currentName: String?; var cancelling = false
+                                       var stage: String? = nil; var startedAt: Double = 0 }
+    /// 프로젝트 열기 진행(2026-10-11): 파일 읽기 → 원본 확인(k/n, 현재 원본 이름·검사 단계). 취소하면 현재 프로젝트 그대로.
+    struct OpenProgress: Equatable { var stage: String; var completed = 0; var total = 0; var currentName: String?; var cancelling = false; var startedAt: Double = 0 }
+    private(set) var openProgress: OpenProgress?
+    @ObservationIgnored private var openTask: Task<Void, Never>?
+    /// 열기 회차. 취소마다 1 늘고, 이전 회차의 늦은 결과는 버린다.
+    @ObservationIgnored private var openEpoch = 0
+    #if DEBUG
+    /// 자체 검사 전용: 열기·가져오기 패널 대신 고른 파일(메뉴 동작 → 요청 → 확인 → 열기 경로는 그대로)
+    @ObservationIgnored var openPanelOverrideForTest: (() -> URL?)?
+    @ObservationIgnored var importPanelOverrideForTest: (() -> [URL]?)?
+    /// 자체 검사 전용: 원본 확인 전에 기다릴 시간(취소 검사가 빨리 끝나는 확인 사이에 끼어들 수 있게. 일반 실행에서는 0)
+    @ObservationIgnored var probeDelayForTest: UInt64 = 0
+    #endif
+    /// 진단 기록(2026-10-11): 가져오기·열기 단계와 걸린 시간. 경로·파일 이름·북마크는 남기지 않는다(파일 번호만).
+    static let trace = Logger(subsystem: "dev.ontheframe.app", category: "trace")
     private(set) var importProgress: ImportProgress?
     /// 아직 결과가 나지 않은 파일 수(진행 중 묶음의 남은 파일 + 대기 중 묶음). 검사·자체 검사용.
     var importing: Int { (importProgress.map { $0.total - $0.completed } ?? 0) + pendingOps.reduce(0) { if case .importFiles(let u) = $1 { return $0 + u.count }; return $0 } }
@@ -203,7 +222,7 @@ final class ProjectStore {
 
     var mediaByID: [UUID: MediaAsset] { Dictionary(uniqueKeysWithValues: assets.map { ($0.id, $0) }) }
     var durationFrames: Int { timeline.durationFrames }
-    var canExport: Bool { !timeline.isEmpty && exportPhase == .idle && importProgress == nil && pendingOps.isEmpty && missingUsedMedia.isEmpty }
+    var canExport: Bool { !timeline.isEmpty && exportPhase == .idle && importProgress == nil && pendingOps.isEmpty && exportBlockReason == nil }
 
     // MARK: 가져오기
 
@@ -223,7 +242,7 @@ final class ProjectStore {
 
     /// 대기열에서 다음 작업을 시작한다(가져오기·내보내기 중 하나만 진행).
     private func runNextOp() {
-        guard importProgress == nil, importTask == nil, exportPhase == .idle, exportTask == nil, !pendingOps.isEmpty else { return }
+        guard openProgress == nil, importProgress == nil, importTask == nil, exportPhase == .idle, exportTask == nil, !pendingOps.isEmpty else { return }
         switch pendingOps.removeFirst() {
         case .importFiles(let urls): runImport(urls)
         case .export(let d): beginExport(d)
@@ -231,21 +250,46 @@ final class ProjectStore {
     }
 
     private func runImport(_ urls: [URL]) {
-        let epoch = importEpoch, s = settings
-        importProgress = ImportProgress(total: urls.count, completed: 0, currentName: urls.first?.lastPathComponent)
+        let epoch = importEpoch, s = settings, t0 = monoSeconds()
+        importProgress = ImportProgress(total: urls.count, completed: 0, currentName: urls.first?.lastPathComponent, startedAt: t0)
+        Self.trace.info("import start files=\(urls.count, privacy: .public)")
         importTask = Task { [weak self] in
             var results: [(URL, Result<MediaAsset, Error>)] = []
-            for url in urls {
+            for (i, url) in urls.enumerated() {
                 guard let self, self.importEpoch == epoch, !Task.isCancelled else { break }
                 self.importProgress?.currentName = url.lastPathComponent
+                self.importProgress?.stage = nil
+                let f0 = self.monoSeconds()
+                #if DEBUG
+                if self.probeDelayForTest > 0 { try? await Task.sleep(nanoseconds: self.probeDelayForTest) }
+                #endif
                 let r: Result<MediaAsset, Error>
-                do { r = .success(try await MediaProbe.inspect(url, settings: s)) } catch { r = .failure(error) }
-                guard self.importEpoch == epoch, !Task.isCancelled else { break }   // 취소 뒤 늦게 끝난 검사 결과는 버린다
+                do {
+                    r = .success(try await MediaProbe.inspect(url, settings: s) { st in
+                        Task { @MainActor [weak self] in self?.importStage(epoch: epoch, file: i, st, since: f0) }
+                    })
+                } catch { r = .failure(error) }
+                guard self.importEpoch == epoch, !Task.isCancelled else {   // 취소 뒤 늦게 끝난 검사 결과는 버린다
+                    Self.trace.info("import file#\(i + 1, privacy: .public) result dropped (cancelled) after \(self.monoSeconds() - f0, format: .fixed(precision: 3), privacy: .public)s")
+                    break
+                }
+                Self.trace.info("import file#\(i + 1, privacy: .public) \({ if case .success = r { return "ok" } else { return "rejected" } }(), privacy: .public) in \(self.monoSeconds() - f0, format: .fixed(precision: 3), privacy: .public)s")
                 results.append((url, r))
                 self.importProgress?.completed += 1
             }
+            if let self { Self.trace.info("import end epochMatch=\(self.importEpoch == epoch, privacy: .public) results=\(results.count, privacy: .public)/\(urls.count, privacy: .public) total \(self.monoSeconds() - t0, format: .fixed(precision: 3), privacy: .public)s") }
             self?.finishImport(epoch: epoch, total: urls.count, results: results)
         }
+    }
+    /// 검사 단계(표시·진단). 다른 회차·끝난 가져오기의 늦은 단계 알림은 버린다.
+    private func importStage(epoch: Int, file i: Int, _ st: MediaProbe.Stage, since f0: Double) {
+        guard epoch == importEpoch, importProgress != nil, importProgress?.completed == i else { return }
+        importProgress?.stage = st.label
+        if case .scanningFrames(let n) = st, n > 0 { return }   // 중간 개수는 기록하지 않는다
+        Self.trace.info("import file#\(i + 1, privacy: .public) stage \(Self.stageName(st), privacy: .public) at \(self.monoSeconds() - f0, format: .fixed(precision: 3), privacy: .public)s")
+    }
+    static func stageName(_ st: MediaProbe.Stage) -> String {
+        switch st { case .opening: return "open"; case .checkingFormat: return "format"; case .scanningFrames(let n): return "scan\(n)"; case .finished: return "done" }
     }
 
     private func finishImport(epoch: Int, total: Int, results: [(URL, Result<MediaAsset, Error>)]) {
@@ -316,14 +360,18 @@ final class ProjectStore {
         let p = NSOpenPanel()
         p.allowsMultipleSelection = true
         p.canChooseDirectories = false
-        p.allowedContentTypes = [.movie]
-        p.message = "가져올 영상 파일을 고르세요(H.264·HEVC MP4·MOV·M4V, 1920×1080 이하, 10분 이하)."
+        p.allowedContentTypes = [.movie, .audio]
+        p.message = "가져올 영상 또는 오디오 파일을 선택하세요."   // 지원 형식·제한은 도움말(README)과 거부 알림에 둔다
+        #if DEBUG
+        if let o = importPanelOverrideForTest { if let urls = o() { importFiles(urls) }; return }
+        #endif
         if p.runModal() == .OK { importFiles(p.urls) }
     }
 
     // MARK: 편집(실행 취소 대상)
 
-    private func commit(_ make: (Timeline) throws -> Timeline, focus: UUID?, select: UUID? = nil) {
+    /// rebuild가 false면 프리뷰 재구성은 부르는 쪽이 맡는다(변형 편집의 정지 화면 경로)
+    private func commit(_ make: (Timeline) throws -> Timeline, focus: UUID?, select: UUID? = nil, rebuild: Bool = true) {
         pauseForEdit()
         do {
             let t = try make(timeline)
@@ -331,16 +379,32 @@ final class ProjectStore {
             selection = select ?? focus
             linkCandidate = nil
             statusMessage = nil
-            timelineChanged()
+            if rebuild { timelineChanged() } else { updateWindowDocumentState() }
         } catch let e as EditError {
             statusMessage = e.description
         } catch { statusMessage = error.localizedDescription }
     }
 
-    /// 영상(+원본에 소리가 있으면 연결된 원본 소리)을 넣는다(A-012)
-    func addToTimeline(_ mediaID: UUID, at index: Int? = nil) {
+    /// 목록의 + 단추(2026-10-11): 고른 대상 레인(쌍)의 마지막으로 차지한 끝 뒤에 놓는다(리플 없음, 재생 헤드와 무관).
+    /// 대상 레인이 비었으면(빈 타임라인의 첫 추가 포함) 0에서 시작한다. 기존 빈틈은 그대로 둔다.
+    func addToTimeline(_ mediaID: UUID) {
+        guard let ref = timeline.media.first(where: { $0.id == mediaID }) else { return }
+        let d = addDestination(hasVideo: ref.hasVideo, hasAudio: ref.hasAudio)
         let cid = UUID()
-        commit({ try $0.inserting(media: mediaID, at: index, clipID: cid) }, focus: cid)
+        commit({ try $0.appending(media: mediaID, videoLane: d.video, audioLane: d.audio, clipID: cid) }, focus: cid)
+    }
+    /// + 단추의 대상: 레인 머리에서 고른 레인이 있으면 그 레인과 같은 번호의 짝(V2 ↔ A2, 짝이 없으면 기본 레인), 없으면 V1·A1.
+    func addDestination(hasVideo: Bool, hasAudio: Bool) -> (video: UUID?, audio: UUID?) {
+        let t = timeline, chosen = selectedLane.flatMap { t.laneInfo($0) }
+        var v: UUID? = nil, a: UUID? = nil
+        if hasVideo {
+            v = chosen?.kind == .video ? chosen?.id : (chosen.flatMap { t.pairedLane(of: $0.id)?.id } ?? t.baseLane(.video)?.id)
+        }
+        if hasAudio {
+            if chosen?.kind == .audio { a = chosen?.id }
+            else { a = v.flatMap { t.pairedLane(of: $0)?.id } ?? t.baseLane(.audio)?.id }
+        }
+        return (v, a)
     }
 
     /// 분할: 선택한 클립(없으면 재생 헤드 아래 영상, 없으면 소리 클립)을 재생 헤드에서 나눈다. 연결된 짝도 함께.
@@ -377,7 +441,7 @@ final class ProjectStore {
 
     /// 클릭 선택. extend(⌘-클릭)이면 다른 레인의 클립을 연결 후보로 더하거나 뺀다.
     func select(_ id: UUID?, extend: Bool = false) {
-        guard extend, let id, let sel = selection, sel != id else { selection = id; return }
+        guard extend, let id, let sel = selection, sel != id else { selection = id; if id != nil { selectedLane = nil }; return }
         if timeline.group(of: sel).contains(where: { $0.id == id }) { return }
         linkCandidate = linkCandidate == id ? nil : id
     }
@@ -409,6 +473,268 @@ final class ProjectStore {
         } catch let e as EditError { statusMessage = e.description; return false } catch { return false }
     }
 
+    // MARK: 레인(A-014)
+
+    /// 레인 머리에서 고른 레인(정보 패널에 레인 설정을 보인다). 클립을 고르면 그 클립의 레인을 보인다.
+    var selectedLane: UUID?
+    /// 정보 패널이 보일 레인: 고른 레인, 없으면 선택한 클립의 레인
+    var inspectedLane: Lane? {
+        if let l = selectedLane, let lane = timeline.laneInfo(l) { return lane }
+        return selection.flatMap { timeline.laneID(of: $0) }.flatMap { timeline.laneInfo($0) }
+    }
+    func selectLane(_ id: UUID?) { selectedLane = id; if id != nil { selection = nil } }
+    /// 레인 편집(실행 취소 한 단계). 편집 중(드래그)에는 하지 않는다.
+    private func commitLane(_ make: (Timeline) throws -> Timeline, select lane: UUID? = nil) {
+        guard gestureBase == nil else { return }
+        pauseForEdit()
+        do {
+            let t = try make(timeline)
+            guard t != timeline else { return }
+            history.apply(t, focus: selection)
+            if let lane { selectedLane = lane }
+            if let l = selectedLane, t.laneInfo(l) == nil { selectedLane = nil }
+            if let s = selection, t.clip(s) == nil { selection = nil }
+            statusMessage = nil
+            timelineChanged()
+        } catch let e as EditError { statusMessage = e.description } catch { statusMessage = error.localizedDescription }
+    }
+    /// 새 레인의 기본 이름: "영상"·"오디오". 번호(V2·A2)는 위치에서 따로 보이므로 이름에 넣지 않는다(순서를 바꿔도 어긋나지 않게).
+    func newLaneName(_ kind: LaneKind) -> String { kind == .video ? "영상" : "오디오" }
+    /// 레인 추가: 경계에서 바깥쪽 끝(영상은 맨 위 새 Vn, 오디오는 맨 아래 새 An)
+    func addLane(_ kind: LaneKind) {
+        let id = UUID()
+        commitLane({ try $0.addingLane(kind, name: newLaneName(kind), id: id, outward: true) }, select: id)
+    }
+    /// 영상·소리 레인 쌍 추가(한 단계): 새 영상 레인은 맨 위, 새 오디오 레인은 맨 아래
+    func addLanePair() {
+        let v = UUID(), a = UUID()
+        commitLane({ try $0.addingLane(.video, name: newLaneName(.video), id: v, outward: true)
+                          .addingLane(.audio, name: newLaneName(.audio), id: a, outward: true) }, select: v)
+    }
+    /// 레인 순서(같은 종류 안에서 한 칸). 영상 레인 순서는 겹친 영상 중 무엇이 보이는지를 바꾼다.
+    func moveLane(_ id: UUID, by step: Int) { commitLane({ try $0.movingLane(id, by: step) }) }
+    func canMoveLane(_ id: UUID, by step: Int) -> Bool {
+        guard let i = timeline.lanes.firstIndex(where: { $0.id == id }) else { return false }
+        let j = i + step
+        return timeline.lanes.indices.contains(j) && timeline.lanes[j].kind == timeline.lanes[i].kind
+    }
+    /// 레인 삭제. 클립이 있으면 확인한다(레인·클립 삭제와 짝 연결 해제가 한 단계). 그 종류의 마지막 레인은 지우지 않는다.
+    func requestRemoveLane(_ id: UUID) {
+        guard let lane = timeline.laneInfo(id), gestureBase == nil else { return }
+        guard timeline.lanes(lane.kind).count > 1 else { statusMessage = EditError.lastLane.description; return }
+        let n = timeline.clips(inLane: id).count
+        guard n > 0 else { commitLane({ try $0.removingLane(id) }); return }
+        let linked = timeline.clips(inLane: id).filter { $0.link != nil }.count
+        var msg = "‘\(lane.name)’ 레인과 그 안의 클립 \(n)개를 지웁니다."
+        if linked > 0 { msg += " 다른 레인에 있는 연결된 짝 \(linked)개는 지우지 않고 연결만 해제합니다." }
+        msg += "\n\n실행 취소(⌘Z)로 되돌릴 수 있습니다. 원본 파일은 그대로입니다."
+        presentAlert(AlertInfo(title: "레인을 삭제할까요?", message: msg, buttons: ["레인 삭제", "취소"], destructiveIndex: 0, cancelIndex: 1,
+                               onButton: { [weak self] i in if i == 0 { self?.commitLane({ try $0.removingLane(id) }) } }))
+    }
+    func setLaneMuted(_ id: UUID, _ muted: Bool) { commitLane({ try $0.settingLaneAudio(id, muted: muted) }) }
+    /// 음량(0–100%). 슬라이더는 놓을 때 한 번 부른다(한 단계).
+    func setLaneVolume(_ id: UUID, _ percent: Int) { commitLane({ try $0.settingLaneAudio(id, volumePercent: max(0, min(100, percent))) }) }
+
+    // MARK: 소리 클립 음량·음소거·페이드(2026-10-11)
+
+    /// 고른 클립의 소리 대상: 소리 클립이면 그 클립, 영상 클립이면 연결된 소리 클립(없으면 nil)
+    var audioTargetClip: Clip? { selection.flatMap { timeline.audioTarget(of: $0) }.flatMap { timeline.clip($0) } }
+    /// 소리 클립 설정(한 단계). 다른 클립·레인은 그대로다. 페이드는 프레임(1/30 s), 다른 쪽 페이드와 겹치지 않게 줄인다.
+    func setClipAudio(_ id: UUID, volumePercent: Int? = nil, muted: Bool? = nil, fadeInFrames: Int? = nil, fadeOutFrames: Int? = nil) {
+        guard gestureBase == nil else { return }
+        let before = timeline
+        commit({ try $0.settingClipAudio(clip: id, volumePercent: volumePercent.map { max(0, min(100, $0)) }, muted: muted,
+                                         fadeInFrames: fadeInFrames.map { max(0, $0) }, fadeOutFrames: fadeOutFrames.map { max(0, $0) }) },
+               focus: selection ?? id, rebuild: false)
+        if timeline != before { timelineChanged() }
+    }
+    enum FadeEdge { case fadeIn, fadeOut }
+    /// 타임라인 페이드 손잡이 끌기 중(beginGesture → updateFade… → commitGesture 한 단계, Esc는 cancelGesture).
+    /// frames는 손잡이 위치에서 잰 페이드 길이(반올림한 프레임)이고 다른 쪽 페이드와 겹치지 않게 줄인다. 선택은 바꾸지 않는다.
+    func updateFade(_ id: UUID, edge: FadeEdge, frames: Int) {
+        guard let base = gestureBase, let t = try? base.settingClipAudio(clip: id, fadeInFrames: edge == .fadeIn ? max(0, frames) : nil,
+                                                                       fadeOutFrames: edge == .fadeOut ? max(0, frames) : nil) else { return }
+        history.updateGesture(t, focus: selection ?? id)
+    }
+    /// 페이드 손잡이 끌기 시작(선택은 그대로: 영상 클립을 골랐으면 연결된 소리의 페이드를 바꾼다)
+    func beginFadeGesture() {
+        pauseForEdit()
+        history.beginGesture()
+        gestureBase = timeline
+    }
+
+    /// 끌어 놓기(A-014, 2026-10-11 갱신): 미디어를 고른 레인의 놓은 시각(frame)에 놓는다(한 단계, 리플·끼워 넣기 없음, 겹치면 거부).
+    /// - 영상 레인에 영상 파일: 그 레인에. 연결된 소리는 같은 번호의 오디오 레인(V2 → A2)이 그 구간에서 비었으면 거기, 아니면 경계에서 가까운
+    ///   빈 오디오 레인, 없으면 파일 이름의 새 오디오 레인(맨 아래)에.
+    /// - 오디오 레인에 소리 파일: 그 레인에.
+    /// - 레인 아래 빈 곳(lane nil): 파일 이름의 새 레인을 바깥쪽에 만든다. 소리가 있는 영상은 새 영상 레인(맨 위)과 새 오디오 레인(맨 아래)
+    ///   쌍, 소리 없는 영상은 영상 레인만, 소리 파일은 오디오 레인만.
+    func placeMedia(_ mediaID: UUID, atFrame f: Int, lane: UUID?) {
+        guard let ref = timeline.media.first(where: { $0.id == mediaID }), let n = timeline.mediaFrames[mediaID] else { return }
+        let name = (ref.name as NSString).deletingPathExtension.trimmingCharacters(in: .whitespaces).isEmpty ? newLaneName(ref.hasVideo ? .video : .audio)
+            : (ref.name as NSString).deletingPathExtension
+        let start = max(0, f)
+        let kind = lane.flatMap { timeline.laneInfo($0)?.kind }
+        if ref.hasVideo {
+            if kind == .audio { statusMessage = "영상 파일은 영상 레인에 놓으세요. 소리는 연결된 클립으로 오디오 레인에 함께 들어갑니다."; return }
+            let cid = UUID()
+            commit({ t in
+                var t = t
+                var vl = lane, al: UUID? = nil
+                if vl == nil {
+                    let id = UUID(); t = try t.addingLane(.video, name: name, id: id, outward: true); vl = id
+                    if ref.hasAudio { let a = UUID(); t = try t.addingLane(.audio, name: name, id: a, outward: true); al = a }
+                } else if ref.hasAudio, let v = vl {
+                    al = Self.freeAudioLane(t, pairedWith: v, range: start..<(start + n))
+                    if al == nil { let id = UUID(); t = try t.addingLane(.audio, name: name, id: id, outward: true); al = id }
+                }
+                return try t.placing(media: mediaID, at: start, videoLane: vl, audioLane: al, clipID: cid)
+            }, focus: cid)
+        } else {
+            if kind == .video { statusMessage = "소리 파일은 오디오 레인에 놓거나, 레인 아래 빈 곳에 놓아 새 오디오 레인을 만드세요."; return }
+            let cid = UUID()
+            commit({ t in
+                var t = t
+                var al = lane
+                if al == nil { let id = UUID(); t = try t.addingLane(.audio, name: name, id: id, outward: true); al = id }
+                return try t.placing(media: mediaID, at: start, videoLane: nil, audioLane: al, clipID: cid)
+            }, focus: cid)
+        }
+    }
+    /// 연결된 소리를 놓을 오디오 레인: 같은 번호의 짝 레인이 그 구간에서 비었으면 그 레인, 아니면 경계에서 가까운 빈 오디오 레인
+    static func freeAudioLane(_ t: Timeline, pairedWith v: UUID, range r: Range<Int>) -> UUID? {
+        let free: (Lane) -> Bool = { l in !t.clips(inLane: l.id).contains { $0.start < r.upperBound && r.lowerBound < $0.end } }
+        if let p = t.pairedLane(of: v), p.kind == .audio, free(p) { return p.id }
+        return t.lanesFromBoundary(.audio).first(where: free)?.id
+    }
+
+    /// 선택한 클립(과 연결된 짝)을 다른 레인으로(정보 패널). 위치는 그대로, 겹치면 아무것도 옮기지 않는다(한 단계).
+    func relocateSelection(lane: UUID?, partnerLane: UUID?) {
+        guard let id = selection, gestureBase == nil else { return }
+        commit({ try $0.relocating(clip: id, lane: lane, partnerLane: partnerLane) }, focus: id)
+    }
+
+    // MARK: 영상 크기·위치(A-015)
+
+    /// 프리뷰에서 편집할 영상 클립: 선택한 영상 클립(소리 클립을 골랐으면 연결된 영상)이 재생 헤드 위치에 있을 때만.
+    var overlayTarget: (clip: Clip, asset: MediaAsset)? {
+        guard let sel = selection, let c0 = timeline.clip(sel) else { return nil }
+        let c = timeline.lane(of: sel) == .video ? c0 : timeline.partner(of: sel)
+        guard let c, timeline.lane(of: c.id) == .video, playhead >= c.start, playhead < c.end, missingMedia[c.mediaID] == nil,
+              let a = mediaByID[c.mediaID] else { return nil }
+        return (c, a)
+    }
+    /// 선택한 클립의 영상(정보 패널): 재생 헤드와 무관
+    var transformClip: Clip? {
+        guard let sel = selection else { return nil }
+        if timeline.lane(of: sel) == .video { return timeline.clip(sel) }
+        return timeline.partner(of: sel).flatMap { timeline.lane(of: $0.id) == .video ? $0 : nil }
+    }
+    /// 정보 패널 입력·초기화(한 단계). 범위 밖 값은 범위 안으로 맞춘다.
+    /// 프리뷰는 새 상태의 정지 화면(InteractivePreview)을 먼저 띄운 뒤 다시 만들고, 새 항목이 표시될 준비가 되면 정지 화면을 내린다(깜박임 없음).
+    func setTransform(_ id: UUID, _ t: ClipTransform?) {
+        guard gestureBase == nil, let c = timeline.clip(id), c.transform != t?.clamped.normalized else { return }
+        let before = timeline
+        commit({ try $0.settingTransform(clip: id, t?.clamped) }, focus: selection ?? id, rebuild: false)
+        guard timeline != before else { return }
+        if !stillRebuild(from: before) { timelineChanged() }
+    }
+
+    // MARK: 프리뷰 끌기의 정지 화면(2026-10-11 깜박임 수정)
+    //
+    // 원인(코드와 자체 검사로 확인): 끌기 중 마우스가 움직일 때마다 composition을 다시 만들고 AVPlayer 항목을 바꿨다
+    // (replaceCurrentItem). 새 항목의 첫 프레임이 준비될 때까지 AVPlayerLayer가 비어 검정이 보였다.
+    // 수정: 끌기 중에는 항목을 바꾸지 않고, 재생 헤드 시각의 원본 프레임을 한 번 디코딩해 둔 뒤 같은 쌓음·변형 해석
+    // (CompositionPlanner.layeredSegments·layerTransform)으로 겹친 화면을 그려 프리뷰 위 정지 화면 층에 보인다.
+    // 놓으면 최종 상태로 한 번 다시 만들고, 새 항목이 표시될 준비가 된 뒤에 정지 화면을 내린다. Esc는 정지 화면만 내린다
+    // (항목은 끌기 전 상태 그대로다).
+
+    let interactive = InteractivePreview()
+    /// 프리뷰 화면 호스트(PlayerNSView, 약한 참조). 정지 화면 표시·해제를 맡는다.
+    @ObservationIgnored weak var previewHost: PlayerNSView?
+    /// 정지 화면을 내릴 세대(이 세대 이상의 재구성이 적용되고 표시 준비가 되면 내린다)
+    @ObservationIgnored private var stillReleaseGeneration: Int?
+    #if DEBUG
+    /// 자체 검사 전용: 이전(깜박이는) 경로 — 끌기 중 마우스 이동마다 다시 만든다. 원인 재현에만 쓴다.
+    @ObservationIgnored var legacyTransformPreviewForTest = false
+    @ObservationIgnored private var pendingPreviewRebuild = false
+    /// 자체 검사 전용: 프리뷰 항목 교체 수
+    private(set) var itemReplacements = 0
+    #endif
+
+    /// 정지 화면 경로를 쓸 수 있으면 시작한다(재생 헤드 아래 영상 원본 프레임을 미리 디코딩)
+    private func beginStill(_ base: Timeline) {
+        interactive.onItems = { [weak self] items in
+            self?.previewHost?.showStage(items)
+            #if DEBUG
+            if let self, let (id, _) = self.liveTransform ?? self.selection.map({ ($0, ClipTransform.identity) }),
+               let t = self.interactive.lastTimeline?.clip(id)?.effectiveTransform {
+                PerfProbe.shared.didShow(.init(scale: t.scale, x: t.x, y: t.y))
+            }
+            #endif
+        }
+        interactive.begin(base.excludingMedia(missingUsedMedia), frame: min(playhead, max(0, base.durationFrames - 1)), media: mediaByID, settings: settings)
+    }
+    /// 변형만 바뀐 편집: 새 상태의 정지 화면을 띄우고 그 뒤에 다시 만든다(정지 화면이 뜨기 전에는 항목을 바꾸지 않는다). 할 수 없으면 false.
+    private func stillRebuild(from before: Timeline) -> Bool {
+        guard previewHost != nil, player.currentItem != nil else { return false }
+        beginStill(before)
+        let target = timeline
+        generation += 1   // 진행 중인 재구성 결과는 버린다(새 상태로 다시 만든다)
+        interactive.request(target.excludingMedia(missingUsedMedia)) { [weak self] shown in
+            guard let self, self.timeline == target else { return }
+            if shown { self.stillReleaseGeneration = self.generation + 1 }
+            self.timelineChanged()
+        }
+        return true
+    }
+    /// 재구성이 적용된 뒤: 정지 화면을 내릴 차례면 새 항목이 표시될 준비가 됐을 때 내린다
+    private func releaseStillIfDue(_ g: Int, item: AVPlayerItem) {
+        guard let r = stillReleaseGeneration, g >= r else { return }
+        stillReleaseGeneration = nil
+        interactive.end()
+        previewHost?.releaseStill(when: item)
+    }
+    /// 정지 화면을 바로 내린다(Esc·프로젝트 교체: 항목은 이미 맞는 상태)
+    private func dropStill() {
+        stillReleaseGeneration = nil
+        interactive.end()
+        previewHost?.hideStill()
+    }
+
+    /// 프리뷰 끌기 중: 끌기 시작 상태에서 변형만 바꾼다(기록은 놓을 때 한 단계, Esc는 시작 상태로).
+    /// 프리뷰 항목은 바꾸지 않고 무대 레이어의 변형만 바꾼다. 편집 기록(관찰되는 타임라인)도 놓을 때까지 바꾸지 않는다:
+    /// 끌기 중 타임라인을 바꾸면 그것을 읽는 모든 SwiftUI 보기와 타임라인 보기를 매번 다시 계산·그렸다(§19 측정).
+    /// 끌기 중 값은 gestureTimeline(관찰 안 함)과 liveTransform(조정 칸 표시용, 관찰)에만 둔다. 호출은 화면 갱신마다 한 번(PreviewOverlayView).
+    func updateTransformGesture(_ id: UUID, _ t: ClipTransform) {
+        guard let base = gestureBase, let next = try? base.settingTransform(clip: id, t.clamped) else { return }
+        #if DEBUG
+        if legacyTransformPreviewForTest {
+            history.updateGesture(next, focus: selection)
+            if appliedGeneration == generation { timelineChanged() } else { pendingPreviewRebuild = true }; return
+        }
+        #endif
+        gestureTimeline = next
+        if liveTransform?.clip != id || liveTransform?.transform != t.clamped { liveTransform = (id, t.clamped) }
+        interactive.request(next.excludingMedia(missingUsedMedia))
+    }
+    /// 프리뷰 끌기 중 최신 상태(편집 기록에는 놓을 때 넣는다). 끌기가 아니면 nil.
+    @ObservationIgnored private(set) var gestureTimeline: Timeline?
+    /// 프리뷰 끌기 중 변형(조정 칸이 끌기 중 값을 보이는 데만 쓴다)
+    private(set) var liveTransform: (clip: UUID, transform: ClipTransform)?
+    /// 프리뷰 끌기 시작(선택은 그대로 둔다: 소리 클립을 골랐어도 연결된 영상의 변형을 바꾼다)
+    func beginTransformGesture() {
+        pauseForEdit()
+        history.beginGesture()
+        gestureBase = timeline
+        transformGesture = true
+        #if DEBUG
+        if legacyTransformPreviewForTest { return }
+        #endif
+        if previewHost != nil, player.currentItem != nil { beginStill(timeline) }
+    }
+    @ObservationIgnored private var transformGesture = false
+
     // MARK: 드래그 제스처(완료한 드래그 하나 = 한 단계, 취소하면 원래 상태)
 
     enum TrimEdge { case start, end }
@@ -423,18 +749,29 @@ final class ProjectStore {
         do { history.updateGesture(try edge == .start ? base.trimmingStart(clip: id, by: delta) : base.trimmingEnd(clip: id, by: delta), focus: id); moveRejection = nil }
         catch let e as EditError { history.updateGesture(base, focus: id); moveRejection = delta == 0 ? nil : e } catch {}
     }
-    /// 자유 이동 미리 보기(연결되지 않은 클립): 드래그 시작 위치 + delta. 겹치면 원래 자리에 두고 제안 위치를 빨갛게 보인다.
-    func updateFreeMove(_ id: UUID, delta: Int) {
+    /// 끌어 옮기기 미리 보기(2026-10-11: 연결된 쌍·연결되지 않은 클립 모두): 드래그 시작 위치 + delta, lane이 있으면 같은 종류의 그 레인으로.
+    /// 연결된 짝은 같은 양만큼 옮기고(상대 위치 그대로) 자기 레인에 둔다. 묶음의 가장 이른 시작이 0보다 앞서지 않게 막는다.
+    /// snapFrames > 0이면 0과 다른 클립 경계에 그 거리(프레임) 안에서 붙인다. 리플 없음, 원래 자리는 빈틈.
+    /// 겹치면 원래 자리에 두고 제안 위치를 빨갛게 보인다(놓으면 아무것도 옮기지 않음).
+    /// delta는 포인터에서 잰 소수 프레임(붙음 거리를 반올림 전 값으로 잰다).
+    func updateFreeMove(_ id: UUID, delta: Double, lane: UUID? = nil, snapFrames: Double = 0) {
         guard let base = gestureBase, let c = base.clip(id) else { return }
-        let s = max(0, c.start + delta)
-        if let t = try? base.movingFree(clip: id, toStart: s) {
-            freeMoveProposal = (id, s, true); history.updateGesture(t, focus: id)
+        let earliest = base.group(of: id).map(\.start).min() ?? c.start
+        let (d, snap) = base.snappedDelta(clip: id, delta: max(Double(-earliest), delta), threshold: snapFrames)
+        let s = c.start + d
+        let l = lane.flatMap { base.laneInfo($0)?.kind == base.lane(of: id) ? $0 : nil } ?? c.lane
+        snapGuide = snap
+        if let t = try? base.relocating(clip: id, toStart: s, lane: l) {
+            freeMoveProposal = (id, s, true, l); history.updateGesture(t, focus: id)
         } else {
-            freeMoveProposal = (id, s, false); history.updateGesture(base, focus: id)
+            freeMoveProposal = (id, s, false, l); history.updateGesture(base, focus: id)
         }
     }
-    /// 자유 이동 중 제안 위치(표시용): (클립, 시작, 놓을 수 있음)
-    private(set) var freeMoveProposal: (id: UUID, start: Int, ok: Bool)?
+    /// 끌어 옮기기 중 제안 위치(표시용): (클립, 시작, 놓을 수 있음, 레인)
+    private(set) var freeMoveProposal: (id: UUID, start: Int, ok: Bool, lane: UUID?)?
+    /// 끌어 옮기기 중 붙은 위치(프레임, 표시용 안내선). 붙지 않았으면 nil.
+    private(set) var snapGuide: Int?
+    /// 끼워 넣기 이동(리플). 2026-10-11부터 일반 끌기에서는 쓰지 않는다(이전 자체 검사의 저장소 경로로만 남김).
     func updateMove(_ id: UUID, toIndex: Int) {
         guard let base = gestureBase else { return }
         moveInsertionIndex = toIndex
@@ -442,17 +779,37 @@ final class ProjectStore {
         do { history.updateGesture(try base.moving(clip: id, toIndex: toIndex), focus: id); moveRejection = nil }
         catch let e as EditError { history.updateGesture(base, focus: id); moveRejection = e } catch {}
     }
+    /// 끌기 끝(한 단계). 바뀐 것이 없으면 프리뷰를 다시 만들지 않는다(항목을 바꾸지 않아 깜박이지 않음).
+    /// 변형 끌기는 정지 화면을 띄운 채 최종 상태로 다시 만들고, 새 항목이 표시될 준비가 되면 정지 화면을 내린다.
     func commitGesture() {
-        guard gestureBase != nil else { return }
+        guard let base = gestureBase else { return }
+        if transformGesture, let g = gestureTimeline { history.updateGesture(g, focus: selection) }   // 마지막(놓은 위치) 값 그대로
+        gestureTimeline = nil; liveTransform = nil
         if let p = freeMoveProposal, !p.ok { statusMessage = EditError.overlap.description }
         if let r = moveRejection { statusMessage = r.description; moveRejection = nil }
-        history.commitGesture(); gestureBase = nil; moveInsertionIndex = nil; freeMoveProposal = nil
+        history.commitGesture(); gestureBase = nil; moveInsertionIndex = nil; freeMoveProposal = nil; snapGuide = nil
+        let wasTransform = transformGesture; transformGesture = false
+        #if DEBUG
+        if legacyTransformPreviewForTest && wasTransform { pendingPreviewRebuild = false; timelineChanged(); return }
+        #endif
+        guard timeline != base else { if wasTransform { dropStill() }; updateWindowDocumentState(); return }
+        if wasTransform, previewHost?.isShowingStill == true || interactive.isActive {
+            stillReleaseGeneration = generation + 1
+            interactive.request(timeline.excludingMedia(missingUsedMedia))   // 마지막 위치의 정지 화면(이미 그렸으면 같은 그림)
+        }
         timelineChanged()
     }
+    /// 끌기 취소(Esc): 끌기 전 상태로. 끌기 중에는 프리뷰 항목을 바꾸지 않았으므로 다시 만들지 않고 정지 화면만 내린다.
     func cancelGesture() {
         guard gestureBase != nil else { return }
-        history.cancelGesture(); gestureBase = nil; moveInsertionIndex = nil; freeMoveProposal = nil
-        timelineChanged()
+        gestureTimeline = nil; liveTransform = nil
+        history.cancelGesture(); gestureBase = nil; moveInsertionIndex = nil; freeMoveProposal = nil; snapGuide = nil
+        let wasTransform = transformGesture; transformGesture = false
+        #if DEBUG
+        if legacyTransformPreviewForTest && wasTransform { pendingPreviewRebuild = false; timelineChanged(); return }
+        #endif
+        if wasTransform { dropStill() }
+        updateWindowDocumentState()
     }
 
     // MARK: 프리뷰
@@ -469,6 +826,7 @@ final class ProjectStore {
             currentPlan = nil
             player.replaceCurrentItem(with: nil)
             appliedGeneration = g
+            dropStill()
             return
         }
         Task {
@@ -486,16 +844,27 @@ final class ProjectStore {
                 }
                 self.currentPlan = plan
                 let item = AVPlayerItem(asset: plan.composition)
-                item.videoComposition = plan.videoComposition
+                if plan.hasVideo { item.videoComposition = plan.videoComposition }   // 소리 파일만 있으면 영상 트랙이 없다(검정)
+                item.audioMix = plan.audioMix   // 오디오 레인 음량(A-014, 내보내기와 같은 믹스)
                 #if DEBUG
                 self.itemCreatedHookForTest?(item, g)   // 진단 전용: 새 항목에 비디오 출력을 붙인다(일반 실행에서는 nil)
                 #endif
                 self.player.replaceCurrentItem(with: item)
+                #if DEBUG
+                self.itemReplacements += 1
+                #endif
                 self.observeEnd(item)
                 await self.player.seek(to: s.time(self.playhead), toleranceBefore: .zero, toleranceAfter: .zero)
-                if g == self.generation { self.appliedGeneration = g }
+                if g == self.generation {
+                    self.appliedGeneration = g
+                    self.releaseStillIfDue(g, item: item)   // 정지 화면은 새 항목이 표시될 준비가 된 뒤에 내린다
+                    #if DEBUG
+                    if self.pendingPreviewRebuild { self.pendingPreviewRebuild = false; self.timelineChanged() }   // 이전 경로 재현용
+                    #endif
+                }
             } catch {
                 guard g == self.generation else { return }
+                self.dropStill()
                 self.statusMessage = "프리뷰를 만들지 못했습니다: \(error)"
             }
         }
@@ -793,16 +1162,20 @@ extension ProjectStore {
         guard !missingMedia.isEmpty else { return [] }
         return Set(missingMedia.keys).intersection((timeline.clips + timeline.audioClips).map(\.mediaID))
     }
-    /// 재생 헤드 아래(영상·소리) 클립 중 찾을 수 없는 원본의 이름
+    /// 재생 헤드 아래(모든 레인) 클립 중 찾을 수 없는 원본의 이름
     var missingNameAtPlayhead: String? {
         guard !missingMedia.isEmpty else { return nil }
-        let ids = [timeline.clipIndex(atFrame: playhead).map { timeline.clips[$0].mediaID }, timeline.audioClipIndex(atFrame: playhead).map { timeline.audioClips[$0].mediaID }]
-        return ids.compactMap { $0 }.first { missingMedia[$0] != nil }.flatMap { id in timeline.media.first { $0.id == id }?.name }
+        let ids = (timeline.clips + timeline.audioClips).filter { playhead >= $0.start && playhead < $0.end }.map(\.mediaID)
+        return ids.first { missingMedia[$0] != nil }.flatMap { id in timeline.media.first { $0.id == id }?.name }
     }
-    /// 내보내기를 할 수 없는 이유(찾을 수 없는 원본)
+    /// 내보내기를 할 수 없는 이유(찾을 수 없는 원본, 또는 영상 원본이 하나도 없음)
     var exportBlockReason: String? {
         let names = timeline.media.filter { missingUsedMedia.contains($0.id) }.map(\.name)
-        return names.isEmpty ? nil : "찾을 수 없는 원본 미디어(\(names.joined(separator: ", ")))가 있어 내보낼 수 없습니다. 파일 > 미디어 재연결…로 다시 연결하세요."
+        if !names.isEmpty { return "찾을 수 없는 원본 미디어(\(names.joined(separator: ", ")))가 있어 내보낼 수 없습니다. 파일 > 미디어 재연결…로 다시 연결하세요." }
+        if !timeline.isEmpty, !timeline.media.contains(where: { $0.hasVideo && missingMedia[$0.id] == nil }) {
+            return "영상 원본이 없어 내보낼 수 없습니다(소리 파일만 있음). 출력 영상(1920×1080)의 바탕을 만들 영상 파일을 하나 이상 가져오세요."
+        }
+        return nil
     }
     func updateWindowDocumentState() {
         guard let w = editorWindow else { return }
@@ -811,9 +1184,10 @@ extension ProjectStore {
     }
     /// 프로젝트를 바꿀 수 있는가(가져오기·내보내기 중이면 아니다)
     func projectReplaceBlocked() -> Bool {
-        guard importProgress != nil || !pendingOps.isEmpty || exportPhase != .idle else { return false }
+        guard openProgress != nil || importProgress != nil || !pendingOps.isEmpty || exportPhase != .idle else { return false }
         presentAlert(AlertInfo(title: "프로젝트를 바꿀 수 없습니다",
-                               message: "가져오기 또는 내보내기가 진행 중입니다. 끝나거나 취소한 뒤 다시 시도하세요."))
+                               message: openProgress != nil ? "다른 프로젝트를 여는 중입니다. 끝나거나 취소한 뒤 다시 시도하세요."
+                                                            : "가져오기 또는 내보내기가 진행 중입니다. 끝나거나 취소한 뒤 다시 시도하세요."))
         return true
     }
     func stopAllScopes() {
@@ -835,11 +1209,12 @@ extension ProjectStore {
     private func replaceProject(timeline t: Timeline, url: URL?, id: UUID, cache: [String: MediaAsset], bookmarks bm: [UUID: Data], missing: [UUID: String]) {
         pauseForEdit()
         if gestureBase != nil { cancelGesture() }
+        dropStill()
         history = EditHistory(t)
         savedTimeline = t
         projectURL = url; projectID = id
         assetCache = cache; bookmarks = bm; missingMedia = missing
-        selection = nil; linkCandidate = nil; statusMessage = nil
+        selection = nil; linkCandidate = nil; selectedLane = nil; statusMessage = nil
         seek(to: 0)
         timelineChanged()
     }
@@ -976,43 +1351,96 @@ extension ProjectStore {
     /// 프로젝트 열기(메뉴·최근·Finder). url이 nil이면 열기 패널. 가져오기·내보내기 중이면 거절, 저장하지 않은 변경은 확인.
     func requestOpenProject(_ url: URL?, scoped: Bool = false) {
         guard !projectReplaceBlocked() else { if scoped { url?.stopAccessingSecurityScopedResource() }; return }
+        Self.trace.info("open requested fromRecent=\(url != nil, privacy: .public)")
         requestDiscard(.openProject, proceed: { [weak self] in
             guard let self else { return }
             var target = url
             if target == nil {
-                let p = NSOpenPanel()
-                p.allowedContentTypes = [Self.projectType]
-                p.allowsMultipleSelection = false
-                p.message = "열 프로젝트(.ontheframe)를 고르세요."
-                guard p.runModal() == .OK, let u = p.url else { return }
-                target = u
+                #if DEBUG
+                if let o = self.openPanelOverrideForTest { target = o(); Self.trace.info("open panel (test override) chosen=\(target != nil, privacy: .public)") }
+                #endif
+                if target == nil, !self.openPanelOverridden {
+                    let p = NSOpenPanel()
+                    p.allowedContentTypes = [Self.projectType]
+                    p.allowsMultipleSelection = false
+                    p.message = "열 프로젝트(.ontheframe)를 선택하세요."
+                    let r = p.runModal()
+                    Self.trace.info("open panel response=\(r.rawValue, privacy: .public)")
+                    guard r == .OK, let u = p.url else { return }
+                    target = u
+                }
             }
             guard let target else { return }
-            Task { @MainActor in
+            self.openTask = Task { @MainActor in
                 let ok = await self.openProject(at: target)
                 if scoped, !ok { target.stopAccessingSecurityScopedResource() }
                 if scoped, ok { self.scopedURLs.append(target) }   // 최근 목록 북마크로 연 프로젝트 파일: 프로젝트가 바뀔 때 멈춘다
+                self.openTask = nil
+                self.runNextOp()
             }
-        }, cancel: { if scoped { url?.stopAccessingSecurityScopedResource() } })
+        }, cancel: { [weak self] in
+            Self.trace.info("open cancelled at unsaved-changes prompt")
+            _ = self
+            if scoped { url?.stopAccessingSecurityScopedResource() }
+        })
+    }
+    #if DEBUG
+    private var openPanelOverridden: Bool { openPanelOverrideForTest != nil }
+    #else
+    private var openPanelOverridden: Bool { false }
+    #endif
+    /// 프로젝트 열기 취소(원본 확인 중): 현재 프로젝트는 그대로, 늦게 끝난 확인 결과는 버린다
+    func cancelOpen() {
+        guard openProgress != nil else { return }
+        openEpoch += 1
+        openProgress?.cancelling = true
+        openTask?.cancel()
+        Self.trace.info("open cancel requested")
     }
 
     /// 전체를 읽고 검사한 뒤에만 현재 프로젝트를 바꾼다. 실패하면 알림만(현재 상태 그대로). 성공하면 true.
+    /// 2026-10-11: 파일 읽기는 주 스레드 밖에서, 원본 확인은 진행 카드(단계·경과·취소)와 함께. 단계와 걸린 시간을 진단 기록에 남긴다(경로 없음).
     @discardableResult
     func openProject(at url: URL) async -> Bool {
+        guard openProgress == nil else { return false }
+        openEpoch += 1
+        let epoch = openEpoch, t0 = monoSeconds(), s = settings
+        openProgress = OpenProgress(stage: "프로젝트 파일 읽는 중", startedAt: t0)
+        defer { openProgress = nil }   // 성공·실패·취소 모두(열기는 한 번에 하나: projectReplaceBlocked)
+        func cancelled() -> Bool { epoch != openEpoch || Task.isCancelled }
+        func abandon(_ scopes: [URL]) -> Bool {
+            for u in scopes { u.stopAccessingSecurityScopedResource() }
+            statusMessage = "프로젝트 열기를 취소했습니다. 현재 프로젝트는 그대로입니다."
+            Self.trace.info("open abandoned (cancelled) after \(self.monoSeconds() - t0, format: .fixed(precision: 3), privacy: .public)s")
+            return false
+        }
+        func fail(_ msg: String, _ stage: String) -> Bool {
+            Self.trace.info("open failed at \(stage, privacy: .public) after \(self.monoSeconds() - t0, format: .fixed(precision: 3), privacy: .public)s")
+            presentAlert(AlertInfo(title: "프로젝트를 열 수 없습니다", message: "\(url.lastPathComponent): \(msg)\n\n현재 프로젝트는 그대로입니다."))
+            return false
+        }
+        Self.trace.info("open read start")
         let data: Data, decoded: (timeline: Timeline, document: ProjectFile.Document)
-        do { data = try Data(contentsOf: url) } catch {
-            presentAlert(AlertInfo(title: "프로젝트를 열 수 없습니다", message: "\(url.lastPathComponent): \(error.localizedDescription)")); return false
-        }
-        do { decoded = try ProjectFile.decode(data, settings: settings) } catch let e as ProjectFile.LoadError {
-            presentAlert(AlertInfo(title: "프로젝트를 열 수 없습니다", message: "\(url.lastPathComponent): \(e.description)")); return false
-        } catch {
-            presentAlert(AlertInfo(title: "프로젝트를 열 수 없습니다", message: error.localizedDescription)); return false
-        }
+        do { data = try await Task.detached { try Data(contentsOf: url) }.value } catch { return fail(error.localizedDescription, "read") }
+        if cancelled() { return abandon([]) }
+        Self.trace.info("open read bytes=\(data.count, privacy: .public) at \(self.monoSeconds() - t0, format: .fixed(precision: 3), privacy: .public)s")
+        do { decoded = try ProjectFile.decode(data, settings: s) } catch let e as ProjectFile.LoadError {
+            return fail(e.description, "decode")
+        } catch { return fail(error.localizedDescription, "decode") }
+        Self.trace.info("open decoded version=\(decoded.document.version, privacy: .public) media=\(decoded.document.media.count, privacy: .public) clips=\(decoded.document.videoClips.count + decoded.document.audioClips.count, privacy: .public) at \(self.monoSeconds() - t0, format: .fixed(precision: 3), privacy: .public)s")
+        openProgress?.total = decoded.document.media.count
+        openProgress?.stage = "원본 미디어 확인 중"
         // 원본 미디어 찾기(북마크 → 프로젝트 기준 상대 경로 → 절대 경로). 찾지 못해도 편집 구조는 연다.
         var t = decoded.timeline
         var cache: [String: MediaAsset] = [:], bm: [UUID: Data] = [:], missing: [UUID: String] = [:], scopes: [URL] = []
         let dir = url.deletingLastPathComponent()
-        for e in decoded.document.media {
+        for (i, e) in decoded.document.media.enumerated() {
+            if cancelled() { return abandon(scopes) }
+            openProgress?.completed = i; openProgress?.currentName = e.ref.name; openProgress?.stage = "원본 미디어 확인 중"
+            let m0 = monoSeconds()
+            #if DEBUG
+            if probeDelayForTest > 0 { try? await Task.sleep(nanoseconds: probeDelayForTest) }
+            #endif
             if let b = e.bookmark { bm[e.ref.id] = b }
             var candidates: [(URL, Bool)] = []
             if let b = e.bookmark {
@@ -1025,10 +1453,16 @@ extension ProjectStore {
             candidates.append((URL(fileURLWithPath: e.ref.path), false))
             var reason = "원본 파일을 찾을 수 없습니다(이동·삭제됐거나 접근 권한이 없음)."
             var found = false
-            for (u, started) in candidates {
-                guard !found, FileManager.default.isReadableFile(atPath: u.path), let a = try? await MediaProbe.inspect(u, settings: settings) else {
+            for (k, (u, started)) in candidates.enumerated() {
+                guard !found, !cancelled(), FileManager.default.isReadableFile(atPath: u.path), let a = try? await MediaProbe.inspect(u, settings: s, stage: { st in
+                    Task { @MainActor [weak self] in
+                        guard let self, epoch == self.openEpoch, self.openProgress?.completed == i else { return }
+                        self.openProgress?.stage = "원본 미디어 확인 중 · " + st.label
+                    }
+                }) else {
                     if started { u.stopAccessingSecurityScopedResource() }; continue
                 }
+                Self.trace.info("open media#\(i + 1, privacy: .public) candidate\(k + 1, privacy: .public) inspected")
                 let asset = a.withID(e.ref.id)
                 var ref = MediaRef(asset); ref.path = e.ref.path   // 저장된 경로를 키로 쓴다(실제 위치는 검사 결과에)
                 do {
@@ -1042,11 +1476,14 @@ extension ProjectStore {
                 } catch { if started { u.stopAccessingSecurityScopedResource() } }
             }
             if !found { missing[e.ref.id] = reason }
+            Self.trace.info("open media#\(i + 1, privacy: .public) \(found ? "found" : "missing", privacy: .public) in \(self.monoSeconds() - m0, format: .fixed(precision: 3), privacy: .public)s")
         }
+        if cancelled() { return abandon(scopes) }
         stopAllScopes()
         scopedURLs = scopes
         replaceProject(timeline: t, url: url.standardizedFileURL, id: decoded.document.projectID, cache: cache, bookmarks: bm, missing: missing)
         addRecent(url.standardizedFileURL)
+        Self.trace.info("open applied missing=\(missing.count, privacy: .public) total \(self.monoSeconds() - t0, format: .fixed(precision: 3), privacy: .public)s")
         if !missing.isEmpty {
             let names = t.media.filter { missing[$0.id] != nil }.map(\.name)
             presentAlert(AlertInfo(title: "찾을 수 없는 원본 미디어가 있습니다",
@@ -1096,7 +1533,7 @@ extension ProjectStore {
     func relinkMedia(_ id: UUID) {
         guard let r = timeline.media.first(where: { $0.id == id }) else { return }
         let p = NSOpenPanel()
-        p.allowedContentTypes = [.movie]
+        p.allowedContentTypes = [.movie, .audio]
         p.allowsMultipleSelection = false
         p.message = "‘\(r.name)’ 대신 쓸 파일을 고르세요(같은 원본, 길이 \(store_tc(r.frameCount)) 이상)."
         p.directoryURL = URL(fileURLWithPath: r.path).deletingLastPathComponent()

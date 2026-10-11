@@ -27,6 +27,9 @@ final class EditorLayout {
     /// 목록·정보 패널 접힘(접어도 비율은 그대로 두어, 펼치면 이전 너비로 돌아온다)
     var mediaCollapsed: Bool
     var inspectorCollapsed: Bool
+    /// 왼쪽 패널 탭(2026-10-11): 미디어 목록 / 클립 조정. 사용자가 고른 탭을 기억하고, 클립을 골라도 바꾸지 않는다.
+    enum LeftTab: String { case media, adjust }
+    var leftTab: LeftTab { didSet { defaults.set(leftTab.rawValue, forKey: Self.leftTabKey) } }
     @ObservationIgnored let defaults: UserDefaults
     @ObservationIgnored let suiteName: String?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
@@ -38,6 +41,7 @@ final class EditorLayout {
 
     static let frameKey = "editor.windowFrame", upperKey = "editor.split.upper", mediaKey = "editor.split.media", inspectorKey = "editor.split.inspector"
     static let mediaCollapsedKey = "editor.split.mediaCollapsed", inspectorCollapsedKey = "editor.split.inspectorCollapsed"
+    static let leftTabKey = "editor.leftTab"
 
     init() {
         #if DEBUG
@@ -56,6 +60,7 @@ final class EditorLayout {
         inspectorFraction = load(Self.inspectorKey, Self.defaultInspector)
         mediaCollapsed = d.bool(forKey: Self.mediaCollapsedKey)
         inspectorCollapsed = d.bool(forKey: Self.inspectorCollapsedKey)
+        leftTab = d.string(forKey: Self.leftTabKey).flatMap(LeftTab.init(rawValue:)) ?? .media
     }
 
     func saveFractions() {

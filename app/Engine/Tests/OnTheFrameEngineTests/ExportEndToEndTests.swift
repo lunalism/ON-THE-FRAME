@@ -56,12 +56,13 @@ final class ExportEndToEndTests: XCTestCase {
 
         let plan = try await CompositionPlanner.plan(t, media: [ta.id: ta, tb.id: tb])
         XCTAssertEqual(plan.settings.nearestFrame(plan.composition.duration), 360)
-        // 소리 트랙: 빈틈 구간은 빈 세그먼트이거나(앞·중간) 트랙이 이미 끝남(끝 빈틈) — 둘 다 무음
+        // 소리 트랙: 빈틈 구간은 무음 원본 구간이거나(앞·중간, A-014부터 빈 편집 대신) 트랙이 이미 끝남(끝 빈틈) — 사용자 원본이 아님
         let at = try await plan.composition.loadTracks(withMediaType: .audio).first
         let segs = try await at?.load(.segments) ?? []
         for g in t.gaps {
             let mid = plan.settings.time((g.lowerBound + g.upperBound) / 2)
-            XCTAssertTrue(segs.first { $0.timeMapping.target.containsTime(mid) }?.isEmpty ?? true, "audio not empty in gap \(g)")
+            let seg = segs.first { $0.timeMapping.target.containsTime(mid) } as? AVCompositionTrackSegment
+            XCTAssertTrue(seg == nil || seg!.isEmpty || seg!.sourceURL?.lastPathComponent.hasPrefix(SilenceSource.namePrefix) == true, "audio not silence in gap \(g)")
         }
         let dest = out.appendingPathComponent("gaps.mp4")
         let r = await ExportService.export(plan, to: .fromSavePanel(dest), sources: [ta, tb]) { _ in }
