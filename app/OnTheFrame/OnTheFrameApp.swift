@@ -115,6 +115,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await ProjectSelfTest.run(folder: folder) }
             return
         }
+        if args.contains("-OTFOpenFlowTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await OpenFlowSelfTest.run(folder: folder) }
+            return
+        }
         if args.contains("-OTFOpenImportTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await OpenImportSelfTest.run(folder: folder) }
             return

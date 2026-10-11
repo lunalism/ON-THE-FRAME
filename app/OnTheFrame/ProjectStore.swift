@@ -97,6 +97,8 @@ final class ProjectStore {
     @ObservationIgnored var importPanelOverrideForTest: (() -> [URL]?)?
     /// 자체 검사 전용: 원본 확인 전에 기다릴 시간(취소 검사가 빨리 끝나는 확인 사이에 끼어들 수 있게. 일반 실행에서는 0)
     @ObservationIgnored var probeDelayForTest: UInt64 = 0
+    /// 자체 검사 전용: 실제 저장·열기 패널을 runModal 하기 직전에 넘긴다(패널이 실제로 보이는지 관찰·조작, OpenFlowSelfTest)
+    @ObservationIgnored var panelWillRunForTest: ((NSSavePanel) -> Void)?
     #endif
     /// 진단 기록(2026-10-11): 가져오기·열기 단계와 걸린 시간. 경로·파일 이름·북마크는 남기지 않는다(파일 번호만).
     static let trace = Logger(subsystem: "dev.ontheframe.app", category: "trace")
@@ -1069,13 +1071,60 @@ final class ProjectStore {
                                onButton: { [weak self] i in
             guard let self else { return }
             self.closePromptPending = false
-            switch i {
-            case 0: self.saveProject { ok in if ok { go() } else { cancel() } }   // 저장 실패·취소면 진행하지 않음
-            case 2: go()
-            default: cancel()
-            }
+            // 확인 시트가 완전히 사라진 뒤에 잇는다(2026-10-11 소유자 보고 재현: 시트 끝 처리 안에서 바로 저장·열기 패널을 runModal 하면
+            // 패널이 보이지 않은 채 곧바로(약 0.04 s) OK가 아닌 값으로 끝나, "저장"은 저장 취소로, "저장 안 함"은 열기 취소로 처리됐다)
+            self.afterSheetSettles({
+                switch i {
+                case 0: self.saveProject { ok in if ok { go() } else { cancel() } }   // 저장 실패·취소면 진행하지 않음
+                case 2: go()
+                default: cancel()
+                }
+            }, abort: {
+                // 앞의 시트·패널이 사라지지 않아 다음 패널을 띄울 수 없다: 고른 동작(저장·저장 안 함)을 하지 않고 취소와 같게 멈춘다
+                cancel()
+                self.statusMessage = "확인 창이 닫히지 않아 작업을 멈췄습니다. 현재 프로젝트와 변경 사항은 그대로입니다."
+                self.presentAlert(AlertInfo(title: "작업을 계속할 수 없습니다",
+                                            message: "앞의 확인 창이나 패널이 아직 닫히지 않아, 고른 동작(저장·저장 안 함)을 하지 않고 멈췄습니다.\n\n현재 프로젝트와 변경 사항은 그대로입니다. 열려 있는 창을 닫은 뒤 다시 시도하세요."))
+            })
         }))
     }
+    /// 확인 시트에서 고른 동작을 잇는다(2026-10-11). 편집기 창에 붙은 시트·보이는 시트 창·앱 모달이 모두 없어진 것을 확인한 뒤에만 f를 부른다
+    /// (시트 처리기 안이나 다른 시트·패널이 떠 있는 동안 저장·열기 패널을 runModal 하면 패널이 보이지 않고 곧바로 끝났다).
+    /// 사라짐은 처음엔 다음 주 대기열 차례에, 그 뒤 20 ms마다 확인한다. promptSettleTimeout 안에 사라지지 않으면 f를 부르지 않고 abort를 부른다
+    /// (부르는 쪽이 취소와 같게 멈추고 상태를 푼다). f·abort는 합쳐 한 번만 불린다.
+    private func afterSheetSettles(_ f: @escaping @MainActor () -> Void, abort: @escaping @MainActor () -> Void) {
+        let deadline = Date().addingTimeInterval(Self.promptSettleTimeout)
+        var finished = false, checks = 0
+        func busy() -> Bool {
+            #if DEBUG
+            if promptSettleBlockedForTest { return true }
+            #endif
+            return editorWindow?.attachedSheet != nil || NSApp.modalWindow != nil || NSApp.windows.contains { $0.isSheet && $0.isVisible }
+        }
+        func check() {
+            guard !finished else { return }
+            checks += 1
+            if !busy() {
+                finished = true
+                Self.trace.info("prompt continuation after sheet dismissed (checks \(checks, privacy: .public))")
+                f()
+            } else if Date() >= deadline {
+                finished = true
+                Self.trace.error("prompt continuation aborted: sheet or modal still present after \(Self.promptSettleTimeout, privacy: .public)s")
+                abort()
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { MainActor.assumeIsolated { check() } }
+            }
+        }
+        DispatchQueue.main.async { MainActor.assumeIsolated { check() } }
+    }
+    #if DEBUG
+    static var promptSettleTimeout: TimeInterval = 2
+    /// 자체 검사 전용: 시트·패널이 사라지지 않는 상황을 흉내 낸다(시간 초과 → 중단 경로)
+    @ObservationIgnored var promptSettleBlockedForTest = false
+    #else
+    static let promptSettleTimeout: TimeInterval = 2
+    #endif
     /// 진행 중인 내보내기가 있으면 취소하고 정리(임시 디렉터리 삭제)가 끝난 뒤 proceed
     /// 진행 중인 가져오기도 취소하고(늦은 결과는 버림) 검사가 멈춘 뒤 proceed.
     private func finishDiscard(_ proceed: @escaping @MainActor () -> Void) {
@@ -1297,7 +1346,7 @@ extension ProjectStore {
         #if DEBUG
         if let injected = savePanelResultForTest {   // 자체 검사: 패널이 "확인 + 이 위치"를 돌려준 것과 같게(패널 뒤 경로 회귀)
             savePanelResultForTest = nil; resp = .OK; chosen = injected
-        } else { resp = p.runModal(); chosen = p.url }
+        } else { panelWillRunForTest?(p); resp = p.runModal(); chosen = p.url }
         autoConfirmTimer?.invalidate(); autoConfirmTimer = nil
         #else
         resp = p.runModal(); chosen = p.url
@@ -1404,13 +1453,20 @@ extension ProjectStore {
                     p.allowedContentTypes = [Self.projectType]
                     p.allowsMultipleSelection = false
                     p.message = "열 프로젝트(.ontheframe)를 선택하세요."
+                    #if DEBUG
+                    self.panelWillRunForTest?(p)
+                    #endif
                     let r = p.runModal()
                     Self.trace.info("open panel response=\(r.rawValue, privacy: .public)")
-                    guard r == .OK, let u = p.url else { return }
-                    target = u
+                    // 취소·실패면 target이 nil로 남아 아래에서 열기 요청을 끝낸다. 2026-10-11 결함: 여기서 바로 return해
+                    // openRequested가 남았고, 그 뒤 모든 열기·새 프로젝트가 "프로젝트를 바꿀 수 없습니다"로 거부되고 가져오기·내보내기가 대기열에 멈췄다.
+                    if r == .OK, let u = p.url { target = u }
                 }
             }
-            guard let target else { self.endOpenRequest(); return }
+            guard let target else {
+                Self.trace.info("open ended without a file (panel cancelled)")
+                self.endOpenRequest(); return
+            }
             self.openTask = Task { @MainActor in
                 let ok = await self.openProject(at: target)
                 if scoped, !ok { target.stopAccessingSecurityScopedResource() }

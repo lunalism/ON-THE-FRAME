@@ -168,7 +168,8 @@ enum OpenImportSelfTest {
         // 8. 2026-10-11 리뷰: Finder에서 프로젝트와 미디어를 함께 연 경로(열기 요청 직후 가져오기). 가져오기는 열기가 끝난 뒤 새 프로젝트에 들어가야 한다.
         _ = await menu("새 프로젝트")
         if s.alerts.isShowing { s.alerts.pressButton(2); _ = await LaneSelfTest.waitUntil(3) { !s.alerts.isShowing } }
-        _ = await LaneSelfTest.waitUntil(3) { s.projectURL == nil }
+        // "저장 안 함" 뒤 새 프로젝트는 확인 시트가 사라진 다음 차례에 만든다(2026-10-11 열기·저장 흐름 수정). 실제로 비워질 때까지 기다린다.
+        _ = await LaneSelfTest.waitUntil(3) { s.projectURL == nil && s.assets.isEmpty && !s.isDirty }
         let pv5 = folder.appendingPathComponent("p-v5.ontheframe")
         s.probeDelayForTest = 300_000_000
         s.requestOpenProject(pv5)
