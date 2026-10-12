@@ -65,10 +65,10 @@ struct ContentView: View {
                 .help("편집 도구: 선택 (V) · 자르기 (C)")
             }
             ToolbarItemGroup(placement: .primaryAction) {
-                Button { store.presentImportPanel() } label: { Label("가져오기", systemImage: "square.and.arrow.down") }
+                Button { store.presentImportPanel() } label: { Label("가져오기", systemImage: "square.and.arrow.down") }.disabled(!store.fileCommandsAvailable)
                     .help("영상·소리 파일 가져오기(⌘I)")
                 Button { store.presentExportPanel() } label: { Label("내보내기", systemImage: "square.and.arrow.up") }
-                    .help("MP4로 내보내기(⌘E)").disabled(!store.canExport)
+                    .help("MP4로 내보내기(⌘E)").disabled(!store.canExport || !store.fileCommandsAvailable)
             }
         }
         .navigationTitle(store.windowTitle)
@@ -191,7 +191,7 @@ struct MediaListView: View {
                                 Text(store.missingMedia[r.id] ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(2)
                             }
                             Spacer()
-                            Button("미디어 재연결…") { store.relinkMedia(r.id) }.controlSize(.small)
+                            Button("미디어 재연결…") { store.relinkMedia(r.id) }.controlSize(.small).disabled(!store.fileCommandsAvailable)
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel("찾을 수 없는 원본 \(r.name)")
@@ -206,7 +206,7 @@ struct MediaListView: View {
                     Spacer()
                     Image(systemName: "film.stack").font(.system(size: 30)).foregroundStyle(.tertiary)
                     Text("가져온 미디어가 없습니다").foregroundStyle(.secondary)
-                    Button("영상·소리 가져오기…") { store.presentImportPanel() }
+                    Button("영상·소리 가져오기…") { store.presentImportPanel() }.disabled(!store.fileCommandsAvailable)
                     Text("파일을 여기로 끌어 놓아도 됩니다.").font(.caption).foregroundStyle(.tertiary)
                     Spacer()
                 }.frame(maxWidth: .infinity)

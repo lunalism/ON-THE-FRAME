@@ -17,22 +17,24 @@ struct OnTheFrameApp: App {
         .restorationBehavior(.disabled)
         .commands {
             // 파일(A-013): 프로젝트 하나를 편집기 창 하나에서. 새로 만들기·열기·최근·Finder 열기는 같은 저장하지 않은 변경 처리를 거친다.
+            // 알림·시트·패널이 떠 있는 동안 파일 명령은 꺼진다(CP-03, fileCommandsAvailable). 저장소 함수도 같은 확인으로 막는다.
             CommandGroup(replacing: .newItem) {
-                Button("새 프로젝트") { store.requestNewProject() }.keyboardShortcut("n")
-                Button("프로젝트 열기…") { store.requestOpenProject(nil) }.keyboardShortcut("o")
+                Button("새 프로젝트") { store.requestNewProject() }.keyboardShortcut("n").disabled(!store.fileCommandsAvailable)
+                Button("프로젝트 열기…") { store.requestOpenProject(nil) }.keyboardShortcut("o").disabled(!store.fileCommandsAvailable)
                 Menu("최근 프로젝트") {
-                    ForEach(store.recentProjects) { r in Button(r.name) { store.openRecent(r) } }
+                    ForEach(store.recentProjects) { r in Button(r.name) { store.openRecent(r) }.disabled(!store.fileCommandsAvailable) }
                     if !store.recentProjects.isEmpty { Divider() }
                     Button("목록 지우기") { store.clearRecents() }.disabled(store.recentProjects.isEmpty)
                 }
                 Divider()
-                Button("가져오기…") { store.presentImportPanel() }.keyboardShortcut("i")
-                Button("내보내기…") { store.presentExportPanel() }.keyboardShortcut("e").disabled(!store.canExport && store.exportBlockReason == nil)
-                Button("미디어 재연결…") { store.relinkFirstMissing() }.disabled(store.missingMedia.isEmpty)
+                Button("가져오기…") { store.presentImportPanel() }.keyboardShortcut("i").disabled(!store.fileCommandsAvailable)
+                Button("내보내기…") { store.presentExportPanel() }.keyboardShortcut("e")
+                    .disabled(!store.fileCommandsAvailable || (!store.canExport && store.exportBlockReason == nil))
+                Button("미디어 재연결…") { store.relinkFirstMissing() }.disabled(!store.fileCommandsAvailable || store.missingMedia.isEmpty)
             }
             CommandGroup(replacing: .saveItem) {
-                Button("프로젝트 저장") { store.saveProject() }.keyboardShortcut("s")
-                Button("다른 이름으로 저장…") { store.saveProject(saveAs: true) }.keyboardShortcut("s", modifiers: [.command, .shift])
+                Button("프로젝트 저장") { store.saveProject() }.keyboardShortcut("s").disabled(!store.fileCommandsAvailable)
+                Button("다른 이름으로 저장…") { store.saveProject(saveAs: true) }.keyboardShortcut("s", modifiers: [.command, .shift]).disabled(!store.fileCommandsAvailable)
             }
             // 단축키는 흔히 쓰는 기본값(D-019·D-027, 완전 호환을 주장하지 않음). 키 입력은 KeyRouting이 실제 상태로 판단해 처리하고,
             // 메뉴는 표시·마우스 선택용이다(SwiftUI 메뉴 항목 상태는 메뉴를 열 때만 갱신되어 키 등가물로는 믿을 수 없었다).
@@ -137,6 +139,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if args.contains("-OTFGestureGuardTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await GestureGuardSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFFileGuardTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await FileGuardSelfTest.run(folder: folder) }
             return
         }
         if args.contains("-OTFToolTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {

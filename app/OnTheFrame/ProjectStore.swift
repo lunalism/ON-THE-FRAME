@@ -21,6 +21,9 @@ final class ProjectStore {
     /// 현재 프로젝트 파일 위치(처음 저장 전에는 nil)
     var projectURL: URL?
     var projectID = UUID()
+    /// 프로젝트 회차: 프로젝트를 바꿀 때마다(새 프로젝트·열기, 같은 파일을 다시 열어도) 1 는다. 저장된 프로젝트 ID는 같은 프로젝트를 다시 열면 같아서
+    /// 확인 요청을 묶는 데 쓰기에 모자라다(CP-02, 2026-10-12).
+    @ObservationIgnored private(set) var projectSession = 0
     /// 마지막으로 저장하거나 연 상태. 지금 상태와 다르면 저장하지 않은 변경이 있다(실행 취소로 돌아오면 사라짐).
     var savedTimeline = Timeline()
     var isDirty: Bool { history.timeline != savedTimeline }
@@ -65,6 +68,41 @@ final class ProjectStore {
     /// 표시 중인 알림(관찰·검사용 사본). 실제 표시는 AlertPresenter(AppKit 시트)가 맡고,
     /// 표시 중인 알림은 바꾸거나 코드로 닫지 않는다(2026-10-10 충돌 대응, app/README.md 충돌 기록).
     private(set) var alert: AlertInfo?
+
+    // MARK: 파일 명령 보호(CP-03, 2026-10-12)
+
+    /// 지금 돌고 있는 저장·열기·가져오기·내보내기·재연결 패널 수(runModal 동안 1 이상). 메뉴 사용 가능 상태에 쓴다.
+    private(set) var panelsRunning = 0
+    /// 앱의 저장·열기 패널을 앱 모달로 돌린다(돌고 있는 동안 파일 명령을 받지 않는다)
+    func runPanel(_ p: NSSavePanel) -> NSApplication.ModalResponse {
+        panelsRunning += 1
+        defer { panelsRunning -= 1 }
+        return p.runModal()
+    }
+    #if DEBUG
+    /// 자체 검사 전용: 실제 패널 대신 검사용 창을 같은 방식(패널 수 + 앱 모달)으로 돌린다
+    func runModalLikePanelForTest(_ w: NSWindow) {
+        panelsRunning += 1
+        defer { panelsRunning -= 1 }
+        NSApp.runModal(for: w)
+    }
+    #endif
+    /// 사용자가 시작하는 파일 명령(새 프로젝트·열기·최근 프로젝트·가져오기·내보내기·저장·다른 이름으로 저장·재연결)을 지금 받을 수 있는가.
+    /// 알림(확인·오류·완료 시트)이 떠 있거나 대기 중, 편집기 창에 시트가 붙어 있음, 앱 모달(저장·열기 패널 등)이 돌고 있으면 받지 않는다.
+    /// 그 상태에서 저장·열기 패널을 runModal 하면 패널이 보이지 않고 곧바로 끝나거나(§24), 확인이 떠 있는 동안 프로젝트가 바뀌었다(CP-02의 한 계기).
+    /// 창 초점만 잃은 것(다른 앱·다른 창이 앞에 있음)은 막지 않는다. 이어지는 흐름(저장 → 새 프로젝트·열기, 열기 확인 뒤의 열기 패널)은
+    /// 이 확인을 거치지 않는 내부 경로라 막히지 않는다.
+    var fileCommandsAvailable: Bool {
+        alert == nil && panelsRunning == 0 && !alerts.isShowing && editorWindow?.attachedSheet == nil && NSApp.modalWindow == nil
+    }
+    /// 파일 명령 진입점에서 부른다. 받을 수 없으면 경고음과 상태 문구를 내고 true(아무것도 하지 않음).
+    func fileCommandBlocked() -> Bool {
+        guard !fileCommandsAvailable else { return false }
+        NSSound.beep()
+        statusMessage = "확인 창이나 패널이 열려 있는 동안에는 파일 명령을 쓸 수 없습니다. 닫은 뒤 다시 시도하세요."
+        Self.trace.info("file command blocked (sheet/alert/modal)")
+        return true
+    }
     let alerts = AlertPresenter()
     /// 가져오기 진행(표시용). nil이면 진행 중인 가져오기 묶음이 없다.
     /// 가져오기 진행(2026-10-11: 현재 단계·시작 시각 추가 — 첫 파일 확인이 길어도 멈춘 것처럼 보이지 않게). 단계는 진행률이 아니다.
@@ -95,6 +133,8 @@ final class ProjectStore {
     /// 자체 검사 전용: 열기·가져오기 패널 대신 고른 파일(메뉴 동작 → 요청 → 확인 → 열기 경로는 그대로)
     @ObservationIgnored var openPanelOverrideForTest: (() -> URL?)?
     @ObservationIgnored var importPanelOverrideForTest: (() -> [URL]?)?
+    /// 자체 검사 전용: 내보내기 저장 패널 대신 부른다(패널을 띄우려 했는지만 기록, 내보내기는 시작하지 않음)
+    @ObservationIgnored var exportPanelOverrideForTest: (() -> Void)?
     /// 자체 검사 전용: 원본 확인 전에 기다릴 시간(취소 검사가 빨리 끝나는 확인 사이에 끼어들 수 있게. 일반 실행에서는 0)
     @ObservationIgnored var probeDelayForTest: UInt64 = 0
     /// 자체 검사 전용: 실제 저장·열기 패널을 runModal 하기 직전에 넘긴다(패널이 실제로 보이는지 관찰·조작, OpenFlowSelfTest)
@@ -424,6 +464,7 @@ final class ProjectStore {
     private var shownAlerts: [AlertInfo] = []
 
     func presentImportPanel() {
+        guard !fileCommandBlocked() else { return }
         let p = NSOpenPanel()
         p.allowsMultipleSelection = true
         p.canChooseDirectories = false
@@ -432,7 +473,7 @@ final class ProjectStore {
         #if DEBUG
         if let o = importPanelOverrideForTest { if let urls = o() { importFiles(urls) }; return }
         #endif
-        if p.runModal() == .OK { importFiles(p.urls) }
+        if runPanel(p) == .OK { importFiles(p.urls) }
     }
 
     // MARK: 편집(실행 취소 대상)
@@ -669,14 +710,31 @@ final class ProjectStore {
     func requestRemoveLane(_ id: UUID) {
         guard let lane = timeline.laneInfo(id), gestureBase == nil else { return }
         guard timeline.lanes(lane.kind).count > 1 else { statusMessage = EditError.lastLane.description; return }
-        let n = timeline.clips(inLane: id).count
+        let inLane = timeline.clips(inLane: id)
+        let n = inLane.count
         guard n > 0 else { commitLane({ try $0.removingLane(id) }); return }
+        let request = LaneRemovalRequest(session: projectSession, lane: id, kind: lane.kind, clipIDs: Set(inLane.map(\.id)))
         let linked = timeline.clips(inLane: id).filter { $0.link != nil }.count
         var msg = "‘\(lane.name)’ 레인과 그 안의 클립 \(n)개를 지웁니다."
         if linked > 0 { msg += " 다른 레인에 있는 연결된 짝 \(linked)개는 지우지 않고 연결만 해제합니다." }
         msg += "\n\n실행 취소(⌘Z)로 되돌릴 수 있습니다. 원본 파일은 그대로입니다."
         presentAlert(AlertInfo(title: "레인을 삭제할까요?", message: msg, buttons: ["레인 삭제", "취소"], destructiveIndex: 0, cancelIndex: 1,
-                               onButton: { [weak self] i in if i == 0 { self?.commitLane({ try $0.removingLane(id) }) } }))
+                               onButton: { [weak self] i in if i == 0 { self?.confirmRemoveLane(request) } }))
+    }
+    /// 레인 삭제 확인이 묶인 대상(CP-02): 확인을 띄운 프로젝트 회차, 레인, 그 종류, 확인 문구에 센 클립들
+    struct LaneRemovalRequest: Equatable { let session: Int; let lane: UUID; let kind: LaneKind; let clipIDs: Set<UUID> }
+    /// "레인 삭제"를 누른 때: 확인을 띄운 뒤 프로젝트가 바뀌었거나(같은 파일을 다시 연 경우 포함), 레인이 없어졌거나, 그 안의 클립이 확인 문구와
+    /// 달라졌거나, 그 종류의 마지막 레인이 되었으면 아무것도 지우지 않는다(기록·저장 상태 그대로, 상태 문구만). 삭제했으면 true.
+    @discardableResult
+    func confirmRemoveLane(_ r: LaneRemovalRequest) -> Bool {
+        guard r.session == projectSession, gestureBase == nil, let lane = timeline.laneInfo(r.lane), lane.kind == r.kind,
+              Set(timeline.clips(inLane: r.lane).map(\.id)) == r.clipIDs, timeline.lanes(r.kind).count > 1 else {
+            statusMessage = "확인한 뒤 프로젝트나 레인이 바뀌어 레인을 지우지 않았습니다."
+            Self.trace.info("lane removal confirmation ignored (stale) sameSession=\(r.session == self.projectSession, privacy: .public)")
+            return false
+        }
+        commitLane({ try $0.removingLane(r.lane) })
+        return true
     }
     func setLaneMuted(_ id: UUID, _ muted: Bool) { commitLane({ try $0.settingLaneAudio(id, muted: muted) }) }
     /// 음량(0–100%). 슬라이더는 놓을 때 한 번 부른다(한 단계).
@@ -1120,6 +1178,7 @@ final class ProjectStore {
     // MARK: 내보내기
 
     func presentExportPanel() {
+        guard !fileCommandBlocked() else { return }
         if let r = exportBlockReason { presentAlert(AlertInfo(title: "내보낼 수 없습니다", message: r)); return }
         guard canExport else { return }
         pauseForEdit()
@@ -1128,7 +1187,10 @@ final class ProjectStore {
         p.nameFieldStringValue = projectName + ".mp4"
         p.canCreateDirectories = true
         p.message = "내보낼 위치를 고르세요(1920×1080, 30 fps, H.264/AAC MP4)."
-        guard p.runModal() == .OK, let url = p.url else { return }
+        #if DEBUG
+        if let o = exportPanelOverrideForTest { o(); return }   // 자체 검사: 실제 저장 패널을 띄우지 않고 "패널을 띄우려 함"만 기록
+        #endif
+        guard runPanel(p) == .OK, let url = p.url else { return }
         // 저장 패널이 기존 파일 대치를 확인했으면 그 시점의 파일 식별을 기록한다.
         startExport(ExportDestination.fromSavePanel(url))
     }
@@ -1452,7 +1514,7 @@ extension ProjectStore {
     // MARK: 새 프로젝트
 
     func requestNewProject() {
-        guard !projectReplaceBlocked() else { return }
+        guard !fileCommandBlocked(), !projectReplaceBlocked() else { return }
         requestDiscard(.newProject, proceed: { [weak self] in self?.resetProject() }, cancel: {})
     }
     /// 빈 프로젝트로(창 배치·최근 목록은 그대로)
@@ -1467,6 +1529,7 @@ extension ProjectStore {
         history = EditHistory(t)
         savedTimeline = t
         projectURL = url; projectID = id
+        projectSession += 1   // 같은 프로젝트를 다시 열어도 새 회차(그 전 회차에 묶인 확인은 동작하지 않음, CP-02)
         clipClipboard = nil   // 복사한 클립은 그 프로젝트에만(다른 프로젝트 미디어·권한을 다루지 않는다)
         assetCache = cache; bookmarks = bm; missingMedia = missing
         selection = nil; linkCandidate = nil; selectedLane = nil; statusMessage = nil
@@ -1479,7 +1542,10 @@ extension ProjectStore {
     /// 프로젝트 저장. 위치가 없거나 saveAs면 저장 패널. done(true)는 저장에 성공했을 때.
     /// 주의(2026-10-10 저장 실패 원인): `done?(writeProject(to: u))`처럼 쓰면 done이 nil일 때(메뉴·⌘S) Swift 선택적 호출이
     /// 인자 계산까지 건너뛰어 writeProject가 불리지 않는다. 결과를 먼저 계산한 뒤 done에 넘긴다.
+    /// 사용자가 시작한 저장(메뉴·⌘S·⇧⌘S, done 없음)은 시트·알림·패널 중이면 하지 않는다(CP-03). done이 있는 호출은 확인 시트가 사라진 뒤 잇는
+    /// 내부 흐름(저장 → 새 프로젝트·열기·닫기·종료)이라 막지 않는다.
     func saveProject(saveAs: Bool = false, done: (@MainActor (Bool) -> Void)? = nil) {
+        if done == nil, fileCommandBlocked() { return }
         SaveTrace.note("saveProject saveAs=\(saveAs) hasURL=\(projectURL != nil) dirty=\(isDirty)")
         if let u = projectURL, !saveAs {
             let ok = writeProject(to: u)
@@ -1513,10 +1579,10 @@ extension ProjectStore {
         #if DEBUG
         if let injected = savePanelResultForTest {   // 자체 검사: 패널이 "확인 + 이 위치"를 돌려준 것과 같게(패널 뒤 경로 회귀)
             savePanelResultForTest = nil; resp = .OK; chosen = injected
-        } else { panelWillRunForTest?(p); resp = p.runModal(); chosen = p.url }
+        } else { panelWillRunForTest?(p); resp = runPanel(p); chosen = p.url }
         autoConfirmTimer?.invalidate(); autoConfirmTimer = nil
         #else
-        resp = p.runModal(); chosen = p.url
+        resp = runPanel(p); chosen = p.url
         #endif
         SaveTrace.note("panel response=\(resp.rawValue) url=\(chosen?.path ?? "nil")")
         guard resp == .OK else {
@@ -1605,7 +1671,7 @@ extension ProjectStore {
 
     /// 프로젝트 열기(메뉴·최근·Finder). url이 nil이면 열기 패널. 가져오기·내보내기 중이면 거절, 저장하지 않은 변경은 확인.
     func requestOpenProject(_ url: URL?, scoped: Bool = false) {
-        guard !projectReplaceBlocked() else { if scoped { url?.stopAccessingSecurityScopedResource() }; return }
+        guard !fileCommandBlocked(), !projectReplaceBlocked() else { if scoped { url?.stopAccessingSecurityScopedResource() }; return }
         Self.trace.info("open requested fromRecent=\(url != nil, privacy: .public)")
         openRequested = true
         requestDiscard(.openProject, proceed: { [weak self] in
@@ -1623,7 +1689,7 @@ extension ProjectStore {
                     #if DEBUG
                     self.panelWillRunForTest?(p)
                     #endif
-                    let r = p.runModal()
+                    let r = self.runPanel(p)
                     Self.trace.info("open panel response=\(r.rawValue, privacy: .public)")
                     // 취소·실패면 target이 nil로 남아 아래에서 열기 요청을 끝낸다. 2026-10-11 결함: 여기서 바로 return해
                     // openRequested가 남았고, 그 뒤 모든 열기·새 프로젝트가 "프로젝트를 바꿀 수 없습니다"로 거부되고 가져오기·내보내기가 대기열에 멈췄다.
@@ -1782,6 +1848,7 @@ extension ProjectStore {
     /// 목록만 지운다(프로젝트 파일은 그대로)
     func clearRecents() { recentProjects = []; saveRecents() }
     func openRecent(_ r: RecentProject) {
+        guard !fileCommandBlocked() else { return }
         var stale = false
         if let b = r.bookmark, let u = try? URL(resolvingBookmarkData: b, options: [.withSecurityScope], relativeTo: nil, bookmarkDataIsStale: &stale),
            u.startAccessingSecurityScopedResource() {
@@ -1802,13 +1869,13 @@ extension ProjectStore {
 
     /// 찾을 수 없는 원본 하나를 고른 파일로 다시 연결한다(실행 취소 한 단계). 모든 원본 구간이 새 파일 안에 있어야 한다(클립을 줄이지 않음).
     func relinkMedia(_ id: UUID) {
-        guard let r = timeline.media.first(where: { $0.id == id }) else { return }
+        guard !fileCommandBlocked(), let r = timeline.media.first(where: { $0.id == id }) else { return }
         let p = NSOpenPanel()
         p.allowedContentTypes = [.movie, .audio]
         p.allowsMultipleSelection = false
         p.message = "‘\(r.name)’ 대신 쓸 파일을 고르세요(같은 원본, 길이 \(store_tc(r.frameCount)) 이상)."
         p.directoryURL = URL(fileURLWithPath: r.path).deletingLastPathComponent()
-        guard p.runModal() == .OK, let u = p.url else { return }
+        guard runPanel(p) == .OK, let u = p.url else { return }
         Task { @MainActor in await self.relinkMedia(id, to: u) }
     }
     private func store_tc(_ f: Int) -> String { settings.timecode(f) }
