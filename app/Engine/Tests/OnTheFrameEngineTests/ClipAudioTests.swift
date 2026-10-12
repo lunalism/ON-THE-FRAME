@@ -253,9 +253,176 @@ final class ClipAudioTests: XCTestCase {
         // 저장·다시 열기 뒤 같은 소리(같은 오디오 믹스 경사)
         let (back, _) = try ProjectFile.decode(try ProjectFile.encode(tv, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil))
         let bplan = try await CompositionPlanner.plan(back, media: [s.id: s, plate.id: plate])
+        // 저장·다시 열기에 관계된 값은 정확히 같아야 한다(타임라인, 레인별 음량 경사·소리 트랙 나눔, 계획의 트랙·구간·믹스 경사).
+        XCTAssertEqual(back, tv, "reopened timeline identical")
+        for lane in tv.lanes where lane.kind == .audio {
+            let bl = back.laneInfo(lane.id)
+            XCTAssertEqual(bl, lane, "reopened lane \(lane.name)")
+            XCTAssertEqual(bl.map { CompositionPlanner.volumeRamps(back.clips(inLane: lane.id), lane: $0) },
+                           CompositionPlanner.volumeRamps(tv.clips(inLane: lane.id), lane: lane), "reopened ramps \(lane.name)")
+            XCTAssertEqual(bl.map { CompositionPlanner.volumeTracks(back.clips(inLane: lane.id), lane: $0) },
+                           CompositionPlanner.volumeTracks(tv.clips(inLane: lane.id), lane: lane), "reopened audio tracks \(lane.name)")
+        }
+        let vsig = try await Self.planSignature(vplan), bsig = try await Self.planSignature(bplan)
+        XCTAssertFalse(vsig.isEmpty)
+        XCTAssertEqual(bsig, vsig, "reopened plan identical")
+        // 소리: 따로 읽은 AVFoundation 믹스 출력은 같은 계획에서도 마지막 자리(최대 2⁻²⁶)가 갈린다(app/README §33, P-012 채택).
+        // 비트 단위 대신 두 채널 모두 표본 수 같음·유한값·표본마다 차이 ≤ 1×10⁻⁶.
         let bp = try await AudioMixExportTests.decodePreview(bplan)
         let vp = try await AudioMixExportTests.decodePreview(vplan)
-        XCTAssertEqual(bp.l, vp.l, "reopened mix identical")
+        if let m = Self.outputMismatch(bp, vp) { XCTFail("reopened mix: \(m)") }
+    }
+
+    /// 다시 열기 비교의 소리 허용 오차(P-012, 2026-10-12): 관찰한 최대 차이 1.49×10⁻⁸의 약 67배, 이 테스트의 가장 작은 회귀(한 표본 어긋남 ≈ 0.02,
+    /// 음량 1% ≈ 1.6×10⁻³, 페이드 한 프레임 ≈ 0.005)보다 수천 배 작다. 다른 소리 단언에는 쓰지 않는다.
+    static let reopenTolerance: Float = 1e-6
+    /// 두 출력의 표본 비교: 채널마다 표본 수가 같고, 유한값이고, 표본마다 |a − b| ≤ tol. 맞으면 nil, 아니면 채널·첫 위치·최대 오차를 적은 설명.
+    static func outputMismatch(_ a: AudioMixExportTests.Stereo, _ b: AudioMixExportTests.Stereo, tolerance tol: Float = reopenTolerance) -> String? {
+        var problems: [String] = []
+        for (name, x, y) in [("L", a.l, b.l), ("R", a.r, b.r)] {
+            guard x.count == y.count else { problems.append("\(name) sample count \(x.count) vs \(y.count)"); continue }
+            if let i = x.indices.first(where: { !x[$0].isFinite || !y[$0].isFinite }) { problems.append("\(name) non-finite at \(i): \(x[i]) vs \(y[i])"); continue }
+            var worst: Float = 0, worstAt = -1, firstBad = -1, bad = 0
+            for i in x.indices {
+                let e = abs(x[i] - y[i])
+                if e > worst { worst = e; worstAt = i }
+                if e > tol { bad += 1; if firstBad < 0 { firstBad = i } }
+            }
+            if bad > 0 { problems.append("\(name) \(bad) samples over \(tol), first at \(firstBad), max error \(worst) at \(worstAt)") }
+        }
+        return problems.isEmpty ? nil : problems.joined(separator: "; ")
+    }
+    /// 계획의 소리 구성(저장·다시 열기에 관계된 값만): 소리 트랙 차례마다 구간(타임라인 시각·길이·원본 시각, 원본 파일 이름, 빈 구간)과
+    /// 그 트랙의 믹스 음량 경사(시각·길이·시작·끝 음량의 비트). 트랙 ID 같은 프레임워크 값은 차례로 바꿔 쓴다.
+    static func planSignature(_ p: PlannedComposition) async throws -> [String] {
+        func t(_ x: CMTime) -> String { "\(x.value)/\(x.timescale)" }
+        let tracks = try await p.composition.loadTracks(withMediaType: .audio)
+        var out: [String] = []
+        for (k, tr) in tracks.enumerated() {
+            for sg in try await tr.load(.segments) {
+                let m = sg.timeMapping
+                out.append("track\(k) \(sg.isEmpty ? "empty" : ((sg as? AVCompositionTrackSegment)?.sourceURL?.lastPathComponent ?? "?")) at \(t(m.target.start))+\(t(m.target.duration)) from \(t(m.source.start))")
+            }
+            guard let ip = p.audioMix?.inputParameters.first(where: { $0.trackID == tr.trackID }) else { out.append("track\(k) no mix"); continue }
+            var at = CMTime.zero
+            let end = p.composition.duration
+            while at < end {
+                var a: Float = 0, b: Float = 0, r = CMTimeRange.invalid
+                if ip.getVolumeRamp(for: at, startVolume: &a, endVolume: &b, timeRange: &r), r.isValid, r.end > at {
+                    out.append("track\(k) ramp \(t(r.start))+\(t(r.duration)) \(a.bitPattern)->\(b.bitPattern)")
+                    at = r.end
+                } else { at = at + CMTime(value: 1, timescale: 30) }
+            }
+        }
+        return out
+    }
+
+    /// 다시 열기 비교(위 테스트)가 실제 회귀를 놓치지 않는지(P-012): 손댄 계획·출력은 모두 거부되어야 한다.
+    /// - 출력: 한 표본 어긋남, 오른쪽 채널만 1% 음량
+    /// - 타임라인: 레인 음량 1%(80 → 79), 페이드 아웃 한 프레임(15 → 16), 클립 한 프레임 늦게
+    /// - 저장 파일: 레인 음량 값을 바꾼 프로젝트 파일 → 타임라인·계획 비교가 거부
+    func testReopenComparisonRejectsMutations() async throws {
+        let s = try await steady()
+        let t = try layout(s)
+        let media = [s.id: s]
+        let plan = try await CompositionPlanner.plan(t, media: media)
+        let ref = try await AudioMixExportTests.decodePreview(plan)
+        let sig = try await Self.planSignature(plan)
+        // 같은 계획을 다시 읽은 출력은 받아들인다(허용 오차 안)
+        let again = try await AudioMixExportTests.decodePreview(plan)
+        XCTAssertNil(Self.outputMismatch(again, ref), "same plan accepted")
+        // 출력 손대기
+        var shifted = ref
+        shifted.l = [0] + ref.l.dropLast(); shifted.r = [0] + ref.r.dropLast()
+        XCTAssertNotNil(Self.outputMismatch(shifted, ref), "one-sample shift rejected")
+        var rGain = ref
+        rGain.r = ref.r.map { $0 * 0.99 }
+        let rMsg = Self.outputMismatch(rGain, ref)
+        XCTAssertTrue(rMsg?.hasPrefix("R ") == true, "right-only 1% gain rejected on R: \(rMsg ?? "nil")")
+        var shorter = ref
+        shorter.r.removeLast()
+        XCTAssertNotNil(Self.outputMismatch(shorter, ref), "sample count mismatch rejected")
+        var nan = ref
+        nan.l[1_000] = .nan
+        XCTAssertTrue(Self.outputMismatch(nan, ref)?.contains("non-finite") == true, "non-finite rejected")
+        // 타임라인 손대기: 계획 비교와 소리 비교가 모두 거부
+        let right = t.audioClips.first { $0.lane == Lane.audioID && $0.start == 45 }!.id
+        var lanes = t.lanes
+        let a1 = lanes.firstIndex { $0.id == Lane.audioID }!
+        lanes[a1].volumePercent = 79
+        let gain79 = Timeline(clips: t.clips, audioClips: t.audioClips, lanes: lanes).registering(s)
+        let fade16 = try t.settingClipAudio(clip: right, fadeOutFrames: 16)
+        let late = try t.relocating(clip: right, toStart: 46)
+        XCTAssertTrue(gain79.isValid)
+        for (name, m) in [("lane gain 1%", gain79), ("fade-out one frame", fade16), ("clip one frame later", late)] {
+            XCTAssertNotEqual(m, t, name)
+            let mp = try await CompositionPlanner.plan(m, media: media)
+            let msig = try await Self.planSignature(mp)
+            XCTAssertNotEqual(msig, sig, "\(name): plan signature differs")
+            let out = try await AudioMixExportTests.decodePreview(mp)
+            let msg = Self.outputMismatch(out, ref)
+            XCTAssertNotNil(msg, "\(name): output rejected")
+            print("mutation \(name): \(msg ?? "accepted")")
+        }
+        // 저장 파일 손대기: 레인 음량(80)을 79로 바꾼 파일을 읽으면 타임라인·계획 비교가 거부
+        let data = try ProjectFile.encode(t, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)
+        let json = String(decoding: data, as: UTF8.self)
+        let key = json.contains("\"volumePercent\":80") ? "\"volumePercent\":80" : "\"volumePercent\" : 80"
+        XCTAssertEqual(json.components(separatedBy: key).count - 1, 1, "one lane at 80%")
+        let (bad, _) = try ProjectFile.decode(Data(json.replacingOccurrences(of: key, with: key.replacingOccurrences(of: "80", with: "79")).utf8))
+        XCTAssertNotEqual(bad, t, "mutated file: timeline differs")
+        let badSig = try await Self.planSignature(try await CompositionPlanner.plan(bad, media: media))
+        XCTAssertNotEqual(badSig, sig, "mutated file: plan signature differs")
+        let (good, _) = try ProjectFile.decode(data)
+        XCTAssertEqual(good, t)
+        let goodSig = try await Self.planSignature(try await CompositionPlanner.plan(good, media: media))
+        XCTAssertEqual(goodSig, sig, "unmutated file: plan signature same")
+    }
+
+    /// 채널별 판정(P-012): 왼쪽·오른쪽 내용이 다른 생성 WAV(왼쪽 1000 Hz 0.2, 오른쪽 500 Hz 0.1)를 페이드가 있는 클립으로 실제 계획·믹스를 거쳐 읽는다.
+    /// 그 출력에서 채널을 바꾸거나 한 채널만 손대면 비교가 그 채널을 지목해 거부해야 한다. (steady fixture는 두 채널이 같아 이것을 보일 수 없다.)
+    func testReopenComparisonDetectsChannelDefects() async throws {
+        let dir = ExportEndToEndTests.root.appendingPathComponent("chan-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("lr-distinct.wav")
+        let n = 96_000
+        let fmt = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)!
+        let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(n))!
+        buf.frameLength = AVAudioFrameCount(n)
+        for i in 0..<n {
+            buf.floatChannelData![0][i] = Float(0.2 * sin(2 * Double.pi * 1_000 * Double(i) / 48_000))
+            buf.floatChannelData![1][i] = Float(0.1 * sin(2 * Double.pi * 500 * Double(i) / 48_000))
+        }
+        do {
+            let f = try AVAudioFile(forWriting: url, settings: [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 48_000, AVNumberOfChannelsKey: 2,
+                                                              AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false])
+            try f.write(from: buf)
+        }
+        let m = try await MediaProbe.inspect(url)
+        let id = UUID()
+        var t = Timeline(audioClips: [Clip(id: id, mediaID: m.id, start: 0, sourceIn: 0, length: 60, lane: Lane.audioID)]).registering(m)
+        t = try t.settingClipAudio(clip: id, fadeInFrames: 10, fadeOutFrames: 10)
+        let plan = try await CompositionPlanner.plan(t, media: [m.id: m])
+        let ref = try await AudioMixExportTests.decodePreview(plan)
+        let lAmp = MultiLaneJudge.toneAmplitude(ref.l, hz: 1_000, from: 48_000 - 480, to: 48_000 + 480)
+        let rAmp = MultiLaneJudge.toneAmplitude(ref.r, hz: 500, from: 48_000 - 480, to: 48_000 + 480)
+        XCTAssertEqual(lAmp, 0.2, accuracy: 0.01, "left carries 1000 Hz")
+        XCTAssertEqual(rAmp, 0.1, accuracy: 0.01, "right carries 500 Hz")
+        let again = try await AudioMixExportTests.decodePreview(plan)
+        XCTAssertNil(Self.outputMismatch(again, ref), "same plan accepted")
+        var swapped = ref
+        swapped.l = ref.r; swapped.r = ref.l
+        let sm = Self.outputMismatch(swapped, ref)
+        XCTAssertTrue(sm?.contains("L ") == true && sm?.contains("R ") == true, "channel swap rejected on both channels: \(sm ?? "nil")")
+        var lOnly = ref
+        lOnly.l = ref.l.map { $0 * 0.99 }
+        let lm = Self.outputMismatch(lOnly, ref)
+        XCTAssertTrue(lm?.hasPrefix("L ") == true && lm?.contains("R ") == false, "left-only 1% gain names L only: \(lm ?? "nil")")
+        var rOnly = ref
+        rOnly.r = ref.r.map { $0 * 0.99 }
+        let rm = Self.outputMismatch(rOnly, ref)
+        XCTAssertTrue(rm?.hasPrefix("R ") == true, "right-only 1% gain names R only: \(rm ?? "nil")")
     }
 
     /// 자르기 전·뒤 소리가 표본 단위로 같다(페이드 안 자르기 두 곳, 트림·옮기기 뒤 설정 유지)
