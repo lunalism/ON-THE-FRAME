@@ -24,6 +24,8 @@ final class ProjectStore {
     /// 프로젝트 회차: 프로젝트를 바꿀 때마다(새 프로젝트·열기, 같은 파일을 다시 열어도) 1 는다. 저장된 프로젝트 ID는 같은 프로젝트를 다시 열면 같아서
     /// 확인 요청을 묶는 데 쓰기에 모자라다(CP-02, 2026-10-12).
     @ObservationIgnored private(set) var projectSession = 0
+    /// 진행 중인 재연결 확인의 표식(CP-04, 아래 relinkMedia(_:to:) 설명)
+    @ObservationIgnored fileprivate var relinkOp: UUID?
     /// 마지막으로 저장하거나 연 상태. 지금 상태와 다르면 저장하지 않은 변경이 있다(실행 취소로 돌아오면 사라짐).
     var savedTimeline = Timeline()
     var isDirty: Bool { history.timeline != savedTimeline }
@@ -137,6 +139,8 @@ final class ProjectStore {
     @ObservationIgnored var exportPanelOverrideForTest: (() -> Void)?
     /// 자체 검사 전용: 원본 확인 전에 기다릴 시간(취소 검사가 빨리 끝나는 확인 사이에 끼어들 수 있게. 일반 실행에서는 0)
     @ObservationIgnored var probeDelayForTest: UInt64 = 0
+    /// 수동 확인 전용(`-OTFManualRelinkDelay <초>`로만 켬): 재연결 확인만 늦춘다(열기·가져오기는 늦추지 않음). 기본 0.
+    @ObservationIgnored var relinkDelayForTest: UInt64 = 0
     /// 자체 검사 전용: 실제 저장·열기 패널을 runModal 하기 직전에 넘긴다(패널이 실제로 보이는지 관찰·조작, OpenFlowSelfTest)
     @ObservationIgnored var panelWillRunForTest: ((NSSavePanel) -> Void)?
     #endif
@@ -1500,10 +1504,12 @@ extension ProjectStore {
     }
     /// 프로젝트를 바꿀 수 있는가(가져오기·내보내기 중이면 아니다)
     func projectReplaceBlocked() -> Bool {
-        guard openProgress != nil || openRequested || importProgress != nil || !pendingOps.isEmpty || exportPhase != .idle else { return false }
+        guard openProgress != nil || openRequested || importProgress != nil || !pendingOps.isEmpty || exportPhase != .idle || relinkInProgress else { return false }
+        // 재연결 확인 중(CP-04): 요청을 미루거나 재연결을 취소하지 않고 거절한다(확인이 끝나거나 실패하면 다시 쓸 수 있음)
         presentAlert(AlertInfo(title: "프로젝트를 바꿀 수 없습니다",
                                message: openProgress != nil || openRequested ? "다른 프로젝트를 여는 중입니다. 끝나거나 취소한 뒤 다시 시도하세요."
-                                                            : "가져오기 또는 내보내기가 진행 중입니다. 끝나거나 취소한 뒤 다시 시도하세요."))
+                                      : relinkInProgress ? Self.relinkBusyMessage
+                                      : "가져오기 또는 내보내기가 진행 중입니다. 끝나거나 취소한 뒤 다시 시도하세요."))
         return true
     }
     func stopAllScopes() {
@@ -1530,6 +1536,7 @@ extension ProjectStore {
         savedTimeline = t
         projectURL = url; projectID = id
         projectSession += 1   // 같은 프로젝트를 다시 열어도 새 회차(그 전 회차에 묶인 확인은 동작하지 않음, CP-02)
+        relinkOp = nil        // 진행 중이던 재연결은 늦은 결과가 된다(CP-04, 바쁨 표식은 새 프로젝트에 남기지 않음)
         clipClipboard = nil   // 복사한 클립은 그 프로젝트에만(다른 프로젝트 미디어·권한을 다루지 않는다)
         assetCache = cache; bookmarks = bm; missingMedia = missing
         selection = nil; linkCandidate = nil; selectedLane = nil; statusMessage = nil
@@ -1870,6 +1877,7 @@ extension ProjectStore {
     /// 찾을 수 없는 원본 하나를 고른 파일로 다시 연결한다(실행 취소 한 단계). 모든 원본 구간이 새 파일 안에 있어야 한다(클립을 줄이지 않음).
     func relinkMedia(_ id: UUID) {
         guard !fileCommandBlocked(), let r = timeline.media.first(where: { $0.id == id }) else { return }
+        guard !relinkInProgress else { NSSound.beep(); statusMessage = Self.relinkBusyMessage; return }
         let p = NSOpenPanel()
         p.allowedContentTypes = [.movie, .audio]
         p.allowsMultipleSelection = false
@@ -1879,15 +1887,41 @@ extension ProjectStore {
         Task { @MainActor in await self.relinkMedia(id, to: u) }
     }
     private func store_tc(_ f: Int) -> String { settings.timecode(f) }
+    /// 진행 중인 재연결 확인(CP-04, 2026-10-12). 확인이 도는 동안(파일 검사부터 적용·거절까지) 이 작업의 표식이 있다.
+    /// 프로젝트 교체 요청(새 프로젝트·열기·최근·Finder 열기)은 이 동안 거절한다(projectReplaceBlocked). 프로젝트가 강제로 바뀌면(replaceProject)
+    /// 표식을 지워 그 작업은 늦은 결과가 된다. 작업은 끝날 때 자기 표식일 때만 지운다(이전 작업의 끝이 새 작업의 표식을 지우지 않음).
+    var relinkInProgress: Bool { relinkOp != nil }
+    static let relinkBusyMessage = "미디어 재연결 확인이 진행 중입니다. 끝난 뒤 다시 시도하세요."
     /// 재연결 실행(검사 → 실행 취소 가능한 변경). 성공하면 true.
+    /// 다른 재연결 확인이 진행 중이면 시작하지 않는다(겹친 확인이 서로 덮어쓰지 않게, 상태 문구만).
+    /// 적용 직전에 이 작업이 아직 현재인지(표식), 시작 때의 프로젝트 회차인지(같은 파일을 다시 연 경우 포함), 열기 요청·진행이 없는지,
+    /// 대상 미디어가 아직 있는지 확인한다. 아니면 아무것도 바꾸지 않는다(늦은 결과, 상태 문구만, 오류 알림도 띄우지 않음).
     @discardableResult
     func relinkMedia(_ id: UUID, to url: URL) async -> Bool {
-        let project = projectID
+        guard relinkOp == nil else { statusMessage = Self.relinkBusyMessage; return false }
+        let op = UUID(), session = projectSession
+        relinkOp = op
+        defer { if relinkOp == op { relinkOp = nil } }
+        func current() -> Bool {
+            relinkOp == op && projectSession == session && !openRequested && openProgress == nil && timeline.media.contains { $0.id == id }
+        }
+        func stale() -> Bool {
+            statusMessage = "프로젝트가 바뀌어 다시 연결하지 않았습니다."
+            Self.trace.info("relink result ignored (stale) sameSession=\(self.projectSession == session, privacy: .public)")
+            return false
+        }
         do {
+            #if DEBUG
+            let delay = max(probeDelayForTest, relinkDelayForTest)   // 자체 검사·수동 확인: 오래 걸리는 확인(경합 재현)
+            if delay > 0 {
+                if relinkDelayForTest > 0 { statusMessage = "재연결 확인 중…(Debug 수동 확인용 지연 \(relinkDelayForTest / 1_000_000_000)초)" }
+                try? await Task.sleep(nanoseconds: delay)
+            }
+            #endif
             let a = try await MediaProbe.inspect(url, settings: settings).withID(id)
             // 검사 중 시작한 끌기가 끝날 때까지 기다린다(끌기 중 기록 변경은 precondition 실패, 2026-10-11 리뷰). 그사이 프로젝트가 바뀌면 그만둔다.
             while gestureBase != nil { try? await Task.sleep(nanoseconds: 50_000_000) }
-            guard projectID == project, openProgress == nil else { statusMessage = "프로젝트가 바뀌어 다시 연결하지 않았습니다."; return false }
+            guard current() else { return stale() }
             let t = try timeline.relinking(media: id, to: MediaRef(a))
             assetCache[a.url.standardizedFileURL.path] = a
             missingMedia[id] = nil
@@ -1896,10 +1930,13 @@ extension ProjectStore {
             statusMessage = "‘\(url.lastPathComponent)’로 다시 연결했습니다."
             return true
         } catch let e as EditError {
+            guard current() else { return stale() }
             presentAlert(AlertInfo(title: "다시 연결할 수 없습니다", message: e.description)); return false
         } catch let e as ProbeError {
+            guard current() else { return stale() }
             presentAlert(AlertInfo(title: "다시 연결할 수 없습니다", message: e.description)); return false
         } catch {
+            guard current() else { return stale() }
             presentAlert(AlertInfo(title: "다시 연결할 수 없습니다", message: error.localizedDescription)); return false
         }
     }

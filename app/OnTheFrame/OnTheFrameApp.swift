@@ -101,6 +101,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 배치 자체 검사 준비(창이 붙기 전): 따로 둔 저장소를 비우거나(-OTFLayoutReset) 화면 밖 저장값을 넣는다(-OTFLayoutInject x,y,w,h)
     func applicationWillFinishLaunching(_ notification: Notification) {
         let args = ProcessInfo.processInfo.arguments
+        // CP-04 수동 확인(2026-10-12): 명시적으로 줄 때만 재연결 확인을 늦춘다. 검사 도우미는 준비된 fixture가 의도대로 되는지 스스로 본다.
+        if let k = args.firstIndex(of: "-OTFManualRelinkDelay"), k + 1 < args.count, let sec = Double(args[k + 1]), sec > 0 {
+            ProjectStore.shared.relinkDelayForTest = UInt64(min(sec, 120) * 1e9)
+        }
+        if let k = args.firstIndex(of: "-OTFManualRelinkCheck"), k + 1 < args.count {
+            let replacement = URL(fileURLWithPath: args[k + 1])
+            Task { await RelinkGuardSelfTest.manualFixtureCheck(replacement: replacement) }
+        }
         guard let i = args.firstIndex(of: "-OTFLayoutSuite"), i + 1 < args.count, let d = UserDefaults(suiteName: args[i + 1]) else { return }
         if args.contains("-OTFLayoutReset") { d.removePersistentDomain(forName: args[i + 1]); ProjectStore.shared.recentProjects = [] }   // 이미 읽어 둔 최근 목록도 비운다
         if let j = args.firstIndex(of: "-OTFLayoutInject"), j + 1 < args.count {
@@ -139,6 +147,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if args.contains("-OTFGestureGuardTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await GestureGuardSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFMakeManualRelinkFixture"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await RelinkGuardSelfTest.makeManualFixture(folder: folder) }
+            return
+        }
+        if args.contains("-OTFRelinkGuardTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await RelinkGuardSelfTest.run(folder: folder) }
             return
         }
         if args.contains("-OTFFileGuardTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
