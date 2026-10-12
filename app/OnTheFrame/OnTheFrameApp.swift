@@ -153,6 +153,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await RelinkGuardSelfTest.makeManualFixture(folder: folder) }
             return
         }
+        if args.contains("-OTFPendingPressTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await PendingPressSelfTest.run(folder: folder) }
+            return
+        }
         if args.contains("-OTFRelinkGuardTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await RelinkGuardSelfTest.run(folder: folder) }
             return

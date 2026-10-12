@@ -646,6 +646,8 @@ final class TimelineNSView: NSView {
             // 일반 끌기 = 옮기기(2026-10-11): 연결된 쌍·연결되지 않은 클립 모두 위치(와 같은 종류 레인)만 바꾼다. 리플·끼워 넣기 없음.
             guard abs(p.x - p0.x) > 4 || abs(p.y - p0.y) > 4 else { return }
             guard store.tool == .selection else { drag = .none; return }   // 누른 뒤 도구가 바뀌었으면 옮기지 않는다
+            // 누른 클립이 없어졌거나 선택이 바뀌었으면 옮기지 않는다(CP-08: 저장소가 편집 명령 전에 대기를 지우지만, 다른 길로 바뀐 경우의 마지막 확인)
+            guard store.timeline.clip(id) != nil, store.selection == id else { drag = .none; return }
             store.beginGesture(select: id)
             drag = .free(id, p0.x)
             #if DEBUG

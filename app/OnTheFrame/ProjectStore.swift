@@ -487,6 +487,7 @@ final class ProjectStore {
     /// (CP-01, 2026-10-11: 끌기 중 문맥 메뉴·끝나지 않은 끌기에서 부른 편집이 앱을 멈췄다). 끌기는 놓기(한 단계)나 Esc(취소)로만 끝난다.
     private func commit(_ make: (Timeline) throws -> Timeline, focus: UUID?, select: UUID? = nil, rebuild: Bool = true) {
         guard gestureBase == nil else { return }
+        cancelPendingPress()
         pauseForEdit()
         do {
             let t = try make(timeline)
@@ -539,6 +540,7 @@ final class ProjectStore {
 
     func undo() {
         guard history.canUndo else { return }
+        cancelPendingPress()
         pauseForEdit()
         let f = history.undo()
         selection = f.flatMap { timeline.clip($0) != nil ? $0 : nil }
@@ -546,6 +548,7 @@ final class ProjectStore {
     }
     func redo() {
         guard history.canRedo else { return }
+        cancelPendingPress()
         pauseForEdit()
         let f = history.redo()
         selection = f.flatMap { timeline.clip($0) != nil ? $0 : nil }
@@ -635,6 +638,7 @@ final class ProjectStore {
     func pasteAtPlayhead() {
         guard gestureBase == nil, openProgress == nil, !openRequested else { return }
         guard let cb = clipClipboard, cb.project == projectID else { statusMessage = EditError.clipboardEmpty.description; return }
+        cancelPendingPress()
         pauseForEdit()
         do {
             let r = try timeline.pasting(cb.content, at: playhead, newLaneName: newLaneName)
@@ -1035,6 +1039,15 @@ final class ProjectStore {
     /// 그 전(누름 대기)에 초점을 잃으면 저장소 끌기가 없다. 그 대기 상태를 지우지 않으면 같은 누름의 늦은 끌기가 새 옮기기를 시작하고 놓기가 확정했다
     /// (2026-10-12 소유자 로그 조사). 끌기 시작 직전의 확인(인자 없음)은 보기에 알리지 않는다(프리뷰는 끌기 상태를 정한 뒤 끌기를 시작한다).
     static let gestureInterruptedNotification = Notification.Name("dev.ontheframe.gestureInterrupted")
+    /// 누름 대기 지우기(CP-08, 2026-10-12): 타임라인 클립을 누른 채 4 pt 전(누름 대기, 저장소 끌기 없음)에 편집 명령(삭제·실행 취소·다시 실행·붙여넣기·
+    /// commit을 거치는 자르기 등)이 타임라인이나 선택을 바꾸면, 같은 누름의 늦은 끌기가 누를 때의 클립 ID로 끌기를 시작했다
+    /// (지운 클립 ID를 다시 고름, 되돌린 클립을 다시 옮겨 다시 실행 기록을 지움, 붙여 넣은 클립 대신 원래 클립을 고름).
+    /// 명령을 실행하기 직전에 보기의 누름 대기를 지운다. 이어지는 끌기·놓기는 아무것도 하지 않고, 다음 끌기는 새 누름부터다.
+    /// 끌기 중(gestureBase가 있음)에는 아무것도 하지 않는다(그때 편집 명령은 각자 막힌다, CP-01).
+    private func cancelPendingPress() {
+        guard gestureBase == nil else { return }
+        interruptGesture(reason: "editCommand", clearViewDrags: true)
+    }
     func interruptGesture(reason: String = "staleGesture", clearViewDrags: Bool = false) {
         let active = gestureBase != nil
         #if DEBUG
