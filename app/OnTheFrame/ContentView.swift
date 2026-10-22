@@ -60,9 +60,10 @@ struct ContentView: View {
                 Picker("편집 도구", selection: Binding(get: { store.tool }, set: { store.setTool($0) })) {
                     Label("선택 도구", systemImage: "cursorarrow").tag(ProjectStore.EditTool.selection).help("선택 도구 (V)")
                     Label("자르기 도구", systemImage: "scissors").tag(ProjectStore.EditTool.cut).help("자르기 도구 (C): 클립을 누른 위치에서 자르기")
+                    Label("텍스트 도구", systemImage: "textformat").tag(ProjectStore.EditTool.text).help("텍스트 도구 (T): 프리뷰 화면을 눌러 그 자리에 자막 만들기·고치기")
                 }
                 .pickerStyle(.segmented).labelStyle(.iconOnly).fixedSize()
-                .help("편집 도구: 선택 (V) · 자르기 (C)")
+                .help("편집 도구: 선택 (V) · 자르기 (C) · 텍스트 (T)")
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { store.presentImportPanel() } label: { Label("가져오기", systemImage: "square.and.arrow.down") }.disabled(!store.fileCommandsAvailable)
@@ -243,6 +244,8 @@ struct PreviewPane: View {
                 PlayerLayerView(store: store)
                 // 편집 테두리(A-015): 화면 위 보기일 뿐 내보내기에는 들어가지 않는다
                 PreviewOverlay(store: store, state: PreviewOverlay.state(store))
+                // 자막 만들기·고르기·옮기기·글 편집(§44): 텍스트 도구·자막 위·편집 중에만 누름을 받고, 그 밖은 아래로 넘긴다
+                SubtitlePreview(store: store, state: SubtitlePreview.state(store))
                 // 찾을 수 없는 원본을 쓰는 구간: 의도한 빈틈과 구별해 알린다(A-013)
                 if let name = store.missingNameAtPlayhead {
                     VStack(spacing: 6) {
@@ -277,11 +280,11 @@ struct PreviewPane: View {
 struct PlayerLayerView: NSViewRepresentable {
     let store: ProjectStore
     func makeNSView(context: Context) -> PlayerNSView {
-        let v = PlayerNSView(); v.playerLayer.player = store.player; store.previewHost = v; return v
+        let v = PlayerNSView(); v.playerLayer.player = store.player; store.previewHost = v; store.refreshPreviewSubtitles(); return v
     }
     func updateNSView(_ v: PlayerNSView, context: Context) {
         if v.playerLayer.player !== store.player { v.playerLayer.player = store.player }
-        if store.previewHost !== v { store.previewHost = v }
+        if store.previewHost !== v { store.previewHost = v; store.refreshPreviewSubtitles() }
     }
 }
 /// 프리뷰 화면: AVPlayerLayer 위에 끌기 무대(2026-10-11). 무대는 프리뷰 끌기 중 겹친 화면(InteractivePreview의 레이어 목록)을 보이고,
@@ -323,6 +326,8 @@ final class PlayerNSView: NSView {
         canvas.actions = Self.noActions
         stageLayer.addSublayer(canvas)
         layer?.addSublayer(stageLayer)
+        subtitleHost.actions = Self.noActions
+        layer?.addSublayer(subtitleHost)
         readyKVO = playerLayer.observe(\.isReadyForDisplay, options: [.new]) { [weak self] _, _ in
             Task { @MainActor [weak self] in self?.checkRelease() }
         }
@@ -336,7 +341,107 @@ final class PlayerNSView: NSView {
         canvas.bounds = CGRect(origin: .zero, size: renderSize)
         canvas.position = CGPoint(x: (bounds.width - renderSize.width * k) / 2, y: (bounds.height - renderSize.height * k) / 2)
         canvas.setAffineTransform(CGAffineTransform(scaleX: k, y: k))
+        subtitleHost.frame = bounds
+        if let sync = subtitleSync { sync.frame = subtitleHost.bounds; fit(subtitleCanvas, in: sync.bounds.size) }
         CATransaction.commit()
+    }
+    /// 출력 화면(1920×1080) 캔버스를 보기 안 resizeAspect 사각형에 맞춘다(무대 캔버스와 같은 식)
+    private func fit(_ c: CALayer, in size: CGSize) {
+        let k = min(size.width / renderSize.width, size.height / renderSize.height)
+        c.bounds = CGRect(origin: .zero, size: renderSize)
+        c.position = CGPoint(x: (size.width - renderSize.width * k) / 2, y: (size.height - renderSize.height * k) / 2)
+        c.setAffineTransform(CGAffineTransform(scaleX: k, y: k))
+    }
+
+    // MARK: 자막 층(2026-10-22, docs/SUBTITLE-DESIGN.md §43)
+    //
+    // 프리뷰 항목 시각에 묶인 AVSynchronizedLayer 안에 자막마다 CALayer 하나(내용 = 내보내기와 같은 SubtitleRenderer 그림, 같은 출력 사각형).
+    // 불투명도 기본 0, [시작, 끝) 초 구간에만 1인 애니메이션으로 보인다(재생·멈춤·탐색 모두 항목 시각을 따른다).
+    // 묶기는 항목이 readyToPlay가 된 뒤에 한다: 준비 전에 묶으면 묶이지 않은 채 남는 경우가 있었다(§21).
+    // 타임라인 끝에서 끝나는 자막은 끝 위치(마지막 프레임 유지, D-018)에서도 보이도록 한 프레임 더 둔다.
+    // 위 레인이 아래 레인 위에 그린다(그리기 순서 = 내보내기와 같음). 무대(정지 화면) 위에 둔다.
+    let subtitleHost = CALayer()
+    private(set) var subtitleSync: AVSynchronizedLayer?
+    let subtitleCanvas = CALayer()
+    /// 자막 ID → 층(편집 중 숨김·끌기 중 위치 바꿈, §44)
+    private var subtitleLayers: [UUID: CALayer] = [:]
+    /// 프리뷰 위에서 글을 고치는 자막: 그림을 숨긴다(편집 칸과 두 번 보이지 않게). 확정·취소하면 다시 보인다.
+    var editingSubtitle: UUID? {
+        didSet {
+            guard oldValue != editingSubtitle else { return }
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            for (id, l) in subtitleLayers { l.isHidden = id == editingSubtitle }
+            CATransaction.commit()
+        }
+    }
+    /// 끌기 중 자막 하나의 그림·위치만 바꾼다(동기 층은 그대로). 놓거나 취소하면 저장소가 층 전체를 다시 넣는다.
+    func moveSubtitleLayer(_ s: SubtitleItem) {
+        guard let l = subtitleLayers[s.id] else { return }
+        let r = SubtitleRenderer.shared.raster(s)
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        l.contents = r.image
+        l.frame = CGRect(x: r.rect.minX, y: renderSize.height - r.rect.maxY, width: r.rect.width, height: r.rect.height)
+        CATransaction.commit()
+    }
+    private var subtitleKVO: NSKeyValueObservation?
+    private var pendingSubtitleItem: AVPlayerItem?
+    #if DEBUG
+    /// 자체 검사 전용: 자막 층 상태(묶인 항목, 층 수)
+    var subtitleBoundItem: AVPlayerItem? { subtitleSync?.playerItem }
+    var subtitleLayerCount: Int { subtitleCanvas.sublayers?.count ?? 0 }
+    func subtitleLayerForTest(_ id: UUID) -> CALayer? { subtitleLayers[id] }
+    #endif
+    func setSubtitles(_ items: [SubtitleItem], durationFrames: Int, fps: Double, item: AVPlayerItem?) {
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        subtitleKVO = nil; pendingSubtitleItem = nil
+        subtitleSync?.removeFromSuperlayer(); subtitleSync = nil
+        subtitleCanvas.removeFromSuperlayer(); subtitleCanvas.sublayers = nil; subtitleLayers = [:]
+        guard let item, !items.isEmpty else { return }
+        let sync = AVSynchronizedLayer()
+        sync.actions = Self.noActions
+        sync.frame = subtitleHost.bounds
+        subtitleCanvas.anchorPoint = .zero
+        subtitleCanvas.masksToBounds = true
+        subtitleCanvas.actions = Self.noActions
+        fit(subtitleCanvas, in: sync.bounds.size)
+        let h = renderSize.height
+        var layers: [CALayer] = []
+        for s in items {
+            let r = SubtitleRenderer.shared.raster(s)
+            let l = CALayer()
+            l.actions = Self.noActions
+            l.contents = r.image
+            l.magnificationFilter = .linear; l.minificationFilter = .trilinear
+            l.frame = CGRect(x: r.rect.minX, y: h - r.rect.maxY, width: r.rect.width, height: r.rect.height)   // 출력(위 원점) → 캔버스(아래 원점)
+            l.opacity = 0
+            let a = CABasicAnimation(keyPath: "opacity")
+            a.fromValue = 1; a.toValue = 1
+            a.beginTime = s.start == 0 ? AVCoreAnimationBeginTimeAtZero : Double(s.start) / fps
+            // 끝 시각에 정확히 멈추면 애니메이션 끝이 포함되어 보였다(자체 검사: 프레임 [30,120)이 120에서 보임). 끝을 0.1 ms 당겨 반 열린 구간으로 맞춘다.
+            a.duration = Double(s.length + (s.end == durationFrames ? 1 : 0)) / fps - 0.0001
+            a.isRemovedOnCompletion = false
+            a.fillMode = .removed
+            l.add(a, forKey: "visible")
+            l.isHidden = s.id == editingSubtitle
+            subtitleLayers[s.id] = l
+            layers.append(l)
+        }
+        subtitleCanvas.sublayers = layers
+        sync.addSublayer(subtitleCanvas)
+        subtitleHost.addSublayer(sync)
+        subtitleSync = sync
+        pendingSubtitleItem = item
+        if item.status == .readyToPlay { bindPendingSubtitles(); return }
+        subtitleKVO = item.observe(\.status, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in self?.bindPendingSubtitles() }
+        }
+    }
+    /// 기다리던 항목이 준비되면 지금 자막 층에 묶는다(그사이 자막 층이 바뀌었으면 새 층의 항목을 본다)
+    private func bindPendingSubtitles() {
+        guard let it = pendingSubtitleItem, it.status == .readyToPlay, let sync = subtitleSync, sync.playerItem == nil else { return }
+        sync.playerItem = it
+        pendingSubtitleItem = nil; subtitleKVO = nil
     }
     /// 레이어 목록을 무대에 보인다(아래 먼저). 같은 클립의 레이어는 다시 쓰고 내용은 바뀐 때만 넣는다.
     func showStage(_ items: [InteractivePreview.DrawItem]) {
@@ -428,7 +533,16 @@ struct InspectorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 Text("클립 정보").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-                if let id = store.selection, let c = store.timeline.clip(id), let m = store.mediaByID[c.mediaID], let kind = store.timeline.lane(of: id) {
+                if let s = store.selectedSubtitle {
+                    let tc = store.settings.timecode
+                    row("종류", "자막")
+                    row("글자", s.isBlank ? "(빈 자막 — 프리뷰·내보내기에 그리지 않음)" : s.text)
+                    row("타임라인 구간", "\(tc(s.start)) – \(tc(s.end))")
+                    row("길이", tc(s.length))
+                    row("레인", laneText(s.lane))
+                    row("글꼴", s.style.fontName + (SubtitleRenderer.fontAvailable(s.style.fontName) ? "" : " — 이 Mac에 없음(시스템 글꼴로 그림)"))
+                    row("크기·위치", "\(NumberText.trim(s.style.size, 1)) pt · X \(NumberText.trim(s.style.x, 3)) · Y \(NumberText.trim(s.style.y, 3))")
+                } else if let id = store.selection, let c = store.timeline.clip(id), let m = store.mediaByID[c.mediaID], let kind = store.timeline.lane(of: id) {
                     let tc = store.settings.timecode
                     Group {
                         row("원본", m.name)
@@ -457,9 +571,10 @@ struct InspectorView: View {
                     }
                 } else if let l = store.inspectedLane {
                     row("레인", "\(store.timeline.laneLabel(l.id)) · \(l.name)")
-                    row("종류", l.kind == .video ? "영상 레인(위 레인이 아래 레인을 가림)" : "오디오 레인(음소거하지 않은 레인을 모두 더함)")
+                    row("종류", l.kind == .video ? "영상 레인(위 레인이 아래 레인을 가림)" : (l.kind == .audio ? "오디오 레인(음소거하지 않은 레인을 모두 더함)" : "자막 레인(모든 영상 위)"))
                     if l.kind == .audio { row("소리", l.muted ? "음소거" : "음량 \(l.volumePercent)%") }
-                    row("클립", "\(store.timeline.clips(inLane: l.id).count)개")
+                    if l.kind == .subtitle { row("자막", "\(store.timeline.subtitles(inLane: l.id).count)개") }
+                    else { row("클립", "\(store.timeline.clips(inLane: l.id).count)개") }
                     Text("번호(V1·A1…)는 가운데 경계에서 센 위치이고 이름과 따로입니다. 이름·순서·음량은 왼쪽 \"클립 조정\" 탭이나 레인 머리 메뉴에서 바꿉니다.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else {
@@ -527,7 +642,11 @@ struct AdjustmentsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                if let id = store.selection, let c = store.timeline.clip(id), let kind = store.timeline.lane(of: id) {
+                if let s = store.selectedSubtitle {
+                    target(icon: "captions.bubble", title: s.isBlank ? "빈 자막" : (s.text.split(separator: "\n", omittingEmptySubsequences: false).first.map(String.init) ?? "자막"),
+                           subtitle: "자막 · \(laneText(s.lane))")
+                    SubtitleAdjustView(store: store, item: s)
+                } else if let id = store.selection, let c = store.timeline.clip(id), let kind = store.timeline.lane(of: id) {
                     target(icon: kind == .video ? "film" : "waveform", title: store.mediaByID[c.mediaID]?.name ?? "클립",
                            subtitle: "\(kind == .video ? "영상 클립" : "소리 클립") · \(laneText(c.lane))")
                     if let vc = store.transformClip {
@@ -540,8 +659,8 @@ struct AdjustmentsView: View {
                     }
                     AdjustSection(title: "레인") { LaneDestinationAdjust(store: store, id: id, clip: c) }
                 } else if let l = store.selectedLane.flatMap({ store.timeline.laneInfo($0) }) {
-                    target(icon: l.kind == .video ? "rectangle.stack" : "speaker.wave.2", title: l.name,
-                           subtitle: "\(store.timeline.laneLabel(l.id)) · \(l.kind == .video ? "영상 레인" : "오디오 레인")")
+                    target(icon: l.kind == .video ? "rectangle.stack" : (l.kind == .audio ? "speaker.wave.2" : "captions.bubble"), title: l.name,
+                           subtitle: "\(store.timeline.laneLabel(l.id)) · \(l.kind == .video ? "영상 레인" : (l.kind == .audio ? "오디오 레인" : "자막 레인"))")
                     AdjustSection(title: "레인 설정") { LaneSettingsAdjust(store: store, lane: l) }
                     if l.kind == .audio { AdjustSection(title: "레인 전체 — \(store.timeline.laneLabel(l.id))의 모든 클립") { AudioLaneAdjust(store: store, lane: l) } }
                 } else {
@@ -783,10 +902,10 @@ struct LaneSettingsAdjust: View {
                 Button { store.moveLane(lane.id, by: 1) } label: { Image(systemName: "arrow.down") }.help("레인을 아래로").disabled(!store.canMoveLane(lane.id, by: 1))
                     .accessibilityLabel("레인을 아래로")
                 Spacer(minLength: 4)
-                Button("삭제…", role: .destructive) { store.requestRemoveLane(lane.id) }.disabled(store.timeline.lanes(lane.kind).count < 2)
+                Button("삭제…", role: .destructive) { store.requestRemoveLane(lane.id) }.disabled(lane.kind != .subtitle && store.timeline.lanes(lane.kind).count < 2)
             }
             .controlSize(.small)
-            Text(lane.kind == .video ? "위 레인이 아래 레인을 가립니다." : "음소거하지 않은 오디오 레인을 모두 더합니다.")
+            Text(lane.kind == .video ? "위 레인이 아래 레인을 가립니다." : (lane.kind == .audio ? "음소거하지 않은 오디오 레인을 모두 더합니다." : "자막은 모든 영상 위에 그리고, 위 자막 레인이 아래 자막 레인 위에 그립니다."))
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .disabled(store.gestureBase != nil)

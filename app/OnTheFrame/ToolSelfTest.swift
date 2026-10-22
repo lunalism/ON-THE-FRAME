@@ -61,7 +61,7 @@ enum ToolSelfTest {
         func toolbarSegment() -> NSSegmentedControl? {
             guard let frame = w.contentView?.superview, let cv = w.contentView else { return nil }
             func all(_ v: NSView) -> [NSSegmentedControl] { (v as? NSSegmentedControl).map { [$0] } ?? [] + v.subviews.flatMap(all) }
-            return all(frame).first { !$0.isDescendant(of: cv) && $0.segmentCount == 2 }
+            return all(frame).first { !$0.isDescendant(of: cv) && $0.segmentCount == 3 }   // 선택·자르기·텍스트(2026-10-22)
         }
         func pressToolbar(_ i: Int) -> Bool {
             guard let seg = toolbarSegment() else { return false }

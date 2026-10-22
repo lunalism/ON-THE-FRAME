@@ -16,8 +16,9 @@ struct TimelinePane: View {
                     Button("영상·소리 레인 쌍 추가") { store.addLanePair() }
                     Button("영상 레인 추가") { store.addLane(.video) }
                     Button("오디오 레인 추가") { store.addLane(.audio) }
+                    Button("자막 레인 추가") { store.addLane(.subtitle) }
                 } label: { Label("레인 추가", systemImage: "plus.rectangle.on.rectangle") }
-                    .menuStyle(.borderlessButton).fixedSize().help("새 영상 레인은 맨 위(V 번호 증가), 새 오디오 레인은 맨 아래(A 번호 증가)에 추가")
+                    .menuStyle(.borderlessButton).fixedSize().help("새 영상 레인은 맨 위(V 번호 증가), 새 오디오 레인은 맨 아래(A 번호 증가), 새 자막 레인은 모든 영상 레인 위(S 번호 증가)에 추가")
                     .disabled(store.gestureBase != nil)
                 Image(systemName: "minus.magnifyingglass").foregroundStyle(.secondary)
                 Slider(value: $store.timelineZoom, in: 0.2...12).frame(width: 120).help("타임라인 확대")
@@ -53,6 +54,8 @@ struct TimelineDrawState: Equatable {
     var missing: Set<UUID>
     /// 편집 도구(선택·자르기, D-030)
     var tool: ProjectStore.EditTool
+    /// 이 Mac에 없는 자막 글꼴(표시)
+    var missingFonts: Set<String>
     @MainActor init(store: ProjectStore) {
         timeline = store.timeline
         names = Dictionary(uniqueKeysWithValues: store.assets.map { ($0.id, $0.name) })
@@ -65,6 +68,7 @@ struct TimelineDrawState: Equatable {
         proposalStart = store.freeMoveProposal?.start; proposalOK = store.freeMoveProposal?.ok ?? true; proposalID = store.freeMoveProposal?.id; proposalLane = store.freeMoveProposal?.lane
         missing = Set(store.missingMedia.keys)
         tool = store.tool
+        missingFonts = Set(store.missingSubtitleFonts)
         names = Dictionary(uniqueKeysWithValues: store.timeline.media.map { ($0.id, $0.name) })
     }
 }
@@ -153,13 +157,13 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
         for l in lanes where l.id != editingLane {
             let r = rowRect(l.id)
             let selected = l.id == selectedLane
-            (l.kind == .video ? NSColor.systemTeal : NSColor.systemGreen).withAlphaComponent(selected ? 0.32 : 0.12).setFill()
+            TimelineNSView.color(l.kind).withAlphaComponent(selected ? 0.32 : 0.12).setFill()
             let bg = NSBezierPath(roundedRect: r.insetBy(dx: 4, dy: 2), xRadius: 4, yRadius: 4)
             bg.fill()
             if selected { NSColor.controlAccentColor.setStroke(); bg.lineWidth = 1.5; bg.stroke() }
             // 번호 표(위치에서 정함, 이름과 따로)
             let badge = NSRect(x: r.minX + 8, y: r.midY - 8, width: 24, height: 16)
-            (l.kind == .video ? NSColor.systemTeal : NSColor.systemGreen).withAlphaComponent(0.8).setFill()
+            TimelineNSView.color(l.kind).withAlphaComponent(0.8).setFill()
             NSBezierPath(roundedRect: badge, xRadius: 3, yRadius: 3).fill()
             let label = NSString(string: numbering.laneLabel(l.id))
             let battrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .bold), .foregroundColor: NSColor.white]
@@ -203,11 +207,12 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
             add("위로", #selector(upFromMenu(_:)), l.id, enabled: store.canMoveLane(l.id, by: -1))
             add("아래로", #selector(downFromMenu(_:)), l.id, enabled: store.canMoveLane(l.id, by: 1))
             if l.kind == .audio { add(l.muted ? "음소거 해제" : "음소거", #selector(muteFromMenu(_:)), l.id) }
-            add("레인 삭제…", #selector(deleteFromMenu(_:)), l.id, enabled: store.timeline.lanes(l.kind).count > 1)
+            add("레인 삭제…", #selector(deleteFromMenu(_:)), l.id, enabled: l.kind == .subtitle || store.timeline.lanes(l.kind).count > 1)
             m.addItem(.separator())
         }
         add("영상 레인 추가", #selector(addVideoFromMenu(_:)), nil)
         add("오디오 레인 추가", #selector(addAudioFromMenu(_:)), nil)
+        add("자막 레인 추가", #selector(addSubtitleFromMenu(_:)), nil)
         return m
     }
     @objc private func renameFromMenu(_ sender: NSMenuItem) { if let id = sender.representedObject as? UUID { beginRename(id) } }
@@ -219,6 +224,7 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
     @objc private func deleteFromMenu(_ sender: NSMenuItem) { if let id = sender.representedObject as? UUID { store.requestRemoveLane(id) } }
     @objc private func addVideoFromMenu(_ sender: NSMenuItem) { store.addLane(.video) }
     @objc private func addAudioFromMenu(_ sender: NSMenuItem) { store.addLane(.audio) }
+    @objc private func addSubtitleFromMenu(_ sender: NSMenuItem) { store.addLane(.subtitle) }
 
     func editorFrame(_ id: UUID) -> NSRect { let r = rowRect(id); return r.insetBy(dx: 4, dy: max(2, (r.height - 22) / 2)) }
     func beginRename(_ id: UUID) {
@@ -258,14 +264,16 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
 final class TimelineNSView: NSView {
     static let inset: CGFloat = 12, rulerHeight: CGFloat = 24, edgeGrab: CGFloat = 6
     /// 레인 줄 배치(A-014): 눈금자 아래 위에서부터 레인 순서대로. 영상 레인 54pt, 오디오 레인 40pt, 사이 8pt.
-    static let firstLaneY: CGFloat = 30, laneGap: CGFloat = 8, videoHeight: CGFloat = 54, audioHeight: CGFloat = 40
+    static let firstLaneY: CGFloat = 30, laneGap: CGFloat = 8, videoHeight: CGFloat = 54, audioHeight: CGFloat = 40, subtitleHeight: CGFloat = 34
     /// 마지막 레인 아래 빈 곳(여기에 놓으면 파일 이름의 새 레인)
     static let dropZoneHeight: CGFloat = 44
     /// 영상 레인 묶음과 오디오 레인 묶음 사이 가운데 경계(2026-10-11): 레인 사이보다 넓은 틈과 경계선
     static let boundaryGap: CGFloat = 18
     /// 끌어 옮기기 붙음 거리(화면 포인트, 확대 배율과 무관)
     static let snapDistance: CGFloat = 8
-    static func height(_ k: LaneKind) -> CGFloat { k == .video ? videoHeight : audioHeight }
+    static func height(_ k: LaneKind) -> CGFloat { k == .video ? videoHeight : (k == .audio ? audioHeight : subtitleHeight) }
+    /// 레인 종류 색: 영상 청록, 오디오 초록, 자막 보라(2026-10-22)
+    static func color(_ k: LaneKind) -> NSColor { k == .video ? .systemTeal : (k == .audio ? .systemGreen : .systemPurple) }
     static func layout(_ lanes: [Lane]) -> [(lane: Lane, rect: NSRect)] {
         var y = firstLaneY
         return lanes.enumerated().map { i, l in
@@ -356,7 +364,7 @@ final class TimelineNSView: NSView {
         drawRuler(st)
         let t = st.timeline
         let rows = Self.layout(t.lanes)
-        for (l, r) in rows {
+        for (l, r) in rows where l.kind != .subtitle {   // 자막 레인의 빈 곳은 빈틈이 아니다(자막 없음)
             for g in t.gaps(inLane: l.id) {
                 drawGap(NSRect(x: x(g.lowerBound), y: r.minY, width: CGFloat(g.count) * pixelsPerFrame, height: r.height), label: l.kind == .video ? "빈틈" : "무음")
             }
@@ -368,12 +376,24 @@ final class TimelineNSView: NSView {
             NSRect(x: x(t.durationFrames) - 0.5, y: top - 6, width: 1, height: bottom - top + 12).fill()
         }
         for c in t.clips + t.audioClips { drawClip(c, st) }
+        for sub in t.subtitles { drawSubtitle(sub, st) }
         // 음소거한 오디오 레인: 클립 위를 어둡게
         for (l, r) in rows where l.muted && l.kind == .audio {
             NSColor.windowBackgroundColor.withAlphaComponent(0.55).setFill()
             NSRect(x: 0, y: r.minY, width: bounds.width, height: r.height).fill()
         }
         // 끌어 옮기기(묶음 전체): 놓을 수 있으면 원래 자리를 점선으로(클립은 이미 새 자리에 그려짐), 놓을 수 없으면 제안 위치를 빨갛게
+        if let id = st.proposalID, let s = st.proposalStart, let base = store.gestureBase, let sub = base.subtitle(id) {   // 자막 옮기기
+            if st.proposalOK {
+                let p = NSBezierPath(roundedRect: subtitleRect(sub).insetBy(dx: 1, dy: 1), xRadius: 4, yRadius: 4)
+                p.setLineDash([4, 3], count: 2, phase: 0); p.lineWidth = 1
+                NSColor.secondaryLabelColor.setStroke(); p.stroke()
+            } else {
+                let r = subtitleRect(sub, lane: st.proposalLane, start: s)
+                NSColor.systemRed.withAlphaComponent(0.25).setFill(); r.fill()
+                NSColor.systemRed.setStroke(); let p = NSBezierPath(rect: r.insetBy(dx: 1, dy: 1)); p.lineWidth = 2; p.stroke()
+            }
+        }
         if let id = st.proposalID, let s = st.proposalStart, let base = store.gestureBase, let c = base.clip(id) {
             for m in base.group(of: id) {
                 if st.proposalOK {
@@ -404,7 +424,8 @@ final class TimelineNSView: NSView {
         }
         if let h = cutHover, st.tool == .cut {   // 자를 위치 안내선(D-030): 대상 클립의 레인과 연결된 짝의 레인에만
             NSColor.controlAccentColor.setFill()
-            for m in t.group(of: h.id) { if let r = laneRect(m.lane) { NSRect(x: x(h.frame) - 1, y: r.minY - 2, width: 2, height: r.height + 4).fill() } }
+            let lanes = t.subtitle(h.id).map { [$0.lane] } ?? t.group(of: h.id).compactMap(\.lane)
+            for l in lanes { if let r = laneRect(l) { NSRect(x: x(h.frame) - 1, y: r.minY - 2, width: 2, height: r.height + 4).fill() } }
         }
         let ph = x(min(st.playhead, t.durationFrames))
         NSColor.systemRed.setFill()
@@ -474,6 +495,47 @@ final class TimelineNSView: NSView {
         }
         if k == .audio { drawAudioEnvelope(c, r, st) }
         if c.id == st.selection || (selected && !candidate && st.selection.map { st.timeline.group(of: $0).contains { $0.id == c.id } } == true) {   // 트림 손잡이
+            NSColor.controlAccentColor.setFill()
+            NSRect(x: r.minX, y: r.minY + 6, width: 3, height: r.height - 12).fill()
+            NSRect(x: r.maxX - 3, y: r.minY + 6, width: 3, height: r.height - 12).fill()
+        }
+    }
+
+    func subtitleRect(_ s: SubtitleItem, lane: UUID? = nil, start: Int? = nil) -> NSRect {
+        let l = laneRect(lane ?? s.lane) ?? .zero
+        return NSRect(x: x(start ?? s.start), y: l.minY, width: max(1, CGFloat(s.length) * pixelsPerFrame), height: l.height)
+    }
+    /// 자막 항목(2026-10-22): 보라 상자 + 첫 줄 글자. 고르면 강조와 양쪽 트림 손잡이(선택 도구).
+    private func drawSubtitle(_ s: SubtitleItem, _ st: TimelineDrawState) {
+        let r = subtitleRect(s)
+        let selected = st.selection == s.id
+        let path = NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
+        (selected ? NSColor.controlAccentColor.withAlphaComponent(0.5) : NSColor.systemPurple.withAlphaComponent(0.35)).setFill()
+        path.fill()
+        (selected ? NSColor.controlAccentColor : NSColor.separatorColor).setStroke()
+        path.lineWidth = selected ? 2 : 1
+        path.stroke()
+        if r.width > 24 {
+            // 빈 자막(D-037): 화면 표시만 "빈 자막"(저장 글자 아님), 흐린 기울임
+            let line = s.isBlank ? "빈 자막" : (s.text.split(separator: "\n", omittingEmptySubsequences: false).first.map(String.init) ?? "")
+            let attrs: [NSAttributedString.Key: Any] = s.isBlank
+                ? [.font: NSFontManager.shared.convert(NSFont.systemFont(ofSize: 11), toHaveTrait: .italicFontMask), .foregroundColor: NSColor.secondaryLabelColor]
+                : [.font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.labelColor]
+            NSString(string: "T  " + line).draw(with: NSRect(x: r.minX + 6, y: r.minY + 4, width: max(0, r.width - 12), height: 16),
+                                               options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attrs)
+        }
+        if !s.isBlank, r.width > 20 {   // 그리기 상태: 그리지 못함(빨강)·화면 밖(주황) 표시(2026-10-23)
+            let rs = SubtitleRenderer.shared.raster(s)
+            if rs.failed || rs.clipped, let img = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: rs.failed ? "그릴 수 없음" : "화면 밖") {
+                let tinted = img.withSymbolConfiguration(.init(paletteColors: [rs.failed ? .systemRed : .systemOrange])) ?? img
+                tinted.draw(in: NSRect(x: r.maxX - 26, y: r.minY + 3, width: 11, height: 11))
+            }
+        }
+        if st.missingFonts.contains(s.style.fontName), r.width > 14 {   // 없는 글꼴 표시
+            NSColor.systemOrange.setFill()
+            NSBezierPath(ovalIn: NSRect(x: r.maxX - 12, y: r.minY + 4, width: 7, height: 7)).fill()
+        }
+        if selected, st.tool == .selection {
             NSColor.controlAccentColor.setFill()
             NSRect(x: r.minX, y: r.minY + 6, width: 3, height: r.height - 12).fill()
             NSRect(x: r.maxX - 3, y: r.minY + 6, width: 3, height: r.height - 12).fill()
@@ -584,6 +646,14 @@ final class TimelineNSView: NSView {
         guard let st = state else { return nil }
         for (lane, l) in Self.layout(st.timeline.lanes) {
             guard p.y >= l.minY, p.y <= l.maxY else { continue }
+            for s in st.timeline.subtitles(inLane: lane.id) {   // 자막(2026-10-22): 클립과 같은 누름 판정
+                let x0 = x(s.start), x1 = x(s.end)
+                guard p.x >= x0 - 1, p.x <= x1 + 1 else { continue }
+                let grab = min(Self.edgeGrab, (x1 - x0) / 3)
+                if p.x <= x0 + grab { return (s.id, .start) }
+                if p.x >= x1 - grab { return (s.id, .end) }
+                return (s.id, nil)
+            }
             for c in st.timeline.clips(inLane: lane.id) {
                 let x0 = x(c.start), x1 = x(c.end)
                 guard p.x >= x0 - 1, p.x <= x1 + 1 else { continue }
@@ -613,6 +683,15 @@ final class TimelineNSView: NSView {
             drag = .none
             guard e.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty, let (id, f) = cutTarget(p) else { return }
             store.cutClip(id, atFrame: f)
+            return
+        }
+        if store.tool == .text {
+            // 텍스트 도구(§44 정정): 타임라인을 눌러 자막을 만들지 않는다. 자막을 누르면 고르기만 하고, 끌기는 하지 않는다.
+            // 만들기·글 쓰기는 프리뷰 화면에서(또는 타임라인 > 자막 추가).
+            drag = .none
+            guard e.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty else { return }
+            if let (id, _) = clipHit(p), store.timeline.subtitle(id) != nil { store.pauseForEdit(); store.select(id); return }
+            store.statusMessage = "텍스트 도구: 프리뷰 화면을 누르면 그 자리에 자막을 만듭니다."
             return
         }
         if store.gestureBase == nil, let (id, edge, grab) = fadeHandleHit(p) {   // 페이드 손잡이(트림·옮기기보다 먼저)
@@ -647,7 +726,7 @@ final class TimelineNSView: NSView {
             guard abs(p.x - p0.x) > 4 || abs(p.y - p0.y) > 4 else { return }
             guard store.tool == .selection else { drag = .none; return }   // 누른 뒤 도구가 바뀌었으면 옮기지 않는다
             // 누른 클립이 없어졌거나 선택이 바뀌었으면 옮기지 않는다(CP-08: 저장소가 편집 명령 전에 대기를 지우지만, 다른 길로 바뀐 경우의 마지막 확인)
-            guard store.timeline.clip(id) != nil, store.selection == id else { drag = .none; return }
+            guard store.timeline.clip(id) != nil || store.timeline.subtitle(id) != nil, store.selection == id else { drag = .none; return }
             store.beginGesture(select: id)
             drag = .free(id, p0.x)
             #if DEBUG
@@ -765,15 +844,16 @@ final class TimelineNSView: NSView {
     override func resetCursorRects() {
         if let st = state, st.tool == .cut {   // 자르기 도구: 클립 본문 위에서 가위 커서(트림·페이드 커서 없음)
             for c in st.timeline.clips + st.timeline.audioClips { addCursorRect(rect(c).intersection(visibleRect), cursor: Self.cutCursor) }
+            for sub in st.timeline.subtitles { addCursorRect(subtitleRect(sub).intersection(visibleRect), cursor: Self.cutCursor) }
             return
         }
+        if let st = state, st.tool == .text { _ = st; return }   // 텍스트 도구: 타임라인에서는 고르기만(트림·옮기기 커서 없음)
         guard let st = state, let sel = st.selection else { return }
         for id in fadeHandleClips(st) {   // 페이드 손잡이(트림 커서보다 위)
             guard let c = st.timeline.clip(id) else { continue }
             for e in [ProjectStore.FadeEdge.fadeIn, .fadeOut] { addCursorRect(fadeHandleRect(c, e, rect(c)).insetBy(dx: -6, dy: -5), cursor: .crosshair) }
         }
-        for c in st.timeline.group(of: sel) {
-            let r = rect(c)
+        for r in st.timeline.group(of: sel).map({ rect($0) }) + (st.timeline.subtitle(sel).map { [subtitleRect($0)] } ?? []) {
             addCursorRect(NSRect(x: r.minX - 2, y: r.minY, width: Self.edgeGrab + 2, height: r.height), cursor: .resizeLeftRight)
             addCursorRect(NSRect(x: r.maxX - Self.edgeGrab, y: r.minY, width: Self.edgeGrab + 2, height: r.height), cursor: .resizeLeftRight)
         }

@@ -59,6 +59,7 @@ final class ProjectStore {
     /// 화면에 선택으로 보이는 클립: 주 선택의 묶음 + 연결 후보
     var selectedIDs: Set<UUID> {
         var s = Set(selection.map { timeline.group(of: $0).map(\.id) } ?? [])
+        if let sel = selection, timeline.subtitle(sel) != nil { s.insert(sel) }   // 자막(2026-10-22)은 묶음이 없다
         if let c = linkCandidate { s.insert(c) }
         return s
     }
@@ -309,7 +310,7 @@ final class ProjectStore {
         guard KeyRouting.menuTargetsEditor(self), gestureBase == nil else { return }
         splitAtPlayhead()
     }
-    var undoMenuEnabled: Bool { !editorFocused || (history.canUndo && alert == nil) }
+    var undoMenuEnabled: Bool { !editorFocused || ((history.canUndo || colorSession != nil) && alert == nil) }   // 색 조정 세션은 끝내고 되돌림
     var redoMenuEnabled: Bool { !editorFocused || (history.canRedo && alert == nil) }
 
     var mediaByID: [UUID: MediaAsset] { Dictionary(uniqueKeysWithValues: assets.map { ($0.id, $0) }) }
@@ -485,7 +486,8 @@ final class ProjectStore {
     /// rebuild가 false면 프리뷰 재구성은 부르는 쪽이 맡는다(변형 편집의 정지 화면 경로)
     /// 끌기 중(gestureBase가 있음)에는 아무것도 하지 않는다: 끌기 기준과 기록이 어긋나지 않게 하고, 기록의 끌기 중 확인(precondition)에 닿지 않게 한다
     /// (CP-01, 2026-10-11: 끌기 중 문맥 메뉴·끝나지 않은 끌기에서 부른 편집이 앱을 멈췄다). 끌기는 놓기(한 단계)나 Esc(취소)로만 끝난다.
-    private func commit(_ make: (Timeline) throws -> Timeline, focus: UUID?, select: UUID? = nil, rebuild: Bool = true) {
+    func commit(_ make: (Timeline) throws -> Timeline, focus: UUID?, select: UUID? = nil, rebuild: Bool = true) {
+        commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         guard gestureBase == nil else { return }
         cancelPendingPress()
         pauseForEdit()
@@ -524,7 +526,13 @@ final class ProjectStore {
     }
 
     /// 분할: 선택한 클립(없으면 재생 헤드 아래 영상, 없으면 소리 클립)을 재생 헤드에서 나눈다. 연결된 짝도 함께.
+    /// 고른 것이 자막이면 그 자막을 나눈다(두 조각 같은 글자·모양, 2026-10-22).
     func splitAtPlayhead() {
+        if let id = selection, timeline.subtitle(id) != nil {
+            let right = UUID()
+            commit({ try $0.splittingSubtitle(id, atFrame: playhead, newIDs: (UUID(), right)) }, focus: right)
+            return
+        }
         let target = selection ?? timeline.clipIndex(atFrame: playhead).map { timeline.clips[$0].id }
             ?? timeline.audioClipIndex(atFrame: playhead).map { timeline.audioClips[$0].id }
         guard let id = target else { statusMessage = "나눌 클립이 없습니다."; return }
@@ -535,23 +543,26 @@ final class ProjectStore {
     /// 선택한 클립 삭제(D-020). ripple이 false면 빈틈을 남기고(다른 클립 위치·길이 그대로), true면 그 구간을 지우고 뒤를 당긴다.
     func deleteSelection(ripple: Bool = false) {
         guard let id = selection else { return }
+        if timeline.subtitle(id) != nil { commit({ try ripple ? $0.rippleDeletingSubtitle(id) : $0.liftingSubtitle(id) }, focus: nil); return }
         commit({ try ripple ? $0.rippleDeleting(clip: id) : $0.lifting(clip: id) }, focus: nil)
     }
 
     func undo() {
+        commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         guard history.canUndo else { return }
         cancelPendingPress()
         pauseForEdit()
         let f = history.undo()
-        selection = f.flatMap { timeline.clip($0) != nil ? $0 : nil }
+        selection = f.flatMap { timeline.clip($0) != nil || timeline.subtitle($0) != nil ? $0 : nil }
         timelineChanged()
     }
     func redo() {
+        commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         guard history.canRedo else { return }
         cancelPendingPress()
         pauseForEdit()
         let f = history.redo()
-        selection = f.flatMap { timeline.clip($0) != nil ? $0 : nil }
+        selection = f.flatMap { timeline.clip($0) != nil || timeline.subtitle($0) != nil ? $0 : nil }
         timelineChanged()
     }
 
@@ -559,7 +570,10 @@ final class ProjectStore {
 
     /// 클릭 선택. extend(⌘-클릭)이면 다른 레인의 클립을 연결 후보로 더하거나 뺀다.
     func select(_ id: UUID?, extend: Bool = false) {
-        guard extend, let id, let sel = selection, sel != id else { selection = id; if id != nil { selectedLane = nil }; return }
+        if inlineEdit != nil, id != inlineEdit?.existingID { commitInlineEditIfAny() }   // 다른 것을 고르면 글 편집 확정(§44)
+        if let c = colorSession, c.id != id { finishColorSession() }                    // 색 조정 세션도(D-039)
+        // 자막은 연결이 없어 ⌘-클릭도 보통 선택이다(2026-10-22)
+        guard extend, let id, let sel = selection, sel != id, timeline.subtitle(id) == nil, timeline.subtitle(sel) == nil else { selection = id; if id != nil { selectedLane = nil }; return }
         if timeline.group(of: sel).contains(where: { $0.id == id }) { return }
         linkCandidate = linkCandidate == id ? nil : id
     }
@@ -599,11 +613,12 @@ final class ProjectStore {
     /// 정보 패널이 보일 레인: 고른 레인, 없으면 선택한 클립의 레인
     var inspectedLane: Lane? {
         if let l = selectedLane, let lane = timeline.laneInfo(l) { return lane }
-        return selection.flatMap { timeline.laneID(of: $0) }.flatMap { timeline.laneInfo($0) }
+        return selection.flatMap { timeline.laneID(of: $0) ?? timeline.subtitle($0)?.lane }.flatMap { timeline.laneInfo($0) }
     }
     func selectLane(_ id: UUID?) { selectedLane = id; if id != nil { selection = nil } }
     /// 레인 편집(실행 취소 한 단계). 편집 중(드래그)에는 하지 않는다.
-    private func commitLane(_ make: (Timeline) throws -> Timeline, select lane: UUID? = nil) {
+    func commitLane(_ make: (Timeline) throws -> Timeline, select lane: UUID? = nil) {
+        commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         guard gestureBase == nil else { return }
         pauseForEdit()
         do {
@@ -612,13 +627,13 @@ final class ProjectStore {
             history.apply(t, focus: selection)
             if let lane { selectedLane = lane }
             if let l = selectedLane, t.laneInfo(l) == nil { selectedLane = nil }
-            if let s = selection, t.clip(s) == nil { selection = nil }
+            if let s = selection, t.clip(s) == nil, t.subtitle(s) == nil { selection = nil }
             statusMessage = nil
             timelineChanged()
         } catch let e as EditError { statusMessage = e.description } catch { statusMessage = error.localizedDescription }
     }
     /// 새 레인의 기본 이름: "영상"·"오디오". 번호(V2·A2)는 위치에서 따로 보이므로 이름에 넣지 않는다(순서를 바꿔도 어긋나지 않게).
-    func newLaneName(_ kind: LaneKind) -> String { kind == .video ? "영상" : "오디오" }
+    func newLaneName(_ kind: LaneKind) -> String { kind == .video ? "영상" : (kind == .audio ? "오디오" : "자막") }
 
     // MARK: 복사·붙여넣기(2026-10-11)
 
@@ -626,13 +641,14 @@ final class ProjectStore {
     /// 프로젝트를 바꾸면(새 프로젝트·열기) 비운다. 다른 프로젝트의 미디어 ID는 쓰지 않는다(붙여넣기 때 이 프로젝트 ID와 미디어로 다시 확인).
     struct ClipClipboard: Equatable { let project: UUID; let content: ClipboardContent; let selected: UUID }
     private(set) var clipClipboard: ClipClipboard?
-    var canCopy: Bool { selection.flatMap { timeline.clip($0) } != nil && gestureBase == nil }
+    var canCopy: Bool { selection.map { timeline.clip($0) != nil || timeline.subtitle($0) != nil } == true && gestureBase == nil }
     var canPaste: Bool { clipClipboard?.project == projectID && gestureBase == nil && openProgress == nil && !openRequested }
     /// 복사(⌘C): 고른 클립과 연결된 짝. 프로젝트를 바꾸지 않고 실행 취소 기록도 없다.
     func copySelection() {
-        guard gestureBase == nil, let id = selection, let c = try? timeline.copying(clip: id) else { statusMessage = "복사할 클립을 먼저 고르세요."; return }
+        guard gestureBase == nil, let id = selection,
+              let c = (timeline.subtitle(id) != nil ? try? timeline.copying(subtitle: id) : try? timeline.copying(clip: id)) else { statusMessage = "복사할 클립을 먼저 고르세요."; return }
         clipClipboard = ClipClipboard(project: projectID, content: c, selected: id)
-        statusMessage = c.all.count > 1 ? "연결된 클립 \(c.all.count)개를 복사했습니다." : "클립을 복사했습니다."
+        statusMessage = !c.subtitles.isEmpty ? "자막을 복사했습니다." : (c.all.count > 1 ? "연결된 클립 \(c.all.count)개를 복사했습니다." : "클립을 복사했습니다.")
     }
     /// 붙여넣기(⌘V): 재생 헤드에 복사한 묶음의 가장 이른 시작을 둔다. 한 단계(필요한 새 레인 포함). 붙여 넣은 클립(복사할 때 고른 클립의 복제)을 고른다.
     func pasteAtPlayhead() {
@@ -657,6 +673,15 @@ final class ProjectStore {
         if KeyRouting.menuTargetsEditor(self) { if canCopy { copySelection() } else { NSSound.beep() } }
         else { NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil) }
     }
+    /// 텍스트 전용 편집 메뉴(CP-07): 편집기 초점이면 경고음, 아니면 응답자 체인의 표준 동작
+    func menuTextOnly(_ action: Selector) {
+        if KeyRouting.menuTargetsEditor(self) { NSSound.beep() } else { NSApp.sendAction(action, to: nil, from: nil) }
+    }
+    /// 편집 > 삭제(CP-07): 편집기 초점이면 고른 클립·자막 삭제(빈틈 남김), 아니면 표준 텍스트 삭제
+    func menuDelete() {
+        if KeyRouting.menuTargetsEditor(self) { if selection != nil, gestureBase == nil { deleteSelection(ripple: false) } else { NSSound.beep() } }
+        else { NSApp.sendAction(#selector(NSText.delete(_:)), to: nil, from: nil) }
+    }
     func menuPaste() {
         if KeyRouting.menuTargetsEditor(self) { if canPaste { pasteAtPlayhead() } else { NSSound.beep(); if clipClipboard == nil { statusMessage = EditError.clipboardEmpty.description } } }
         else { NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil) }
@@ -664,10 +689,33 @@ final class ProjectStore {
     // MARK: 편집 도구(2026-10-11, D-030): 선택(V)·자르기(C)
 
     /// 타임라인 편집 도구. 앱을 열 때 선택 도구이고, 새 프로젝트·열기에서도 그대로이며 프로젝트 파일에 저장하지 않는다.
-    enum EditTool: Equatable { case selection, cut }
+    /// 텍스트(T, 2026-10-22): 자막 레인을 눌러 자막을 만들거나 기존 자막을 골라 글을 고친다. T를 누르는 것만으로는 아무것도 만들지 않는다.
+    enum EditTool: Equatable { case selection, cut, text }
     private(set) var tool: EditTool = .selection
+    /// 프리뷰 위 글 편집(2026-10-22, §44): 문서 밖 상태. 편집 중인 기존 자막은 프리뷰 그림에서 숨긴다(편집 칸과 겹쳐 두 번 보이지 않게).
+    var inlineEdit: InlineSubtitleEdit? { didSet { previewHost?.editingSubtitle = inlineEdit?.existingID } }
+    /// 색 조정 세션(문서 밖, 정보 패널·프리뷰가 보임). SubtitleUI.swift colorEditChange·finishColorSession(D-039).
+    struct ColorEditSession: Equatable { let id: UUID; let project: Int; let initial: SubtitleStyle; var current: SubtitleStyle }
+    var colorSession: ColorEditSession?
+    @ObservationIgnored var colorPanelObserver: NSObjectProtocol?
+    /// 정보 패널 글 칸이 편집 중이면 그 칸의 확정(commitInlineEditIfAny가 부름). 프로젝트 교체 때는 버린다.
+    @ObservationIgnored var panelTextCommit: (() -> Void)?
+    /// 자체 검사 전용(§45.3 측정): true면 이전 동작을 재현한다 — 프리뷰 자막 끌기가 이벤트마다 문서(관찰되는 타임라인)를 바꾸고,
+    /// 모양 칸이 자막 전체(시각 포함)에 의존한다. Release에서는 늘 false.
+    #if DEBUG
+    @ObservationIgnored var legacySubtitleUIForTest = false
+    #endif
+    #if DEBUG
+    /// 자체 검사 전용: 자막 끌기가 끌기 기록(관찰되는 타임라인)을 바꾼 수
+    @ObservationIgnored var subtitleGestureUpdatesForTest = 0
+    #endif
+    @ObservationIgnored var inlineSerial = 0
+    @ObservationIgnored var inlineFinishing = false
+    /// 프리뷰 편집 칸이 등록하는 끝내기(true = 확정). 칸이 글자(조합 중 글자 포함)를 읽어 finishInlineEdit을 부른다.
+    @ObservationIgnored var inlineEditorFinish: ((Bool) -> Void)?
     /// 도구 바꾸기(키·툴바·메뉴 모두 이 길). 끌기 중이면 바꾸지 않는다. 재생·재생 헤드·선택·타임라인·기록·저장 상태는 그대로다.
     @discardableResult func setTool(_ t: EditTool) -> Bool {
+        if t != tool { commitInlineEditIfAny() }   // 도구를 바꾸면 글 편집 확정(§44)
         guard gestureBase == nil else { return false }
         if tool != t { tool = t }
         return true
@@ -675,6 +723,7 @@ final class ProjectStore {
     /// 자르기 도구 판정(안내선과 실제 자르기가 같은 판정을 쓴다): 기존 분할 규칙(연결된 짝도 같은 원본 위치)으로 자를 수 있는가
     enum CutCheck: Equatable { case valid, rejected, linkedOutside }
     func cutCheck(_ id: UUID, atFrame f: Int) -> CutCheck {
+        if timeline.subtitle(id) != nil { return (try? timeline.splittingSubtitle(id, atFrame: f)) != nil ? .valid : .rejected }
         do { _ = try timeline.splitting(clip: id, atFrame: f); return .valid }
         catch EditError.linkedSplitOutside { return .linkedOutside }
         catch { return .rejected }
@@ -683,11 +732,12 @@ final class ProjectStore {
     /// 오른쪽 조각 선택, 재생 헤드 그대로). 경계·클립 밖은 조용히 무시하고, 짝이 그 위치를 덮지 않으면 상태 줄에 이유만 보인다.
     /// 거부되면 타임라인·선택·기록·저장 상태가 그대로다. 끌기 중에는 아무것도 하지 않는다(commit에 닿기 전 국소 보호).
     func cutClip(_ id: UUID, atFrame f: Int) {
-        guard gestureBase == nil, timeline.clip(id) != nil else { return }
+        guard gestureBase == nil, timeline.clip(id) != nil || timeline.subtitle(id) != nil else { return }
         pauseForEdit()
         switch cutCheck(id, atFrame: f) {
         case .valid:
             let right = UUID()
+            if timeline.subtitle(id) != nil { commit({ try $0.splittingSubtitle(id, atFrame: f, newIDs: (UUID(), right)) }, focus: right); return }
             commit({ try $0.splitting(clip: id, atFrame: f, newIDs: (UUID(), right)) }, focus: right)
         case .linkedOutside:
             statusMessage = EditError.linkedSplitOutside.description
@@ -717,13 +767,13 @@ final class ProjectStore {
     /// 레인 삭제. 클립이 있으면 확인한다(레인·클립 삭제와 짝 연결 해제가 한 단계). 그 종류의 마지막 레인은 지우지 않는다.
     func requestRemoveLane(_ id: UUID) {
         guard let lane = timeline.laneInfo(id), gestureBase == nil else { return }
-        guard timeline.lanes(lane.kind).count > 1 else { statusMessage = EditError.lastLane.description; return }
-        let inLane = timeline.clips(inLane: id)
-        let n = inLane.count
+        guard lane.kind == .subtitle || timeline.lanes(lane.kind).count > 1 else { statusMessage = EditError.lastLane.description; return }   // 자막 레인은 0개여도 된다
+        let ids = Self.laneContentIDs(timeline, id)
+        let n = ids.count
         guard n > 0 else { commitLane({ try $0.removingLane(id) }); return }
-        let request = LaneRemovalRequest(session: projectSession, lane: id, kind: lane.kind, clipIDs: Set(inLane.map(\.id)))
+        let request = LaneRemovalRequest(session: projectSession, lane: id, kind: lane.kind, clipIDs: ids)
         let linked = timeline.clips(inLane: id).filter { $0.link != nil }.count
-        var msg = "‘\(lane.name)’ 레인과 그 안의 클립 \(n)개를 지웁니다."
+        var msg = lane.kind == .subtitle ? "‘\(lane.name)’ 레인과 그 안의 자막 \(n)개를 지웁니다." : "‘\(lane.name)’ 레인과 그 안의 클립 \(n)개를 지웁니다."
         if linked > 0 { msg += " 다른 레인에 있는 연결된 짝 \(linked)개는 지우지 않고 연결만 해제합니다." }
         msg += "\n\n실행 취소(⌘Z)로 되돌릴 수 있습니다. 원본 파일은 그대로입니다."
         presentAlert(AlertInfo(title: "레인을 삭제할까요?", message: msg, buttons: ["레인 삭제", "취소"], destructiveIndex: 0, cancelIndex: 1,
@@ -731,12 +781,14 @@ final class ProjectStore {
     }
     /// 레인 삭제 확인이 묶인 대상(CP-02): 확인을 띄운 프로젝트 회차, 레인, 그 종류, 확인 문구에 센 클립들
     struct LaneRemovalRequest: Equatable { let session: Int; let lane: UUID; let kind: LaneKind; let clipIDs: Set<UUID> }
+    /// 레인의 내용(클립 또는 자막) ID
+    static func laneContentIDs(_ t: Timeline, _ lane: UUID) -> Set<UUID> { Set(t.clips(inLane: lane).map(\.id) + t.subtitles(inLane: lane).map(\.id)) }
     /// "레인 삭제"를 누른 때: 확인을 띄운 뒤 프로젝트가 바뀌었거나(같은 파일을 다시 연 경우 포함), 레인이 없어졌거나, 그 안의 클립이 확인 문구와
     /// 달라졌거나, 그 종류의 마지막 레인이 되었으면 아무것도 지우지 않는다(기록·저장 상태 그대로, 상태 문구만). 삭제했으면 true.
     @discardableResult
     func confirmRemoveLane(_ r: LaneRemovalRequest) -> Bool {
         guard r.session == projectSession, gestureBase == nil, let lane = timeline.laneInfo(r.lane), lane.kind == r.kind,
-              Set(timeline.clips(inLane: r.lane).map(\.id)) == r.clipIDs, timeline.lanes(r.kind).count > 1 else {
+              Self.laneContentIDs(timeline, r.lane) == r.clipIDs, r.kind == .subtitle || timeline.lanes(r.kind).count > 1 else {
             statusMessage = "확인한 뒤 프로젝트나 레인이 바뀌어 레인을 지우지 않았습니다."
             Self.trace.info("lane removal confirmation ignored (stale) sameSession=\(r.session == self.projectSession, privacy: .public)")
             return false
@@ -771,6 +823,7 @@ final class ProjectStore {
     }
     /// 페이드 손잡이 끌기 시작(선택은 그대로: 영상 클립을 골랐으면 연결된 소리의 페이드를 바꾼다)
     func beginFadeGesture() {
+        commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         interruptGesture()   // D-031
         pauseForEdit()
         history.beginGesture()
@@ -910,6 +963,18 @@ final class ProjectStore {
         return true
     }
     @ObservationIgnored private var stillRequest = 0
+    /// 지금 프리뷰 항목을 만든 타임라인(자막 제외). 자막만 바뀐 편집을 가려낸다.
+    @ObservationIgnored private var appliedVideoSnap: Timeline?
+    #if DEBUG
+    /// 자체 검사 전용: 항목을 바꾸지 않고 자막 층만 바꾼 수
+    @ObservationIgnored private(set) var subtitleOnlyRefreshes = 0
+    #endif
+    /// 프리뷰 화면이 새로 만들어졌을 때: 지금 항목에 자막 층을 다시 묶는다
+    func refreshPreviewSubtitles() {
+        let snap = timeline.excludingMedia(missingUsedMedia)
+        previewHost?.editingSubtitle = inlineEdit?.existingID
+        previewHost?.setSubtitles(player.currentItem == nil ? [] : snap.renderedSubtitles, durationFrames: snap.durationFrames, fps: Double(settings.fps), item: player.currentItem)
+    }
     /// 재구성이 적용된 뒤: 정지 화면을 내릴 차례면 새 항목이 표시될 준비가 됐을 때 내린다
     private func releaseStillIfDue(_ g: Int, item: AVPlayerItem) {
         guard let r = stillReleaseGeneration, g >= r else { return }
@@ -946,6 +1011,7 @@ final class ProjectStore {
     private(set) var liveTransform: (clip: UUID, transform: ClipTransform)?
     /// 프리뷰 끌기 시작(선택은 그대로 둔다: 소리 클립을 골랐어도 연결된 영상의 변형을 바꾼다)
     func beginTransformGesture() {
+        commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         interruptGesture()   // D-031
         pauseForEdit()
         history.beginGesture()
@@ -965,6 +1031,7 @@ final class ProjectStore {
 
     enum TrimEdge { case start, end }
     func beginGesture(select id: UUID) {
+        commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         interruptGesture()   // 끝나지 않은 끌기가 남아 있으면 먼저 취소(새 끌기에 섞어 확정하지 않음, D-031)
         pauseForEdit()
         selection = id
@@ -974,8 +1041,45 @@ final class ProjectStore {
         gestureSerialForDebug += 1; traceGestureDebug("begin kind=timeline")
         #endif
     }
+    /// 프리뷰에서 자막 옮기기(V 끌기, §44): 시작·놓기·취소는 다른 끌기와 같은 beginGesture·commitGesture·cancelGesture(한 단계, Esc 취소, D-031)
+
+    /// 끌기 중 위치: 끌기 시작 모양에서 출력 픽셀 (dx, dy)만큼(누적 오차 없음), 출력 화면 안으로 맞춤. 바뀐 자막을 돌려준다.
+    /// 끌기 시작 모양에서 출력 픽셀 (dx, dy)만큼 옮긴 모양(누적 오차 없음), 출력 화면 안으로 맞춤
+    static func movedStyle(_ style0: SubtitleStyle, dx: Double, dy: Double) -> SubtitleStyle {
+        var st = style0
+        st.xMilli = Int((min(max(style0.x + dx, 0), Double(SubtitleStyle.outputWidth)) * 1000).rounded())
+        st.yMilli = Int((min(max(style0.y + dy, 0), Double(SubtitleStyle.outputHeight)) * 1000).rounded())
+        return st
+    }
+    /// 끌기 기록에 놓은 위치를 넣는다(놓을 때 한 번, 확정은 commitGesture). 바뀐 자막을 돌려준다.
+    @discardableResult func updateSubtitleMove(_ id: UUID, to style: SubtitleStyle) -> SubtitleItem? {
+        guard let base = gestureBase, base.subtitle(id) != nil, let t = try? base.settingSubtitleStyle(id, style) else { return nil }
+        #if DEBUG
+        subtitleGestureUpdatesForTest += 1
+        #endif
+        history.updateGesture(t, focus: id)
+        return t.subtitle(id)
+    }
     func updateTrim(_ id: UUID, edge: TrimEdge, delta: Int) {
         guard let base = gestureBase else { return }
+        if let s = base.subtitle(id) {   // 자막 트림(리플 없음): 가장자리를 그대로 옮긴다. 1프레임·0·겹침 안으로 제한
+            let ns = edge == .start ? max(0, min(s.start + delta, s.end - 1)) : s.start, ne = edge == .end ? max(s.start + 1, s.end + delta) : s.end
+            // 결과가 지금과 같으면(프레임 사이 움직임) 관찰되는 값을 다시 넣지 않는다(§45.3)
+            do {
+                let t = try base.trimmingSubtitle(id, start: ns, end: ne)
+                var changed = t != timeline
+                #if DEBUG
+                changed = changed || legacySubtitleUIForTest
+                #endif
+                if changed { history.updateGesture(t, focus: id) }
+                if moveRejection != nil { moveRejection = nil }
+            } catch let e as EditError {
+                if timeline != base { history.updateGesture(base, focus: id) }
+                let r: EditError? = delta == 0 ? nil : e
+                if moveRejection != r { moveRejection = r }
+            } catch {}
+            return
+        }
         do { history.updateGesture(try edge == .start ? base.trimmingStart(clip: id, by: delta) : base.trimmingEnd(clip: id, by: delta), focus: id); moveRejection = nil }
         catch let e as EditError { history.updateGesture(base, focus: id); moveRejection = delta == 0 ? nil : e } catch {}
     }
@@ -985,6 +1089,25 @@ final class ProjectStore {
     /// 겹치면 원래 자리에 두고 제안 위치를 빨갛게 보인다(놓으면 아무것도 옮기지 않음).
     /// delta는 포인터에서 잰 소수 프레임(붙음 거리를 반올림 전 값으로 잰다).
     func updateFreeMove(_ id: UUID, delta: Double, lane: UUID? = nil, snapFrames: Double = 0) {
+        if let base = gestureBase, let sub = base.subtitle(id) {   // 자막 옮기기(리플 없음): 자막 레인 사이에서만
+            let (d, snap) = base.snappedSubtitleDelta(id, delta: max(Double(-sub.start), delta), threshold: snapFrames)
+            let s = sub.start + d
+            let l = lane.flatMap { base.laneInfo($0)?.kind == .subtitle ? $0 : nil } ?? sub.lane
+            // 같은 프레임·레인이면 아무것도 바꾸지 않는다(§45.3): 프레임 사이의 포인터 움직임마다 관찰되는 값(기록·안내선·제안)을 다시 넣어
+            // 타임라인을 읽는 모든 보기가 다시 계산되었다. 정수 프레임·붙음 규칙은 그대로다.
+            var skipSame = true
+            #if DEBUG
+            skipSame = !legacySubtitleUIForTest
+            #endif
+            if skipSame, let p = freeMoveProposal, p.id == id, p.start == s, p.lane == l, snapGuide == snap { return }
+            #if DEBUG
+            subtitleGestureUpdatesForTest += 1
+            #endif
+            if snapGuide != snap { snapGuide = snap }
+            if let t = try? base.relocatingSubtitle(id, toStart: s, lane: l) { freeMoveProposal = (id, s, true, l); history.updateGesture(t, focus: id) }
+            else { freeMoveProposal = (id, s, false, l); history.updateGesture(base, focus: id) }
+            return
+        }
         guard let base = gestureBase, let c = base.clip(id) else { return }
         let earliest = base.group(of: id).map(\.start).min() ?? c.start
         let (d, snap) = base.snappedDelta(clip: id, delta: max(Double(-earliest), delta), threshold: snapFrames)
@@ -1107,8 +1230,22 @@ final class ProjectStore {
         guard !snap.isEmpty else {
             currentPlan = nil
             player.replaceCurrentItem(with: nil)
+            appliedVideoSnap = nil
+            previewHost?.setSubtitles([], durationFrames: 0, fps: Double(s.fps), item: nil)
             appliedGeneration = g
             dropStill()
+            return
+        }
+        // 자막만 바뀐 편집(글·모양·자막 위치, 2026-10-22): 영상 항목은 그대로 두고 자막 층만 바꾼다(항목 교체의 검정 깜박임 없음).
+        // 진행 중인 재구성·정지 화면이 없고, 자막을 뺀 타임라인(길이 포함)이 지금 항목과 같을 때만.
+        if let prev = appliedVideoSnap, appliedGeneration == g - 1, stillReleaseGeneration == nil, let item = player.currentItem,
+           prev == snap.withoutSubtitleItems {
+            currentPlan?.subtitles = snap.renderedSubtitles
+            previewHost?.setSubtitles(snap.renderedSubtitles, durationFrames: snap.durationFrames, fps: Double(s.fps), item: item)
+            appliedGeneration = g
+            #if DEBUG
+            subtitleOnlyRefreshes += 1
+            #endif
             return
         }
         Task {
@@ -1132,6 +1269,8 @@ final class ProjectStore {
                 self.itemCreatedHookForTest?(item, g)   // 진단 전용: 새 항목에 비디오 출력을 붙인다(일반 실행에서는 nil)
                 #endif
                 self.player.replaceCurrentItem(with: item)
+                self.appliedVideoSnap = snap.withoutSubtitleItems
+                self.previewHost?.setSubtitles(snap.renderedSubtitles, durationFrames: snap.durationFrames, fps: Double(s.fps), item: item)
                 #if DEBUG
                 self.itemReplacements += 1
                 #endif
@@ -1165,6 +1304,7 @@ final class ProjectStore {
 
     func togglePlay() { isPlaying ? pause() : play() }
     func play() {
+        commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         guard !timeline.isEmpty, player.currentItem != nil else { return }
         if playhead >= timeline.durationFrames { seek(to: 0) }
         player.play(); setPlaying(true)
@@ -1176,6 +1316,7 @@ final class ProjectStore {
     func pauseForEdit() { if isPlaying { pause() } }
     func step(_ k: Int) { pauseForEdit(); seek(to: playhead + k) }
     func seek(to frame: Int) {
+        if hasPendingSubtitleEdits, frame != playhead { commitInlineEditIfAny() }   // 재생 헤드를 옮기면 글 편집 확정(§44)
         let f = max(0, min(frame, timeline.durationFrames))
         playhead = f
         player.seek(to: settings.time(f), toleranceBefore: .zero, toleranceAfter: .zero)
@@ -1195,6 +1336,7 @@ final class ProjectStore {
     // MARK: 내보내기
 
     func presentExportPanel() {
+        commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         guard !fileCommandBlocked() else { return }
         if let r = exportBlockReason { presentAlert(AlertInfo(title: "내보낼 수 없습니다", message: r)); return }
         guard canExport else { return }
@@ -1204,6 +1346,8 @@ final class ProjectStore {
         p.nameFieldStringValue = projectName + ".mp4"
         p.canCreateDirectories = true
         p.message = "내보낼 위치를 고르세요(1920×1080, 30 fps, H.264/AAC MP4)."
+        let missingFonts = missingSubtitleFonts   // 없는 글꼴: 막지 않고 알린다(시스템 글꼴로 그림, 2026-10-22)
+        if !missingFonts.isEmpty { p.message = (p.message ?? "") + "\n주의: 이 Mac에 없는 자막 글꼴(\(missingFonts.joined(separator: ", ")))은 시스템 글꼴로 그립니다." }
         #if DEBUG
         if let o = exportPanelOverrideForTest { o(); return }   // 자체 검사: 실제 저장 패널을 띄우지 않고 "패널을 띄우려 함"만 기록
         #endif
@@ -1402,6 +1546,7 @@ final class ProjectStore {
     @ObservationIgnored private(set) var editorClosedByUser = false
 
     func windowShouldClose(_ w: NSWindow, original: NSWindowDelegate?) -> Bool {
+        commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         if canCloseWithoutPrompt, exportPhase == .idle {
             let ok = original?.windowShouldClose?(w) ?? true
             if ok { editorClosedByUser = true; abandonBackgroundWork() }   // 닫힌 창에 가져오기 결과를 넣지 않는다
@@ -1508,6 +1653,10 @@ extension ProjectStore {
         if !timeline.isEmpty, !timeline.media.contains(where: { $0.hasVideo && missingMedia[$0.id] == nil }) {
             return "영상 원본이 없어 내보낼 수 없습니다(소리 파일만 있음). 출력 영상(1920×1080)의 바탕을 만들 영상 파일을 하나 이상 가져오세요."
         }
+        // 그리지 못하는 자막(2026-10-23): 내보내기 서비스도 같은 판정으로 대상 파일을 건드리기 전에 거부한다
+        if let bad = timeline.renderedSubtitles.first(where: { SubtitleRenderer.shared.raster($0).failed }) {
+            return "그릴 수 없는 자막이 있어 내보낼 수 없습니다(\(settings.timecode(bad.start))에서 시작하는 자막). 그 자막의 글을 줄이거나 글자 크기를 줄이세요."
+        }
         return nil
     }
     func updateWindowDocumentState() {
@@ -1533,6 +1682,7 @@ extension ProjectStore {
     // MARK: 새 프로젝트
 
     func requestNewProject() {
+        commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         guard !fileCommandBlocked(), !projectReplaceBlocked() else { return }
         requestDiscard(.newProject, proceed: { [weak self] in self?.resetProject() }, cancel: {})
     }
@@ -1544,6 +1694,9 @@ extension ProjectStore {
     private func replaceProject(timeline t: Timeline, url: URL?, id: UUID, cache: [String: MediaAsset], bookmarks bm: [UUID: Data], missing: [UUID: String]) {
         pauseForEdit()
         interruptGesture(reason: "replaceProject", clearViewDrags: true)   // 끌기 중이면 취소하고 보기의 끌기 상태(옮기기 누름 대기 포함)도 지운다(D-031)
+        inlineEdit = nil   // 남은 글 편집은 이 프로젝트에 넣지 않고 버린다(교체 요청 앞에서 이미 확정했다, §44)
+        colorSession = nil   // 색 조정 세션도 버린다(회차 확인으로 늦은 패널 값이 새 프로젝트를 바꾸지 않음)
+        panelTextCommit = nil   // 정보 패널 글 칸도(칸이 늦게 초점을 잃어도 회차 확인으로 넣지 않음)
         dropStill()
         history = EditHistory(t)
         savedTimeline = t
@@ -1565,6 +1718,7 @@ extension ProjectStore {
     /// 사용자가 시작한 저장(메뉴·⌘S·⇧⌘S, done 없음)은 시트·알림·패널 중이면 하지 않는다(CP-03). done이 있는 호출은 확인 시트가 사라진 뒤 잇는
     /// 내부 흐름(저장 → 새 프로젝트·열기·닫기·종료)이라 막지 않는다.
     func saveProject(saveAs: Bool = false, done: (@MainActor (Bool) -> Void)? = nil) {
+        commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         if done == nil, fileCommandBlocked() { return }
         SaveTrace.note("saveProject saveAs=\(saveAs) hasURL=\(projectURL != nil) dirty=\(isDirty)")
         if let u = projectURL, !saveAs {
@@ -1691,6 +1845,7 @@ extension ProjectStore {
 
     /// 프로젝트 열기(메뉴·최근·Finder). url이 nil이면 열기 패널. 가져오기·내보내기 중이면 거절, 저장하지 않은 변경은 확인.
     func requestOpenProject(_ url: URL?, scoped: Bool = false) {
+        commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         guard !fileCommandBlocked(), !projectReplaceBlocked() else { if scoped { url?.stopAccessingSecurityScopedResource() }; return }
         Self.trace.info("open requested fromRecent=\(url != nil, privacy: .public)")
         openRequested = true

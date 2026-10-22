@@ -217,7 +217,7 @@ enum MultiLaneSelfTest {
         let proj = out.appendingPathComponent("multilane.ontheframe")
         let saved = s.writeProject(to: proj)
         let doc = (try? Data(contentsOf: proj)).flatMap { try? ProjectFile.decode($0) }
-        check("project.saveV2", saved && !s.isDirty && doc?.document.version == ProjectFile.currentVersion && s.recentProjects.first?.path == proj.standardizedFileURL.path)
+        check("project.saveV2", saved && !s.isDirty && doc?.document.version == ProjectFile.subtitleFreeVersion && s.recentProjects.first?.path == proj.standardizedFileURL.path)
         s.resetProject()
         let reopened = await s.openProject(at: proj)
         check("project.reopenV2", reopened && s.timeline == edited && s.missingMedia.isEmpty && !s.isDirty && s.timeline.laneInfo(laneTB)?.muted == true
@@ -266,7 +266,7 @@ enum MultiLaneSelfTest {
         let v1Resaved = s.writeProject(to: out.appendingPathComponent("legacy-resaved.ontheframe"))
         let re = (try? Data(contentsOf: out.appendingPathComponent("legacy-resaved.ontheframe"))).flatMap { try? ProjectFile.decode($0) }
         check("project.openV1", v1Opened && v1T.lanes.map(\.name) == ["예전 영상", "예전 소리"] && v1T.clips.first?.lane == Lane.videoID && v1T.durationFrames == 130
-              && s.missingMedia.isEmpty && v1T.media.count == 1 && v1Resaved && re?.document.version == ProjectFile.currentVersion && re?.timeline == v1T, "lanes \(v1T.lanes.map(\.name))")
+              && s.missingMedia.isEmpty && v1T.media.count == 1 && v1Resaved && re?.document.version == ProjectFile.subtitleFreeVersion && re?.timeline == v1T, "lanes \(v1T.lanes.map(\.name))")
 
         // 12. 편집한 프로젝트를 다시 열어 내보내기 → otf-dev verify-multilane
         s.resetProject()

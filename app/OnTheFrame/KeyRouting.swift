@@ -22,7 +22,7 @@ import OnTheFrameEngine
 /// - Esc(드래그 취소)는 타임라인 보기가 직접 처리한다(TimelineNSView.cancelOperation).
 @MainActor
 enum KeyRouting {
-    enum BareKeyAction: Equatable { case playPause, stepBackward, stepForward, toStart, toEnd, deleteSelection, rippleDelete, selectionTool, cutTool }
+    enum BareKeyAction: Equatable { case playPause, stepBackward, stepForward, toStart, toEnd, deleteSelection, rippleDelete, selectionTool, cutTool, textTool }
 
     /// 키 코드(가상 키) → 동작. 수정 키(⌘⌥⌃⇧)가 있으면 nil(예: ⇧← 등은 처리하지 않음).
     /// 예외: ⇧Delete·⇧⌫·⇧⌦는 리플 삭제(D-020). 수정 키 없는 Delete·⌫·⌦는 빈틈을 남기는 삭제.
@@ -42,6 +42,7 @@ enum KeyRouting {
         case 51, 117: a = .deleteSelection // ⌫(Delete), ⌦(Forward Delete)
         case 9: a = .selectionTool         // V(한국어 ㅍ)
         case 8: a = .cutTool               // C(한국어 ㅊ)
+        case 17: a = .textTool             // T(한국어 ㅅ, 2026-10-22): 도구만 바꾼다(자막을 만들지 않음)
         default: a = nil
         }
         if isRepeat, a != .stepBackward, a != .stepForward { return nil }
@@ -129,7 +130,7 @@ enum KeyRouting {
         }
         guard let action = bareKeyAction(keyCode: e.keyCode, modifiers: e.modifierFlags, isRepeat: e.isARepeat) else {
             // 반복된 Space·Delete는 편집기 문맥이면 조용히 버린다(한 번 누름 = 한 번 동작).
-            if e.isARepeat, [49, 51, 117, 8, 9].contains(e.keyCode),
+            if e.isARepeat, [49, 51, 117, 8, 9, 17].contains(e.keyCode),
                e.modifierFlags.intersection([.command, .option, .control]).isEmpty,
                editorAcceptsShortcuts(store), eventWindowOK(e, store) { return nil }
             return e
@@ -152,6 +153,7 @@ enum KeyRouting {
             store.deleteSelection(ripple: action == .rippleDelete)
         case .selectionTool: store.setTool(.selection)   // 도구만 바꾼다(재생·재생 헤드·선택·편집 그대로)
         case .cutTool: store.setTool(.cut)
+        case .textTool: store.setTool(.text)
         }
         return nil
     }
@@ -172,7 +174,7 @@ enum KeyRouting {
         switch cmd {
         // 초점은 위에서 실제 상태로 확인했다. 캐시된 editorFocused(store.canSplit)는 키 창 변화 알림이 늦으면 낡을 수 있어 쓰지 않는다.
         case .split: if !store.timeline.isEmpty, store.alert == nil, store.gestureBase == nil { store.splitAtPlayhead(); done = true }
-        case .undo: if store.gestureBase == nil, store.history.canUndo { store.undo(); done = true }
+        case .undo: if store.gestureBase == nil, store.history.canUndo || store.colorSession != nil { store.undo(); done = true }   // 색 조정 세션: 끝내고 되돌림(D-039)
         case .redo: if store.gestureBase == nil, store.history.canRedo { store.redo(); done = true }
         case .export: if store.gestureBase == nil, store.exportBlockReason != nil || store.canExport { store.presentExportPanel(); done = true }
         // 프로젝트 파일(A-013): 한국어 입력 소스에서도 한 번만 동작하도록 라우터가 처리한다

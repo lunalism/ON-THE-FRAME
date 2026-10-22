@@ -45,18 +45,22 @@ struct OnTheFrameApp: App {
             }
             // 편집 > 복사하기·붙여넣기(2026-10-11): 편집기에 초점이 있으면 타임라인 클립(앱 안 클립보드), 텍스트 입력 중이면 표준 텍스트 동작.
             // 키 입력은 KeyRouting이 판단한다(텍스트 입력 중에는 이 메뉴 키 등가물 → 응답자 체인). 텍스트에서 늘 쓰도록 항목을 끄지 않는다.
-            // 오려두기·모두 선택은 텍스트 전용(타임라인 잘라내기는 없음).
+            // 오려두기·모두 선택·붙여넣고 스타일 맞추기는 텍스트 전용(타임라인 잘라내기는 없음): 편집기 초점이면 경고음만(CP-07, 2026-10-22).
+            // 삭제: 텍스트 입력 중이면 표준 텍스트 삭제, 편집기 초점이면 고른 클립·자막 삭제(빈틈 남김, Delete 키와 같음).
             CommandGroup(replacing: .pasteboard) {
-                Button("오려두기") { NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil) }.keyboardShortcut("x")
+                Button("오려두기") { store.menuTextOnly(#selector(NSText.cut(_:))) }.keyboardShortcut("x")
                 Button("복사하기") { store.menuCopy() }.keyboardShortcut("c")
                 Button("붙여넣기") { store.menuPaste() }.keyboardShortcut("v")
-                Button("모두 선택") { NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil) }.keyboardShortcut("a")
+                Button("붙여넣고 스타일 맞추기") { store.menuTextOnly(#selector(NSTextView.pasteAsPlainText(_:))) }.keyboardShortcut("v", modifiers: [.command, .option, .shift])
+                Button("삭제") { store.menuDelete() }
+                Button("모두 선택") { store.menuTextOnly(#selector(NSText.selectAll(_:))) }.keyboardShortcut("a")
             }
             CommandMenu("타임라인") {
                 // 편집 도구(D-030): 체크 표시는 지금 도구. 수정 키 없는 V·C는 메뉴 키 등가물로 두지 않고 제목에만 적는다(키는 KeyRouting).
                 Picker("편집 도구", selection: Binding(get: { store.tool }, set: { store.setTool($0) })) {
                     Text("선택 도구  V").tag(ProjectStore.EditTool.selection)
                     Text("자르기 도구  C").tag(ProjectStore.EditTool.cut)
+                    Text("텍스트 도구  T").tag(ProjectStore.EditTool.text)
                 }
                 .pickerStyle(.inline).labelsHidden().disabled(store.gestureBase != nil)
                 Divider()
@@ -75,6 +79,10 @@ struct OnTheFrameApp: App {
                 Button("영상·소리 레인 쌍 추가") { store.addLanePair() }.disabled(store.gestureBase != nil)
                 Button("영상 레인 추가") { store.addLane(.video) }.disabled(store.gestureBase != nil)
                 Button("오디오 레인 추가") { store.addLane(.audio) }.disabled(store.gestureBase != nil)
+                Button("자막 레인 추가") { store.addLane(.subtitle) }.disabled(store.gestureBase != nil)
+                Divider()
+                // 자막(2026-10-22): 재생 헤드에 기본 길이(3초) 자막. 기본 단축키 없음. 자막 레인이 없으면 S1을 함께 만든다.
+                Button("자막 추가") { store.addSubtitleAtPlayhead() }.disabled(store.gestureBase != nil || !store.fileCommandsAvailable)
             }
             // 보기: 패널 접기·펼치기와 기본 배치(창 위치·크기는 바꾸지 않음)
             CommandGroup(before: .toolbar) {
@@ -163,6 +171,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if args.contains("-OTFFileGuardTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await FileGuardSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFColorLayoutTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await ColorLayoutSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFSubtitleTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await SubtitleSelfTest.run(folder: folder) }
             return
         }
         if args.contains("-OTFToolTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
@@ -258,6 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 시스템 로그아웃·종료 중이면 앱이 그 과정을 한 번 취소하게 된다(저장하지 않은 작업이 있을 때의 안전한 방향).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let s = ProjectStore.shared
+        s.commitInlineEditIfAny()   // 프리뷰 위 글 편집을 확정한 뒤 저장 확인을 판단한다(§44)
         if s.canCloseWithoutPrompt, s.exportPhase == .idle { return .terminateNow }
         s.requestDiscard(.quit, proceed: { DispatchQueue.main.async { NSApp.terminate(nil) } }, cancel: {})
         return .terminateCancel

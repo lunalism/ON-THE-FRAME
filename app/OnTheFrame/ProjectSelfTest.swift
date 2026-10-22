@@ -51,7 +51,7 @@ enum ProjectSelfTest {
         check("save.firstNoCompletion", saved1 && fm.fileExists(atPath: p1.path) && !s.isDirty && s.projectURL?.lastPathComponent == "p1.ontheframe" && s.windowTitle == "p1"
               && s.recentProjects.first?.path == p1.standardizedFileURL.path, "title \(s.windowTitle) recents \(s.recentProjects.map(\.name))")
         if let data = try? Data(contentsOf: p1), let (t, doc) = try? ProjectFile.decode(data) {
-            check("save.fileContents", t == savedTimeline && doc.version == ProjectFile.currentVersion && doc.media.allSatisfy { $0.bookmark != nil } && doc.projectID == s.projectID,
+            check("save.fileContents", t == savedTimeline && doc.version == ProjectFile.subtitleFreeVersion && doc.media.allSatisfy { $0.bookmark != nil } && doc.projectID == s.projectID,
                   "bookmarks \(doc.media.filter { $0.bookmark != nil }.count)/\(doc.media.count)")
         } else { check("save.fileContents", false, "decode") }
         // 2b. 회귀(2026-10-10 저장 실패): 메뉴·⌘S와 같은 완료 처리기 없는 저장도 실제로 파일을 쓴다
