@@ -59,7 +59,7 @@ final class TransformModelTests: XCTestCase {
         let t = try b0.settingTransform(clip: v, ClipTransform(scalePermille: 1234, offsetX: -567, offsetY: 89))
         let data = try ProjectFile.encode(t, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)
         let (back, doc) = try ProjectFile.decode(data)
-        XCTAssertEqual(doc.version, ProjectFile.currentVersion); XCTAssertEqual(back, t)
+        XCTAssertEqual(doc.version, ProjectFile.subtitleFreeVersion); XCTAssertEqual(back, t)
         XCTAssertEqual(back.clip(v)?.transform, ClipTransform(scalePermille: 1234, offsetX: -567, offsetY: 89))
         let text = String(decoding: data, as: UTF8.self).replacingOccurrences(of: " ", with: "")
         // 형식 4: 정수 격자(백만분율·1/1000 픽셀). 부동소수점을 쓰지 않는다.
@@ -100,7 +100,7 @@ final class TransformModelTests: XCTestCase {
         XCTAssertEqual(old.clip(v)?.transform, ClipTransform(scaleMicro: 1_234_000, offsetXMilli: -567_000, offsetYMilli: 89_000))
         // 다시 저장하면 형식 4(같은 값)
         let re = try ProjectFile.encode(old, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)
-        XCTAssertEqual(try ProjectFile.decode(re).document.version, ProjectFile.currentVersion); XCTAssertEqual(try ProjectFile.decode(re).timeline.clip(v)?.transform, old.clip(v)?.transform)
+        XCTAssertEqual(try ProjectFile.decode(re).document.version, ProjectFile.subtitleFreeVersion); XCTAssertEqual(try ProjectFile.decode(re).timeline.clip(v)?.transform, old.clip(v)?.transform)
         // 범위: 1%–1000%, 위치 ±7680·±4320 px. 범위 밖 고운 값은 거부, clamped는 맞춤
         XCTAssertFalse(ClipTransform(scale: 10.000001, x: 0, y: 0).isValid); XCTAssertTrue(ClipTransform(scale: 10, x: 7680, y: -4320).isValid)
         XCTAssertEqual(ClipTransform(scale: 0.001, x: 9000, y: 0).clamped, ClipTransform(scaleMicro: 10_000, offsetXMilli: 7_680_000, offsetYMilli: 0))

@@ -138,7 +138,8 @@ final class ClipAudioTests: XCTestCase {
         t = try t.settingClipAudio(clip: a, volumePercent: 55, muted: true, fadeInFrames: 40).splitting(clip: a, atFrame: 15, newIDs: (UUID(), r))
         let data = try ProjectFile.encode(t, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)
         let (back, doc) = try ProjectFile.decode(data)
-        XCTAssertEqual(doc.version, 5); XCTAssertEqual(ProjectFile.currentVersion, 5)
+        // 자막이 없는 프로젝트는 형식 5로 쓴다(2026-10-22 형식 6 도입 뒤에도, 이전 앱 호환). 읽을 수 있는 최신 형식은 6이다.
+        XCTAssertEqual(doc.version, 5); XCTAssertEqual(ProjectFile.subtitleFreeVersion, 5); XCTAssertEqual(ProjectFile.currentVersion, 6)
         XCTAssertEqual(back, t)
         XCTAssertEqual(back.clip(r)?.effectiveAudio, ClipAudio(volumePercent: 55, muted: true, fadeIn: .init(length: 40, offset: 15)))
         let json = String(data: data, encoding: .utf8)!

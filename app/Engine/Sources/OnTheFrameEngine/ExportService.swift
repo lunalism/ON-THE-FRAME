@@ -94,12 +94,20 @@ public enum ExportService {
     /// 인코딩 중에는 [0, 0.99], 1.0은 검증·승격 성공 뒤 한 번. 취소·실패에서는 1.0을 보고하지 않는다.
     /// 작업(Task) 취소 = 내보내기 취소.
     /// stage: 인코딩 시작(.encoding)과 인코딩이 끝나 검증·승격에 들어감(.finalizing)을 순서대로 알린다(표시용, 진행률은 바꾸지 않음).
+    /// 그리지 못하는 자막(첫 번째). 앱은 내보내기 전에 같은 판정으로 막고 알린다.
+    public static func unrenderableSubtitle(_ p: PlannedComposition) -> SubtitleItem? {
+        p.subtitles.first { SubtitleRenderer.shared.raster($0).failed }
+    }
     public static func export(_ p: PlannedComposition, to d: ExportDestination, sources: [MediaAsset],
                               options: Options = Options(), stage: @escaping @Sendable (ExportStage) async -> Void = { _ in },
                               progress: @escaping @Sendable (Double) async -> Void) async -> ExportOutcome {
         if let f = validate(d, sources: sources) { return .failed(f) }
         // A-014: 영상 원본이 하나도 없으면(소리 파일만) 영상 트랙을 만들 수 없다 — 내보내지 않는다(앱은 미리 막는다)
         guard p.hasVideo else { return .failed(.export("영상이 있는 원본이 없습니다. 영상 파일을 하나 이상 가져오세요.")) }
+        // 그려야 할 자막을 그리지 못하면(2026-10-23) 임시 파일·대상 파일을 건드리기 전에 거부한다. 빈 자막은 plan.subtitles에 없다.
+        if let bad = Self.unrenderableSubtitle(p) {
+            return .failed(.export("자막을 그릴 수 없어 내보내지 않았습니다(\(bad.start)프레임에서 시작하는 자막). 글을 줄이거나 글자 크기를 줄인 뒤 다시 내보내세요."))
+        }
         let tempDir: URL
         do {
             tempDir = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: d.url, create: true)
@@ -109,38 +117,20 @@ public enum ExportService {
         defer { try? FileManager.default.removeItem(at: tempDir) }   // 이 내보내기가 만든 임시 디렉터리만
         let tempFile = tempDir.appendingPathComponent("output.mp4")
 
-        guard let session = AVAssetExportSession(asset: p.composition, presetName: AVAssetExportPreset1920x1080) else {
-            return .failed(.export("export session"))
-        }
-        session.videoComposition = p.videoComposition
-        session.audioMix = p.audioMix   // 오디오 레인 음량(A-014)
-        session.shouldOptimizeForNetworkUse = false
-        let injected = OSAllocatedUnfairLock(initialState: false)
-        let box = SessionBox(session: session)
         await stage(.encoding)
-        let exportTask = Task { try await box.session.export(to: tempFile, as: .mp4) }
-        let watcher = Task {
-            var last = 0.0
-            for await st in box.session.states(updateInterval: 0.1) {
-                if case .exporting(let pr) = st {
-                    let f = pr.fractionCompleted
-                    // 유한값만, [0, 0.99]로 제한, 줄어들지 않게(세션이 되돌린 값은 보고하지 않음)
-                    if f.isFinite {
-                        let v = min(max(f, 0), 1) * encodingProgressCap
-                        if v >= last { last = v; await progress(v) }
-                    }
-                    if let ff = options.failAfterFraction, f >= ff {
-                        injected.withLock { $0 = true }; exportTask.cancel(); break
-                    }
-                }
-            }
+        let result: Result<Void, Error>
+        if p.subtitles.isEmpty {
+            // 자막이 없는 프로젝트: 지금까지의 내보내기 세션 경로 그대로
+            let (r, injected) = await encodeWithSession(p, to: tempFile, options: options, progress: progress)
+            if injected { return .failed(.injected) }
+            result = r
+        } else {
+            // 자막이 있는 프로젝트: 구조 R(기본 합성기 리더 → 4:2:0 자막 → 쓰기, SubtitleExporter)
+            do { try await SubtitleExporter.encode(p, to: tempFile, failAfterFraction: options.failAfterFraction, progress: progress); result = .success(()) }
+            catch is SubtitleExporter.Injected { return .failed(.injected) }
+            catch let e as ExportFailure { return .failed(e) }
+            catch { result = .failure(error) }
         }
-        let result: Result<Void, Error> = await withTaskCancellationHandler {
-            do { try await exportTask.value; return .success(()) } catch { return .failure(error) }
-        } onCancel: { exportTask.cancel() }
-        watcher.cancel()
-        _ = await watcher.value   // 진행률 보고가 끝난 뒤에 결과를 정한다(늦은 진행률이 결과 뒤에 오지 않게)
-        if injected.withLock({ $0 }) { return .failed(.injected) }
         switch result {
         case .failure(let e):
             if e is CancellationError || Task.isCancelled { return .cancelled }
@@ -163,9 +153,46 @@ public enum ExportService {
             guard au.count == (p.hasAudio ? 1 : 0) else { return .failed(.verification("audio tracks \(au.count)")) }
         } catch { return .failed(.verification(error.localizedDescription)) }
         options.beforePromotion?()
+        // 마무리(검증) 중 취소(CP-13): 승격 직전에 다시 본다. 취소했으면 결과를 옮기지 않고 임시 파일만 지운다.
+        if Task.isCancelled { return .cancelled }
         let outcome = promote(tempFile, to: d, sources: sources)
         if case .completed = outcome { await progress(1) }   // 검증·승격 성공 뒤에만 1.0
         return outcome
+    }
+
+    /// 자막 없는 프로젝트의 인코딩(내보내기 세션, AVAssetExportPreset1920x1080). 결과와 실패 주입 여부.
+    static func encodeWithSession(_ p: PlannedComposition, to tempFile: URL, options: Options, progress: @escaping @Sendable (Double) async -> Void) async -> (Result<Void, Error>, Bool) {
+        guard let session = AVAssetExportSession(asset: p.composition, presetName: AVAssetExportPreset1920x1080) else {
+            return (.failure(ExportFailure.export("export session")), false)
+        }
+        session.videoComposition = p.videoComposition
+        session.audioMix = p.audioMix   // 오디오 레인 음량(A-014)
+        session.shouldOptimizeForNetworkUse = false
+        let injected = OSAllocatedUnfairLock(initialState: false)
+        let box = SessionBox(session: session)
+        let exportTask = Task { try await box.session.export(to: tempFile, as: .mp4) }
+        let watcher = Task {
+            var last = 0.0
+            for await st in box.session.states(updateInterval: 0.1) {
+                if case .exporting(let pr) = st {
+                    let f = pr.fractionCompleted
+                    // 유한값만, [0, 0.99]로 제한, 줄어들지 않게(세션이 되돌린 값은 보고하지 않음)
+                    if f.isFinite {
+                        let v = min(max(f, 0), 1) * encodingProgressCap
+                        if v >= last { last = v; await progress(v) }
+                    }
+                    if let ff = options.failAfterFraction, f >= ff {
+                        injected.withLock { $0 = true }; exportTask.cancel(); break
+                    }
+                }
+            }
+        }
+        let result: Result<Void, Error> = await withTaskCancellationHandler {
+            do { try await exportTask.value; return .success(()) } catch { return .failure(error) }
+        } onCancel: { exportTask.cancel() }
+        watcher.cancel()
+        _ = await watcher.value   // 진행률 보고가 끝난 뒤에 결과를 정한다(늦은 진행률이 결과 뒤에 오지 않게)
+        return (result, injected.withLock { $0 })
     }
 
     static func promote(_ temp: URL, to d: ExportDestination, sources: [MediaAsset]) -> ExportOutcome {

@@ -209,7 +209,7 @@ final class MultiLaneModelTests: XCTestCase {
         // 다시 저장 → 형식 2 → 같은 타임라인
         let again = try ProjectFile.encode(t, projectID: pid, settings: .m1, bookmarks: [ma: Data([1, 2, 3])], projectURL: nil)
         let (back, doc2) = try ProjectFile.decode(again)
-        XCTAssertEqual(doc2.version, ProjectFile.currentVersion); XCTAssertEqual(back, t)
+        XCTAssertEqual(doc2.version, ProjectFile.subtitleFreeVersion); XCTAssertEqual(back, t)
     }
 
     func testVersion2RoundTripWithLanesAudioMediaAndValidation() throws {
@@ -221,7 +221,7 @@ final class MultiLaneModelTests: XCTestCase {
             .settingLaneAudio(a2, volumePercent: 40).settingLaneAudio(a3, muted: true)
         let data = try ProjectFile.encode(t, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)
         let (back, doc) = try ProjectFile.decode(data)
-        XCTAssertEqual(back, t); XCTAssertEqual(doc.version, ProjectFile.currentVersion)
+        XCTAssertEqual(back, t); XCTAssertEqual(doc.version, ProjectFile.subtitleFreeVersion)
         XCTAssertEqual(back.lanes.map(\.id), [v2, Lane.videoID, Lane.audioID, a2, a3])
         XCTAssertEqual(back.laneInfo(a2)?.volumePercent, 40); XCTAssertEqual(back.laneInfo(a3)?.muted, true)
         let w = try XCTUnwrap(back.media.first { $0.id == mw })

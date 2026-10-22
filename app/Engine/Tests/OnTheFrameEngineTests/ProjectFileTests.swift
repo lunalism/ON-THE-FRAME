@@ -32,7 +32,8 @@ final class ProjectFileTests: XCTestCase {
         let (back, doc) = try ProjectFile.decode(data)
         XCTAssertEqual(back, t)                                            // 클립·연결·레인·미디어·길이(빈틈 포함) 모두 같음
         XCTAssertEqual(doc.projectID, pid)
-        XCTAssertEqual(doc.version, ProjectFile.currentVersion); XCTAssertEqual(doc.format, "dev.ontheframe.project")
+        XCTAssertEqual(doc.version, ProjectFile.version(for: t)); XCTAssertEqual(doc.version, 5)   // 자막 없음 → 형식 5(2026-10-22)
+        XCTAssertEqual(doc.format, "dev.ontheframe.project")
         XCTAssertEqual(doc.settings, .init(width: 1920, height: 1080, fps: 30))
         XCTAssertEqual(doc.media.first { $0.ref.id == ma }?.bookmark, bm)
         XCTAssertEqual(doc.media.first { $0.ref.id == ma }?.relativePath, "../a.mp4")

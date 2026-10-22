@@ -15,7 +15,15 @@ public enum ProjectFile {
     /// 형식 3 이전 파일의 천분율·정수 픽셀 변형도 그대로 연다. (형식 3을 읽는 이전 빌드가 새 키를 모른 채 열지 않도록 버전을 올렸다.)
     /// 형식 5(2026-10-11): 소리 클립의 `audio`(음량 퍼센트·음소거·페이드 인/아웃 {length, offset} 프레임). 없으면 기본값(100%, 페이드 없음).
     /// 형식 4 이전 파일도 그대로 연다(소리 그대로). (형식 4를 읽는 이전 빌드가 클립 음량·페이드를 모른 채 열고 다시 저장해 버리지 않도록 버전을 올렸다.)
-    public static let currentVersion = 5
+    /// 형식 6(2026-10-22): 자막 레인(레인 종류 `subtitle`)과 `subtitles`(미디어 없는 글자 항목, 정수 프레임·정수 모양 값).
+    /// 자막 레인·자막이 하나도 없는 프로젝트는 형식 5로 쓴다(이전 앱이 열 수 있게, 소유자 방향 2026-10-22). 자막 레인이 있으면(자막이 0개여도) 형식 6이다.
+    /// 그래서 쓰는 형식은 내용에 따라 5 또는 6이고, 내려 쓸 때 버리는 값은 없다(형식 5에 자막이 들어갈 자리가 없으면 6으로 쓴다).
+    /// 형식 5 이하에 자막 레인·`subtitles`가 있으면 잘못된 파일로 거부한다.
+    /// 자막 글자는 빈 글자도 된다(2026-10-23, D-037: 프리뷰를 누르면 바로 빈 자막을 만든다). 형식 6은 커밋한 적이 없는 작업 중 형식이라
+    /// 이 완화로 거부되는 공식 읽기 쪽은 없다(그 전 작업용 Debug 빌드만 빈 자막이 든 파일을 거부한다). 모양·시각·레인 검사는 그대로다.
+    public static let currentVersion = 6
+    /// 자막이 없을 때 쓰는 형식(이전 앱 호환)
+    public static let subtitleFreeVersion = 5
     public static let oldestReadableVersion = 1
     public static let fileExtension = "ontheframe"
 
@@ -37,7 +45,11 @@ public enum ProjectFile {
         public var media: [MediaEntry]
         public var videoClips: [Clip]
         public var audioClips: [Clip]
+        /// 형식 6만(없으면 키 없음)
+        public var subtitles: [SubtitleItem]?
     }
+    /// 이 타임라인을 쓸 형식 버전
+    public static func version(for t: Timeline) -> Int { t.needsSubtitleFormat ? currentVersion : subtitleFreeVersion }
     private struct Header: Decodable { let format: String?; let version: Int? }
 
     public enum LoadError: Error, Equatable, CustomStringConvertible {
@@ -60,13 +72,13 @@ public enum ProjectFile {
     /// 타임라인 → 파일 내용. bookmarks: 미디어 id → 북마크, projectURL: 상대 경로 기준(저장할 위치).
     public static func encode(_ t: Timeline, projectID: UUID, settings: RenderSettings, bookmarks: [UUID: Data], projectURL: URL?) throws -> Data {
         let dir = projectURL?.deletingLastPathComponent().standardizedFileURL
-        let doc = Document(format: format, version: currentVersion, projectID: projectID,
+        let doc = Document(format: format, version: version(for: t), projectID: projectID,
                            settings: Settings(width: settings.width, height: settings.height, fps: Int(settings.fps)),
                            durationFrames: t.durationFrames, lanes: t.lanes,
                            media: t.media.map { r in
                                MediaEntry(ref: r, relativePath: dir.flatMap { d in relative(URL(fileURLWithPath: r.path), from: d) }, bookmark: bookmarks[r.id])
                            },
-                           videoClips: t.clips, audioClips: t.audioClips)
+                           videoClips: t.clips, audioClips: t.audioClips, subtitles: t.needsSubtitleFormat ? t.subtitles : nil)
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         return try enc.encode(doc)
@@ -91,9 +103,15 @@ public enum ProjectFile {
         if v == 1 {
             guard doc.lanes.count == 2, Set(doc.lanes.map(\.kind)) == [.video, .audio] else { throw LoadError.invalid("레인") }
             lanes = [doc.lanes.first { $0.kind == .video }!, doc.lanes.first { $0.kind == .audio }!]
+        } else if v <= 5 {
+            // 형식 2 이상도 두 종류 레인이 하나씩은 있어야 한다(레인 없는 클립이 갈 곳이 없으면 잘못된 파일, 2026-10-11 리뷰).
+            // 형식 5 이하에는 자막 레인·자막이 없다(있으면 잘못된 파일).
+            guard Set(doc.lanes.map(\.kind)) == [.video, .audio], doc.subtitles == nil else { throw LoadError.invalid("레인") }
+            lanes = doc.lanes
         } else {
-            // 형식 2 이상도 두 종류 레인이 하나씩은 있어야 한다(레인 없는 클립이 갈 곳이 없으면 잘못된 파일, 2026-10-11 리뷰)
-            guard Set(doc.lanes.map(\.kind)) == [.video, .audio] else { throw LoadError.invalid("레인") }
+            // 형식 6: 영상·오디오 각 하나 이상, 자막 레인은 0개 이상
+            let kinds = Set(doc.lanes.map(\.kind))
+            guard kinds.isSuperset(of: [.video, .audio]) else { throw LoadError.invalid("레인") }
             lanes = doc.lanes
         }
         guard Set(lanes.map(\.id)).count == lanes.count, lanes.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }),
@@ -107,16 +125,19 @@ public enum ProjectFile {
         let byID = Dictionary(uniqueKeysWithValues: refs.map { ($0.id, $0) })
         // 클립: ID 고유, 아는 미디어, 양수 길이·0 이상 위치
         let all = doc.videoClips + doc.audioClips
-        guard Set(all.map(\.id)).count == all.count else { throw LoadError.invalid("클립 ID 중복") }
+        let subs = doc.subtitles ?? []
+        guard Set(all.map(\.id) + subs.map(\.id)).count == all.count + subs.count else { throw LoadError.invalid("클립 ID 중복") }
+        // start + length가 넘치지 않게(손댄 파일, 코드 리뷰)
+        guard subs.allSatisfy({ laneKinds[$0.lane] == .subtitle && $0.start >= 0 && $0.length >= 1 && $0.start <= Int.max - $0.length && $0.style.isValid }) else { throw LoadError.invalid("자막") }
         guard all.allSatisfy({ byID[$0.mediaID] != nil }) else { throw LoadError.invalid("알 수 없는 미디어를 쓰는 클립") }
         guard all.allSatisfy({ $0.start >= 0 && $0.sourceIn >= 0 && $0.length >= 1 }) else { throw LoadError.invalid("클립 위치·길이") }
         guard doc.audioClips.allSatisfy({ byID[$0.mediaID]!.hasAudio }) else { throw LoadError.invalid("소리 없는 미디어를 쓰는 소리 클립") }
         guard doc.videoClips.allSatisfy({ byID[$0.mediaID]!.hasVideo }) else { throw LoadError.invalid("영상 없는 미디어를 쓰는 영상 클립") }
-        let t = Timeline(clips: doc.videoClips, audioClips: doc.audioClips, lanes: lanes, media: refs, mediaFrames: byID.mapValues(\.frameCount),
+        let t = Timeline(clips: doc.videoClips, audioClips: doc.audioClips, subtitles: subs, lanes: lanes, media: refs, mediaFrames: byID.mapValues(\.frameCount),
                          mediaHasAudio: byID.mapValues(\.hasAudio), mediaHasVideo: byID.mapValues(\.hasVideo), durationFrames: doc.durationFrames)
         // 길이는 저장값 그대로여야 한다(클립 끝보다 짧으면 잘못된 파일). 겹침·원본 범위·연결 쌍은 isValid가 본다.
         guard t.durationFrames == doc.durationFrames, doc.durationFrames >= 0 else { throw LoadError.invalid("타임라인 길이") }
-        guard t.isValid else { throw LoadError.invalid("겹침·원본 범위·연결 쌍") }
+        guard t.isValid else { throw LoadError.invalid("겹침·원본 범위·연결 쌍·레인 순서") }
         return (t, doc)
     }
 

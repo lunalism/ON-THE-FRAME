@@ -16,6 +16,9 @@ public struct PlannedComposition: @unchecked Sendable {
     /// 영상 트랙이 타임라인 끝까지 있는가(영상이 있는 원본이 하나도 없으면 false: 내보내기 불가)
     public let hasVideo: Bool
     let assets: [AVURLAsset]
+    /// 자막(2026-10-22): 그리기 순서(아래 레인 먼저). 비어 있으면 지금까지의 내보내기 세션 경로, 있으면 구조 R(SubtitleExporter)로 내보낸다.
+    /// 프리뷰는 composition 위에 같은 그림(SubtitleRenderer)의 층을 얹는다(앱).
+    public var subtitles: [SubtitleItem] = []
 }
 
 public enum PlanError: Error, CustomStringConvertible {
@@ -224,7 +227,8 @@ public enum CompositionPlanner {
         vc.frameDuration = settings.frameDuration
         vc.instructions = instructions
         return PlannedComposition(composition: comp.copy() as! AVComposition, videoComposition: vc.copy() as! AVVideoComposition,
-                                  durationFrames: t.durationFrames, settings: settings, hasAudio: anyAudio, audioMix: mix, hasVideo: hasVideo, assets: keep)
+                                  durationFrames: t.durationFrames, settings: settings, hasAudio: anyAudio, audioMix: mix, hasVideo: hasVideo, assets: keep,
+                                  subtitles: t.renderedSubtitles)   // 빈 자막은 그리지 않는다(D-037)
     }
 
     /// 소리 트랙 음량 경사(2026-10-11): 클립마다 페이드 모양의 꺾이는 점 사이를 한 구간으로, 구간 양 끝의 배율
