@@ -819,10 +819,10 @@ struct ClipAudioAdjust: View {
                 .id(clip.id)   // 다른 클립을 고르면 입력 중이던 숫자를 버린다(다음 클립에 적용되지 않게)
                 .disabled(a.muted)
             fadeRow("페이드 인", $fadeIn, partial: a.fadeIn.offset > 0 ? "자른 조각: 원래 페이드의 뒷부분(\(Int((a.fadeIn.edgeGain * 100).rounded()))%에서 시작)" : nil) {
-                store.setClipAudio(clip.id, fadeInFrames: frames(fadeIn))
+                if let f = frames(fadeIn) { store.setClipAudio(clip.id, fadeInFrames: f) }
             }
             fadeRow("페이드 아웃", $fadeOut, partial: a.fadeOut.offset > 0 ? "자른 조각: 원래 페이드의 앞부분(\(Int((a.fadeOut.edgeGain * 100).rounded()))%까지)" : nil) {
-                store.setClipAudio(clip.id, fadeOutFrames: frames(fadeOut))
+                if let f = frames(fadeOut) { store.setClipAudio(clip.id, fadeOutFrames: f) }
             }
             Text("클립 길이 \(FadeText.seconds(clip.length))초. 두 페이드는 겹치지 않게 줄어듭니다. 타임라인에서 소리 클립 위쪽 모서리의 손잡이를 끌어도 됩니다.")
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -851,7 +851,9 @@ struct ClipAudioAdjust: View {
             if let partial { Text(partial).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         }
     }
-    func frames(_ sec: Double) -> Int { sec.isFinite ? max(0, Int((sec * 30).rounded())) : 0 }
+    /// 초 → 프레임(2026-10-23 전체 검토): 숫자가 아니거나 무한이면 거부(nil, 칸은 sync로 되돌림 — 이전에는 0이 되어 페이드가 지워졌다),
+    /// 30을 곱하기 전에 넉넉한 범위(0…2⁴⁰)로 맞춘다(이전: "1e308"에 멈춤). 클립 길이·다른 페이드에 맞추는 것은 지금처럼 모델(settingClipAudio)이 한다.
+    func frames(_ sec: Double) -> Int? { NumericInput.scaledInt(sec, scale: 30, range: 0...(1 << 40)) }
     func sync() {
         let a = clip.effectiveAudio
         fadeIn = Double(a.fadeIn.visible(in: clip.length)) / 30; fadeOut = Double(a.fadeOut.visible(in: clip.length)) / 30

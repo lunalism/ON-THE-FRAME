@@ -653,6 +653,9 @@ final class ProjectStore {
     }
     /// 붙여넣기(⌘V): 재생 헤드에 복사한 묶음의 가장 이른 시작을 둔다. 한 단계(필요한 새 레인 포함). 붙여 넣은 클립(복사할 때 고른 클립의 복제)을 고른다.
     func pasteAtPlayhead() {
+        // 진행 중인 모양 조정·패널 글 입력을 먼저 한 단계로 넣는다(다른 문서 편집과 같은 경계, commit과 같음 — 2026-10-23 전체 검토:
+        // 붙여넣기가 열린 조정 세션을 건너뛰어 조정한 모양이 사라지거나 실행 취소 순서가 어긋났다). 글 칸의 붙여넣기는 여기로 오지 않는다(KeyRouting).
+        commitInlineEditIfAny()
         guard gestureBase == nil, openProgress == nil, !openRequested else { return }
         guard let cb = clipClipboard, cb.project == projectID else { statusMessage = EditError.clipboardEmpty.description; return }
         cancelPendingPress()

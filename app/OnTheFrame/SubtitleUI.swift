@@ -489,10 +489,12 @@ struct SubtitleStyleAdjust: View, @preconcurrency Equatable {
         let pick = members.first { ($0.dropFirst().first as? String) == curFace } ?? members.first
         if let ps = pick?.first as? String { apply { $0.fontName = ps } }
     }
+    // 숫자 칸(2026-10-23 전체 검토): 숫자가 아니거나 무한이면 거부하고, 곱하거나 정수로 바꾸기 전에 범위로 맞춘다(이전: "1e308"·"nan"에 멈춤).
+    // 넘긴 뒤 칸은 지금 값으로 다시 맞춘다(같은 값으로 맞춰져 바뀌지 않아도 입력한 글자가 남지 않게, 바뀌면 onChange가 새 값으로).
     func commitSize() {
-        guard let v = Double(size.trimmingCharacters(in: .whitespaces)) else { load(); return }
-        let t = min(max(Int((v * 10).rounded()), SubtitleStyle.sizeTenthsRange.lowerBound), SubtitleStyle.sizeTenthsRange.upperBound)
+        guard let v = NumericInput.number(size), let t = NumericInput.scaledInt(v, scale: 10, range: SubtitleStyle.sizeTenthsRange) else { load(); return }
         apply { $0.sizeTenths = t }
+        load()
     }
     func commitHex() {
         var h = hex.trimmingCharacters(in: .whitespaces); if h.hasPrefix("#") { h.removeFirst() }
@@ -500,14 +502,17 @@ struct SubtitleStyleAdjust: View, @preconcurrency Equatable {
         setColor((v >> 16) & 255, (v >> 8) & 255, v & 255, style.alpha)   // 색 조정 세션
     }
     func commitOpacity() {
-        guard let v = Double(opacity.trimmingCharacters(in: .whitespaces)) else { load(); return }
-        setColor(style.red, style.green, style.blue, Int((min(max(v, 0), 100) * 255 / 100).rounded()))   // 색 조정 세션
+        guard let v = NumericInput.number(opacity), let p = NumericInput.clamped(v, 0, 100) else { load(); return }
+        setColor(style.red, style.green, style.blue, Int((p * 255 / 100).rounded()))   // 색 조정 세션
+        load()
     }
     func commitPosition() {
-        guard let vx = Double(x.trimmingCharacters(in: .whitespaces)), let vy = Double(y.trimmingCharacters(in: .whitespaces)) else { load(); return }
         // 출력 화면 안(0…1920, 0…1080)으로 맞춘다
-        let cx = min(max(vx, 0), Double(SubtitleStyle.outputWidth)), cy = min(max(vy, 0), Double(SubtitleStyle.outputHeight))
-        apply { $0.xMilli = Int((cx * 1000).rounded()); $0.yMilli = Int((cy * 1000).rounded()) }
+        guard let vx = NumericInput.number(x), let vy = NumericInput.number(y),
+              let mx = NumericInput.scaledInt(vx, scale: 1000, range: 0...SubtitleStyle.outputWidth * 1000),
+              let my = NumericInput.scaledInt(vy, scale: 1000, range: 0...SubtitleStyle.outputHeight * 1000) else { load(); return }
+        apply { $0.xMilli = mx; $0.yMilli = my }
+        load()
     }
     /// 정렬 바꾸기: 가로 위치가 이전 정렬의 기본값이면 새 정렬의 기본값으로 옮긴다(아니면 그대로)
     func setAlignment(_ a: SubtitleStyle.Alignment) {
@@ -664,8 +669,7 @@ struct TenthsField: View {
         .onChange(of: value) { _, v in text = NumberText.trim(Double(v) / 10, 1) }
     }
     func apply() {
-        guard let v = Double(text.trimmingCharacters(in: .whitespaces)), v.isFinite else { text = NumberText.trim(Double(value) / 10, 1); return }
-        let t = min(max(Int((v * 10).rounded()), range.lowerBound), range.upperBound)
+        guard let v = NumericInput.number(text), let t = NumericInput.scaledInt(v, scale: 10, range: range) else { text = NumberText.trim(Double(value) / 10, 1); return }
         commit(t)
         text = NumberText.trim(Double(value) / 10, 1)   // 받아들이지 않았거나 같은 값이면 지금 값을 보인다(바뀌면 onChange가 새 값으로)
     }
@@ -686,8 +690,8 @@ struct OpacityField: View {
         .onChange(of: alpha) { _, a in text = String(Int((Double(a) * 100 / 255).rounded())) }
     }
     func apply() {
-        guard let v = Double(text.trimmingCharacters(in: .whitespaces)), v.isFinite else { text = String(Int((Double(alpha) * 100 / 255).rounded())); return }
-        commit(Int((min(max(v, 0), 100) * 255 / 100).rounded()))
+        guard let v = NumericInput.number(text), let p = NumericInput.clamped(v, 0, 100) else { text = String(Int((Double(alpha) * 100 / 255).rounded())); return }
+        commit(Int((p * 255 / 100).rounded()))
         text = String(Int((Double(alpha) * 100 / 255).rounded()))   // 받아들이지 않았거나 같은 값이면 지금 값을 보인다(바뀌면 onChange가 새 값으로)
     }
 }

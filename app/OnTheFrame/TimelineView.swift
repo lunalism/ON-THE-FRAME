@@ -843,8 +843,10 @@ final class TimelineNSView: NSView {
 
     override func resetCursorRects() {
         if let st = state, st.tool == .cut {   // 자르기 도구: 클립 본문 위에서 가위 커서(트림·페이드 커서 없음)
-            for c in st.timeline.clips + st.timeline.audioClips { addCursorRect(rect(c).intersection(visibleRect), cursor: Self.cutCursor) }
-            for sub in st.timeline.subtitles { addCursorRect(subtitleRect(sub).intersection(visibleRect), cursor: Self.cutCursor) }
+            // 보이는 부분만: 화면 밖 클립의 교집합은 null 사각형(원점 무한)이라 그대로 넣으면 AppKit 예외로 앱이 멈췄다(2026-10-23 검증 중 발견, 자르기 도구 + 화면 밖 항목)
+            func add(_ r: NSRect) { let v = r.intersection(visibleRect); if !v.isEmpty { addCursorRect(v, cursor: Self.cutCursor) } }
+            for c in st.timeline.clips + st.timeline.audioClips { add(rect(c)) }
+            for sub in st.timeline.subtitles { add(subtitleRect(sub)) }
             return
         }
         if let st = state, st.tool == .text { _ = st; return }   // 텍스트 도구: 타임라인에서는 고르기만(트림·옮기기 커서 없음)

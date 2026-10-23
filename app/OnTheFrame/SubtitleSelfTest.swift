@@ -655,6 +655,42 @@ enum SubtitleSelfTest {
             check("effects.copyFinishesSession", s.colorSession == nil && copied && s.history.undoDepth == d0 + 1 && s.timeline.subtitle(fid)?.style.activeOutline != nil,
                   "copied \(copied) depth +\(s.history.undoDepth - d0)")
             s.undo(); _ = await previewSettled()
+            // 2026-10-23 전체 검토 고침: 세션 중 붙여넣기 — 세션을 먼저 한 단계로 넣고 붙여넣기는 그 다음 단계(실행 취소 한 번 = 붙여넣기만 취소, 모양은 남음)
+            s.select(fid); s.copySelection()
+            let d1 = s.history.undoDepth, nSubs = s.timeline.subtitles.count
+            s.styleEditChange(fid, project: proj) { if $0.outline == nil { $0.outline = .default }; $0.outline?.enabled = true }
+            s.pasteAtPlayhead(); _ = await previewSettled()
+            let pastedOK = s.colorSession == nil && s.history.undoDepth == d1 + 2 && s.timeline.subtitles.count == nSubs + 1
+                && s.timeline.subtitle(fid)?.style.activeOutline != nil
+            s.undo(); _ = await previewSettled()
+            let undoPaste = s.timeline.subtitles.count == nSubs && s.timeline.subtitle(fid)?.style.activeOutline != nil
+            s.undo(); _ = await previewSettled()
+            let undoStyle = s.timeline.subtitle(fid)?.style == before
+            // 바뀐 것 없는 세션(켰다 끔) + 붙여넣기 = 붙여넣기 한 단계만
+            s.select(fid)
+            s.styleEditChange(fid, project: proj) { if $0.outline == nil { $0.outline = .default }; $0.outline?.enabled = true }
+            s.styleEditChange(fid, project: proj) { $0.outline?.enabled = false }
+            s.pasteAtPlayhead(); _ = await previewSettled()
+            let noopOK = s.history.undoDepth == d1 + 1 && s.timeline.subtitle(fid)?.style == before
+            s.undo(); _ = await previewSettled()
+            check("effects.pasteFinishesSessionFirst", pastedOK && undoPaste && undoStyle && noopOK && s.timeline.subtitles.count == nSubs,
+                  "paste \(pastedOK) undo1 \(undoPaste) undo2 \(undoStyle) noop \(noopOK)")
+            // 2026-10-23 전체 검토 고침: 자막 레인이 있을 때 새 영상 레인(저장소 경로 직접 호출 — 레인 추가·레인 쌍·새 레인에 놓기). 이전에는 모두 "겹칩니다"로 실패.
+            if let mid = s.assets.first?.id {
+                let lanes0 = s.timeline.lanes, d0 = s.history.undoDepth, nSub = lanes0.filter { $0.kind == .subtitle }.count
+                func ordered() -> Bool { let k = s.timeline.lanes.map(\.kind); return k == k.sorted { ($0 == .subtitle ? 0 : $0 == .video ? 1 : 2) < ($1 == .subtitle ? 0 : $1 == .video ? 1 : 2) } && s.timeline.isValid }
+                func newIDs() -> Set<UUID> { Set(s.timeline.lanes.map(\.id)).subtracting(lanes0.map(\.id)) }
+                s.addLane(.video)
+                let one = newIDs(), laneOK = one.count == 1 && s.timeline.lanes[nSub].id == one.first && ordered() && s.history.undoDepth == d0 + 1
+                s.addLanePair()
+                let pairOK = newIDs().count == 3 && ordered() && s.timeline.lanes.last.map { newIDs().contains($0.id) } == true && s.history.undoDepth == d0 + 2
+                s.placeMedia(mid, atFrame: 0, lane: nil)
+                let dropOK = newIDs().count >= 4 && ordered() && s.history.undoDepth == d0 + 3 && s.timeline.lanes[nSub].kind == .video && newIDs().contains(s.timeline.lanes[nSub].id)
+                for _ in 0..<3 { s.undo() }
+                _ = await previewSettled()
+                check("lanes.videoLaneWithSubtitleLanes", laneOK && pairOK && dropOK && s.timeline.lanes == lanes0 && s.history.undoDepth == d0,
+                      "lane \(laneOK) pair \(pairOK) drop \(dropOK) restored \(s.timeline.lanes == lanes0)")
+            } else { check("lanes.videoLaneWithSubtitleLanes", false, "미디어 없음") }
             // 빈 자막 + 효과: 프리뷰 층 없음(그리지 않음)
             if let bid = s.createSubtitleAndEdit(atFrame: 0, output: nil) {
                 pv.syncEditor(); await key(53, "\u{1b}")
