@@ -49,11 +49,9 @@ public final class SubtitleRenderer: @unchecked Sendable {
         var shadowReach = 0
     }
     private var cache: [Key: Layout] = [:]
-    /// 캐시가 붙잡은 그림 바이트(2026-10-23): 개수(512)만으로는 색 패널을 끄는 동안 서로 다른 색마다 그림이 남았다(측정: 색 300개 약 269 MB).
-    /// 바이트 예산을 넘으면 비운다(개수 상한과 같은 방식). 다시 필요하면 다시 그린다(한 장 수 ms 이하).
-    private var cacheBytes = 0
-    static let cacheByteBudget = 160 << 20
-    var cachedBytesForTest: Int { lock.lock(); defer { lock.unlock() }; return cacheBytes }
+    // 캐시 상한은 개수(그림 512, 키 큰 글 띠 64)뿐이다. 2026-10-23에 넣었던 바이트 예산(160 MiB를 넘으면 전체 비움)은 되돌렸다:
+    // 자막이 많으면(측정: 두 줄 자막 500개) 그리기마다 거의 모든 그림을 다시 그렸고(타임라인 한 번 그리기에 약 1000장, 자막 편집 34 ms → 되돌린 뒤 2.8 ms),
+    // 프리뷰 자막 층이 그림을 붙잡고 있어 메모리는 줄지 않았다. 프리뷰 그림 메모리(자막 수에 비례)는 이 캐시로 풀리지 않는 별도 문제다(설계 §48.6).
     /// 키 큰 글의 띠 그림(위치마다 다름, 위치 포함 키)
     private var bandCache: [Key: SubtitleRaster] = [:]
     /// 시험 전용 상한(바이트): 이보다 큰 그림은 만들지 못한 것으로 본다(그리기 실패 길 시험). 보통 무한.
@@ -84,11 +82,7 @@ public final class SubtitleRenderer: @unchecked Sendable {
         let l: Layout
         if let hit { l = hit } else {
             l = Self.layout(text: text, style: base)
-            let b = l.image.map { $0.bytesPerRow * $0.height } ?? 0
-            lock.lock()
-            if cache.count > 512 || cacheBytes + b > Self.cacheByteBudget { cache.removeAll(); bandCache.removeAll(); cacheBytes = 0 }
-            cache[key] = l; cacheBytes += b; renders += 1
-            lock.unlock()
+            lock.lock(); if cache.count > 512 { cache.removeAll() }; cache[key] = l; renders += 1; lock.unlock()
         }
         guard l.image == nil, !l.failed else { return Self.placed(l, style: style) }
         // 키 큰 글: 이 자리의 화면 안 띠
@@ -96,11 +90,7 @@ public final class SubtitleRenderer: @unchecked Sendable {
         lock.lock(); let bandHit = bandCache[full]; lock.unlock()
         if let bandHit { return bandHit }
         let r = Self.band(l, style: style)
-        let b = r.image.bytesPerRow * r.image.height
-        lock.lock()
-        if bandCache.count > 64 || cacheBytes + b > Self.cacheByteBudget { cache.removeAll(); bandCache.removeAll(); cacheBytes = 0 }
-        bandCache[full] = r; cacheBytes += b; renders += 1
-        lock.unlock()
+        lock.lock(); if bandCache.count > 64 { bandCache.removeAll() }; bandCache[full] = r; renders += 1; lock.unlock()
         return r
     }
     public func raster(_ item: SubtitleItem) -> SubtitleRaster { raster(text: item.text, style: item.style) }

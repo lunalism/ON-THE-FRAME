@@ -78,7 +78,10 @@ public enum ProjectFile {
     }
 
     /// 타임라인 → 파일 내용. bookmarks: 미디어 id → 북마크, projectURL: 상대 경로 기준(저장할 위치).
+    /// 저장할 수 없는 타임라인(프레임 값 상한을 넘음 — 다시 열 수 없는 파일을 쓰지 않게)
+    public struct SaveError: Error, Equatable, CustomStringConvertible { public var description: String { "타임라인이 너무 깁니다(프레임 값 상한을 넘어 저장하면 다시 열 수 없습니다)." } }
     public static func encode(_ t: Timeline, projectID: UUID, settings: RenderSettings, bookmarks: [UUID: Data], projectURL: URL?) throws -> Data {
+        guard t.withinFrameLimit else { throw SaveError() }
         let dir = projectURL?.deletingLastPathComponent().standardizedFileURL
         let doc = Document(format: format, version: version(for: t), projectID: projectID,
                            settings: Settings(width: settings.width, height: settings.height, fps: Int(settings.fps)),
@@ -92,6 +95,8 @@ public enum ProjectFile {
         return try enc.encode(doc)
     }
 
+    /// 파일 안 프레임 값의 상한(2⁴⁰ 프레임, 30 fps로 약 1160년): 몇 개를 더해도 Int를 넘지 않는다. 실제 프로젝트는 이보다 훨씬 작다(입력은 길이 제한 안).
+    static let maxFrames = Timeline.maxFrames
     /// 파일 내용 → 검사한 타임라인과 문서. 하나라도 맞지 않으면 오류(부분 결과 없음).
     public static func decode(_ data: Data, settings supported: RenderSettings = .m1) throws -> (timeline: Timeline, document: Document) {
         let dec = JSONDecoder()
@@ -129,18 +134,24 @@ public enum ProjectFile {
               doc.audioClips.allSatisfy({ $0.lane == nil || laneKinds[$0.lane!] == .audio }) else { throw LoadError.invalid("클립의 레인") }
         // 미디어: ID 고유, 길이 1 이상
         let refs = doc.media.map(\.ref)
-        guard Set(refs.map(\.id)).count == refs.count, refs.allSatisfy({ $0.frameCount >= 1 && !$0.name.isEmpty }) else { throw LoadError.invalid("미디어 목록") }
+        guard Set(refs.map(\.id)).count == refs.count, refs.allSatisfy({ $0.frameCount >= 1 && $0.frameCount <= maxFrames && !$0.name.isEmpty }) else { throw LoadError.invalid("미디어 목록") }
         let byID = Dictionary(uniqueKeysWithValues: refs.map { ($0.id, $0) })
         // 클립: ID 고유, 아는 미디어, 양수 길이·0 이상 위치
         let all = doc.videoClips + doc.audioClips
         let subs = doc.subtitles ?? []
         guard Set(all.map(\.id) + subs.map(\.id)).count == all.count + subs.count else { throw LoadError.invalid("클립 ID 중복") }
         // start + length가 넘치지 않게(손댄 파일, 코드 리뷰)
-        guard subs.allSatisfy({ laneKinds[$0.lane] == .subtitle && $0.start >= 0 && $0.length >= 1 && $0.start <= Int.max - $0.length && $0.style.isValid }) else { throw LoadError.invalid("자막") }
+        guard subs.allSatisfy({ laneKinds[$0.lane] == .subtitle && $0.start >= 0 && $0.length >= 1 && $0.start <= Int.max - $0.length && $0.style.isValid
+                                && $0.start <= maxFrames && $0.length <= maxFrames }) else { throw LoadError.invalid("자막") }
         // 켜진 효과는 형식 7에만 있다(형식 6 이하 파일에 켜진 효과가 있으면 잘못된 파일). 꺼진 효과 설정은 형식 6에도 있을 수 있다.
         if v < currentVersion, subs.contains(where: { $0.style.hasEnabledEffects }) { throw LoadError.invalid("자막 효과") }
         guard all.allSatisfy({ byID[$0.mediaID] != nil }) else { throw LoadError.invalid("알 수 없는 미디어를 쓰는 클립") }
+        // 프레임 값 상한(2026-10-23 전체 검토): 모델을 만들기 전에 막는다. 만들자마자 끝(start + length)·원본 끝(sourceIn + length)을 계산하므로
+        // 넘치는 값이 있으면 오류 대신 앱이 멈췄다(재현: start = Int.max). 페이드 길이·위치도 같은 상한이라 이후 덧셈(보이는 페이드 합, 자르기)이 넘치지 않는다.
         guard all.allSatisfy({ $0.start >= 0 && $0.sourceIn >= 0 && $0.length >= 1 }) else { throw LoadError.invalid("클립 위치·길이") }
+        guard all.allSatisfy({ $0.start <= maxFrames && $0.sourceIn <= maxFrames && $0.length <= maxFrames }) else { throw LoadError.invalid("클립 위치·길이") }
+        guard doc.durationFrames <= maxFrames else { throw LoadError.invalid("타임라인 길이") }
+        guard doc.audioClips.allSatisfy({ a in [a.audio?.fadeIn, a.audio?.fadeOut].allSatisfy { f in f.map { (0...maxFrames).contains($0.length) && (0...maxFrames).contains($0.offset) } ?? true } }) else { throw LoadError.invalid("소리 페이드") }
         guard doc.audioClips.allSatisfy({ byID[$0.mediaID]!.hasAudio }) else { throw LoadError.invalid("소리 없는 미디어를 쓰는 소리 클립") }
         guard doc.videoClips.allSatisfy({ byID[$0.mediaID]!.hasVideo }) else { throw LoadError.invalid("영상 없는 미디어를 쓰는 영상 클립") }
         let t = Timeline(clips: doc.videoClips, audioClips: doc.audioClips, subtitles: subs, lanes: lanes, media: refs, mediaFrames: byID.mapValues(\.frameCount),

@@ -213,14 +213,32 @@ final class SubtitleEffectsTests: XCTestCase {
 
     // MARK: 메모리 보유(2026-10-23 검토: 측정한 낭비를 고친 것의 회귀 시험)
 
-    /// 색 패널을 끄는 동안처럼 서로 다른 모양 300개: 고치기 전 캐시가 약 269 MB를 붙잡았다(측정). 이제 바이트 예산 안.
-    func testRasterCacheStaysWithinByteBudget() {
+    /// 캐시가 자막 그림 묶음을 다시 그리지 않고 들고 있다(2026-10-23 전체 검토 고침): 바이트 예산(160 MiB, 전체 비움)이 있을 때는 작업 묶음이
+    /// 예산을 넘으면 같은 자막을 그리기마다 다시 그렸다(측정: 두 줄 자막 500개에서 타임라인 한 번 그리기에 약 1000장). 개수 상한(512)만 두면
+    /// 두 번째 차례는 모두 캐시에서 나온다. 새 그리개를 써서 다른 시험이 채운 캐시와 상관없게 한다.
+    func testRasterCacheKeepsLargeWorkingSetWithoutRerendering() {
+        let r = SubtitleRenderer()
         var st = SubtitleStyle.default; st.background = .default
-        for i in 0..<300 { st.green = i % 256; st.blue = i / 256 * 50 + 1; _ = SubtitleRenderer.shared.raster(text: "두 줄 자막\n둘째 줄입니다", style: st) }
-        XCTAssertLessThanOrEqual(SubtitleRenderer.shared.cachedBytesForTest, SubtitleRenderer.cacheByteBudget)
+        let items = (0..<300).map { i -> SubtitleItem in
+            var s = st; s.green = i % 256; s.blue = i / 256 * 50 + 1
+            return SubtitleItem(id: UUID(), lane: UUID(), start: i * 10, length: 10, text: "두 줄 자막\n둘째 줄입니다", style: s)
+        }
+        var bytes = 0
+        for it in items { let x = r.raster(it); bytes += x.image.bytesPerRow * x.image.height }
+        XCTAssertGreaterThan(bytes, 160 << 20, "작업 묶음이 되돌린 예산보다 크다(이 시험이 뜻이 있게)")
+        XCTAssertEqual(r.renderCount, 300)
+        for it in items { _ = r.raster(it) }
+        XCTAssertEqual(r.renderCount, 300, "두 번째 차례는 다시 그리지 않음")
+        // 키 큰 글 띠(한 장 약 6.5 MB) 60개도 두 번째 차례는 캐시에서
         var tall = SubtitleStyle.default; tall.sizeTenths = 1200; tall.background = .default
-        for i in 0..<60 { tall.green = i; _ = SubtitleRenderer.shared.raster(text: (1...12).map(String.init).joined(separator: "\n"), style: tall) }   // 키 큰 글 띠(한 장 약 6.5 MB)
-        XCTAssertLessThanOrEqual(SubtitleRenderer.shared.cachedBytesForTest, SubtitleRenderer.cacheByteBudget)
+        let tallItems = (0..<60).map { i -> SubtitleItem in
+            var s = tall; s.green = i
+            return SubtitleItem(id: UUID(), lane: UUID(), start: i, length: 1, text: (1...12).map(String.init).joined(separator: "\n"), style: s)
+        }
+        for it in tallItems { _ = r.raster(it) }
+        let afterTall = r.renderCount
+        for it in tallItems { _ = r.raster(it) }
+        XCTAssertEqual(r.renderCount, afterTall)
     }
 
     /// 내보내기 발자국 창: 보이는 자막만 들고(고치기 전에는 효과 자막 200개를 내보내기 내내 약 118 MB 보유 — 측정), 겹칠 때 그리기 순서 그대로

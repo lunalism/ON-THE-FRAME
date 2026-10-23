@@ -59,7 +59,7 @@ public struct ClipAudio: Sendable, Equatable, Codable {
         public static let none = Fade(length: 0)
         /// 보이는 경사 길이(클립 길이 l 안)
         public func visible(in l: Int) -> Int { max(0, min(length - offset, l)) }
-        public var isNone: Bool { length - offset <= 0 }
+        public var isNone: Bool { length <= offset }   // length − offset ≤ 0과 같다(빼기 없이: 파일을 읽는 중 넘치지 않게, 2026-10-23)
         /// 경사 시작(또는 끝)의 배율: offset/length
         public var edgeGain: Double { length > 0 ? Double(offset) / Double(length) : 1 }
         /// 경사가 없으면 none으로
@@ -170,7 +170,8 @@ public struct ClipTransform: Sendable, Equatable, Codable {
             self.init(scaleMicro: m, offsetXMilli: try c.decode(Int.self, forKey: .offsetXMilli), offsetYMilli: try c.decode(Int.self, forKey: .offsetYMilli))
         } else {   // 형식 3: 천분율·정수 픽셀
             let p = try c.decode(Int.self, forKey: .scalePermille), x = try c.decode(Int.self, forKey: .offsetX), y = try c.decode(Int.self, forKey: .offsetY)
-            guard abs(p) <= 1_000_000_000, abs(x) <= 1_000_000_000, abs(y) <= 1_000_000_000 else {
+            // magnitude: abs(Int.min)은 넘쳐 멈춘다(2026-10-23 전체 검토)
+            guard p.magnitude <= 1_000_000_000, x.magnitude <= 1_000_000_000, y.magnitude <= 1_000_000_000 else {
                 throw DecodingError.dataCorrupted(.init(codingPath: c.codingPath, debugDescription: "transform out of range"))
             }
             self.init(scalePermille: p, offsetX: x, offsetY: y)
@@ -285,8 +286,11 @@ public enum EditError: Error, Equatable, CustomStringConvertible {
     case subtitleNoRoom
     /// 자막: 모양 값이 범위 밖
     case subtitleStyleRange
+    /// 프레임 값 상한(Timeline.maxFrames)을 넘음
+    case frameLimit
     public var description: String {
         switch self {
+        case .frameLimit: return "타임라인이 너무 깁니다(프레임 값 상한을 넘습니다)."
         case .unknownClip: return "클립을 찾을 수 없습니다."
         case .unknownMedia: return "미디어를 찾을 수 없습니다."
         case .splitAtBoundary: return "클립 경계, 빈틈, 클립 밖에서는 자를 수 없습니다."
@@ -442,7 +446,21 @@ public struct Timeline: Sendable, Equatable {
     /// 불변식: 레인 ID 고유, 순서는 자막 레인(0개 이상) → 영상 레인 → 오디오 레인(각 하나 이상), 음량 0–100. 클립은 자기 종류의 레인에 있고,
     /// 레인마다 겹침 없음·0 이상·길이 안·1프레임 이상·원본 범위 안. 연결 묶음은 영상 1 + 소리 1, 같은 미디어(CP-11).
     /// 클립·자막 ID는 모두 고유하고, 클립의 미디어는 등록되어 있어야 한다(CP-11). 자막은 자막 레인에 있고 글자가 있으며 모양 값이 범위 안이다.
+    /// 프레임 값 상한(2026-10-23 전체 검토): 2⁴⁰ 프레임(30 fps로 약 1160년). 파일 읽기·편집·저장이 같은 상한을 쓴다 —
+    /// 그 안의 값은 몇 개를 더해도 Int를 넘지 않는다. 읽을 때만 막으면 경계 값 프로젝트가 편집 한 번으로 상한을 넘어 저장된 뒤 다시 열리지 않았다(Codex 검토).
+    public static let maxFrames = 1 << 40
+    /// 모든 프레임 값이 상한 안인가: 길이(모든 클립·자막의 끝 포함), 원본 위치·길이, 페이드, 미디어 길이
+    public var withinFrameLimit: Bool {
+        let m = Self.maxFrames
+        return (0...m).contains(durationFrames) && mediaFrames.values.allSatisfy { (0...m).contains($0) }
+            && (clips + audioClips).allSatisfy { c in
+                (0...m).contains(c.start) && (0...m).contains(c.sourceIn) && (0...m).contains(c.length)
+                    && [c.audio?.fadeIn, c.audio?.fadeOut].allSatisfy { f in f.map { (0...m).contains($0.length) && (0...m).contains($0.offset) } ?? true }
+            }
+            && subtitles.allSatisfy { (0...m).contains($0.start) && (0...m).contains($0.length) }
+    }
     public var isValid: Bool {
+        guard withinFrameLimit else { return false }
         guard Set(lanes.map(\.id)).count == lanes.count, !lanes(.video).isEmpty, !lanes(.audio).isEmpty,
               let lastVideo = lanes.lastIndex(where: { $0.kind == .video }), let firstAudio = lanes.firstIndex(where: { $0.kind == .audio }),
               lastVideo < firstAudio, lanes.allSatisfy({ (0...100).contains($0.volumePercent) }) else { return false }
@@ -560,7 +578,11 @@ public struct Timeline: Sendable, Equatable {
     // MARK: 편집 도우미
 
     /// 결과 불변식 확인(겹침이면 덮어쓰지 않고 거부)
-    func checked(_ t: Timeline) throws -> Timeline { guard t.isValid else { throw EditError.overlap }; return t }
+    func checked(_ t: Timeline) throws -> Timeline {
+        guard t.withinFrameLimit else { throw EditError.frameLimit }
+        guard t.isValid else { throw EditError.overlap }
+        return t
+    }
     /// 지점 p에 묶음이 아닌 클립·자막이 걸쳐 있는가(start < p < end, 모든 레인)
     func crossing(at p: Int, excluding ids: Set<UUID>) -> Bool {
         (clips + audioClips).contains { !ids.contains($0.id) && $0.start < p && p < $0.end } || subtitles.contains { !ids.contains($0.id) && $0.start < p && p < $0.end }
@@ -863,7 +885,9 @@ public struct Timeline: Sendable, Equatable {
         var ls = lanes
         let pos: Int
         // 자막 레인(2026-10-22)은 영상 묶음 위: outward = 맨 위(새 Sn), 아니면 자막 묶음 맨 아래(영상 바로 위)
-        if outward { pos = kind == .audio ? ls.count : 0 }
+        // 바깥쪽 새 영상 레인은 영상 묶음 맨 위 = 자막 레인 바로 아래(2026-10-23 전체 검토: 0에 넣어 자막 레인 위로 가서 레인 순서가 깨지고
+        // "겹칩니다"로 거부되었다 — 자막 레인이 있으면 영상 레인 추가·레인 쌍 추가·새 레인에 놓기·새 레인이 필요한 붙여넣기가 모두 실패)
+        if outward { pos = kind == .audio ? ls.count : kind == .video ? (ls.lastIndex { $0.kind == .subtitle } ?? -1) + 1 : 0 }
         else if let a = after, let i = ls.firstIndex(where: { $0.id == a }), ls[i].kind == kind { pos = i + 1 }
         else if kind == .subtitle { pos = (ls.lastIndex { $0.kind == .subtitle } ?? -1) + 1 }
         else { pos = (ls.lastIndex { $0.kind == kind } ?? (kind == .video ? (ls.lastIndex { $0.kind == .subtitle } ?? -1) : ls.count - 1)) + 1 }

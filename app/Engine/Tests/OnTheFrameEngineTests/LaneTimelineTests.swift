@@ -142,4 +142,40 @@ final class LaneTimelineTests: XCTestCase {
         h.beginGesture(); h.updateGesture(try t3.movingFree(clip: aA, toStart: 230), focus: aA); h.commitGesture()
         XCTAssertEqual(h.undoDepth, 4); h.undo(); XCTAssertEqual(h.timeline, t3)
     }
+
+    /// 2026-10-23 전체 검토: 자막 레인이 있을 때 바깥쪽 새 영상 레인(영상 레인 추가·레인 쌍·새 레인에 놓기·새 레인이 필요한 붙여넣기)이
+    /// 자막 레인 위(0번)에 들어가 순서가 깨지고 "겹칩니다"로 거부되었다(재현). 이제 영상 묶음 맨 위 = 자막 레인 바로 아래.
+    func testOutwardVideoLaneGoesBelowSubtitleLanes() throws {
+        let m = UUID()
+        var t = Timeline(mediaFrames: [m: 300], mediaHasAudio: [m: true])
+        t = try t.inserting(media: m)
+        let s1 = UUID(), s2 = UUID()
+        t = try t.addingSubtitleCreatingLane(at: 0, text: "가", style: .default, id: UUID(), newLaneID: s1, newLaneName: "S1")
+        t = try t.addingLane(.subtitle, name: "S2", id: s2, outward: true)
+        let kinds = { (t: Timeline) in t.lanes.map(\.kind) }
+        XCTAssertEqual(kinds(t), [.subtitle, .subtitle, .video, .audio])
+        // 영상 레인 하나
+        let v2 = UUID()
+        let a = try t.addingLane(.video, name: "V2", id: v2, outward: true)
+        XCTAssertEqual(kinds(a), [.subtitle, .subtitle, .video, .video, .audio]); XCTAssertEqual(a.lanes[2].id, v2); XCTAssertTrue(a.isValid)
+        XCTAssertEqual(a.lanes.filter { $0.kind == .subtitle }.map(\.id), [s2, s1])               // 자막 레인 순서 그대로
+        XCTAssertEqual(a.lanes(.video).last?.id, Lane.videoID)                                     // 기본 영상 레인(V1)은 경계 쪽 그대로
+        // 레인 쌍(영상 위쪽 끝·소리 아래쪽 끝)
+        let pv = UUID(), pa = UUID()
+        let b = try a.addingLane(.video, name: "V3", id: pv, outward: true).addingLane(.audio, name: "A2", id: pa, outward: true)
+        XCTAssertEqual(kinds(b), [.subtitle, .subtitle, .video, .video, .video, .audio, .audio]); XCTAssertEqual(b.lanes[2].id, pv); XCTAssertEqual(b.lanes.last?.id, pa)
+        XCTAssertTrue(b.isValid)
+        // 새 레인이 필요한 붙여넣기(같은 자리에 연결된 짝 → 겹치므로 새 영상·소리 레인)
+        let cid = t.clips[0].id
+        let r = try t.pasting(try t.copying(clip: cid), at: 0, newLaneName: { $0 == .video ? "V새" : "A새" })
+        XCTAssertEqual(r.createdLanes.count, 2); XCTAssertTrue(r.timeline.isValid)
+        XCTAssertEqual(kinds(r.timeline), [.subtitle, .subtitle, .video, .video, .audio, .audio])
+        XCTAssertEqual(r.timeline.lanes[2].id, r.createdLanes.first { r.timeline.laneInfo($0)?.kind == .video })
+        XCTAssertEqual(r.timeline.clips.count, 2); XCTAssertEqual(r.timeline.subtitles.count, 1)
+        // 자막 레인이 없으면 이전과 같다(맨 위)
+        var plain = Timeline(mediaFrames: [m: 300], mediaHasAudio: [m: true]); plain = try plain.inserting(media: m)
+        XCTAssertEqual(try plain.addingLane(.video, name: "V2", id: v2, outward: true).lanes.first?.id, v2)
+        // 새 자막 레인은 여전히 맨 위
+        XCTAssertEqual(try a.addingLane(.subtitle, name: "S3", id: UUID(), outward: true).lanes.first?.kind, .subtitle)
+    }
 }

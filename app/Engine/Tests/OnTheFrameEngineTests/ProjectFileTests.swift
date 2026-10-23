@@ -80,6 +80,59 @@ final class ProjectFileTests: XCTestCase {
         }, { if case .invalid = $0 { return true }; return false }, "no audio lane, lane-less audio clips")
     }
 
+    /// 2026-10-23 전체 검토: 넘치는 정수가 있는 손댄 파일은 앱을 멈추지 않고 오류로 거부한다(이전: start = Int.max에서 decode 안에서 멈춤 — 재현).
+    /// 클립 위치·원본 위치·길이, 타임라인·미디어 길이, 페이드 값(파일을 읽는 중의 페이드 정리 포함), 형식 3 변형(abs(Int.min))을 본다.
+    func testRejectsOverflowingValuesWithoutTrapping() throws {
+        let t = try sample()
+        let base = try JSONSerialization.jsonObject(with: try ProjectFile.encode(t, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)) as! [String: Any]
+        func mutated(_ edit: (inout [String: Any]) -> Void) throws -> Data { var j = base; edit(&j); return try JSONSerialization.data(withJSONObject: j) }
+        func clip(_ key: String, _ field: String, _ value: Any) -> (inout [String: Any]) -> Void {
+            { j in var cs = j[key] as! [[String: Any]]; cs[0][field] = value; j[key] = cs }
+        }
+        let huge = ProjectFile.maxFrames + 1
+        let cases: [(String, (inout [String: Any]) -> Void)] = [
+            ("video start Int.max", clip("videoClips", "start", Int.max)), ("video sourceIn Int.max", clip("videoClips", "sourceIn", Int.max)),
+            ("video length Int.max", clip("videoClips", "length", Int.max)), ("audio start Int.max", clip("audioClips", "start", Int.max)),
+            ("audio sourceIn Int.max", clip("audioClips", "sourceIn", Int.max)), ("video start max+1", clip("videoClips", "start", huge)),
+            ("audio length max+1", clip("audioClips", "length", huge)),
+            ("fade Int.max/Int.min", clip("audioClips", "audio", ["fadeIn": ["length": Int.max, "offset": Int.min]])),
+            ("fade offset Int.min", clip("audioClips", "audio", ["fadeOut": ["length": 5, "offset": Int.min]])),
+            ("fade length max+1", clip("audioClips", "audio", ["fadeIn": ["length": huge, "offset": 0]])),
+            ("duration Int.max", { $0["durationFrames"] = Int.max }),
+            ("media frames Int.max", { j in var m = j["media"] as! [[String: Any]]; var r = m[0]["ref"] as! [String: Any]; r["frameCount"] = Int.max; m[0]["ref"] = r; j["media"] = m }),
+            ("legacy transform Int.min", { j in j["version"] = 3; var cs = j["videoClips"] as! [[String: Any]]; cs[0]["transform"] = ["scalePermille": Int.min, "offsetX": 0, "offsetY": 0]; j["videoClips"] = cs }),
+            ("legacy offset Int.min", { j in j["version"] = 3; var cs = j["videoClips"] as! [[String: Any]]; cs[0]["transform"] = ["scalePermille": 1000, "offsetX": Int.min, "offsetY": 0]; j["videoClips"] = cs }),
+        ]
+        for (name, edit) in cases { XCTAssertThrowsError(try ProjectFile.decode(try mutated(edit)), name) }
+        // 정상 값은 그대로 읽힌다(형식 3 변형·페이드 포함)
+        let okLegacy = try mutated { j in j["version"] = 3; var cs = j["videoClips"] as! [[String: Any]]; cs[0]["transform"] = ["scalePermille": 500, "offsetX": -10, "offsetY": 20]; j["videoClips"] = cs }
+        XCTAssertEqual(try ProjectFile.decode(okLegacy).timeline.clips.first { $0.transform != nil }?.transform, ClipTransform(scalePermille: 500, offsetX: -10, offsetY: 20))
+        let okFade = try mutated(clip("audioClips", "audio", ["fadeIn": ["length": 6, "offset": 2]]))
+        XCTAssertEqual(try ProjectFile.decode(okFade).timeline.audioClips.first?.audio?.fadeIn, ClipAudio.Fade(length: 6, offset: 2))
+        XCTAssertEqual(try ProjectFile.decode(try mutated { _ in }).timeline, t)
+    }
+
+    /// Codex 검토(2026-10-23): 상한을 읽을 때만 막으면 경계 값 프로젝트(길이 = 2⁴⁰)가 편집 한 번으로 상한을 넘어 저장된 뒤 다시 열리지 않았다.
+    /// 이제 편집이 상한을 넘으면 거부하고(문서 그대로), 넘는 타임라인은 저장하지 않으며, 경계 값은 저장·다시 열기가 된다.
+    func testFrameLimitHoldsAcrossEditsAndSaves() throws {
+        let t = try sample()
+        var j = try JSONSerialization.jsonObject(with: try ProjectFile.encode(t, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)) as! [String: Any]
+        j["durationFrames"] = Timeline.maxFrames
+        let edge = try ProjectFile.decode(try JSONSerialization.data(withJSONObject: j)).timeline
+        XCTAssertEqual(edge.durationFrames, Timeline.maxFrames); XCTAssertTrue(edge.isValid)
+        // 길이를 늘리는 편집(맨 앞에 끼워 넣기 → 뒤가 밀림)은 상한 오류로 거부
+        XCTAssertThrowsError(try edge.inserting(media: ma, at: 0)) { XCTAssertEqual($0 as? OnTheFrameEngine.EditError, .frameLimit) }
+        // 길이를 늘리지 않는 편집은 그대로 되고, 저장·다시 열기도 된다
+        let renamed = try edge.renamingLane(Lane.videoID, to: "경계")
+        let back = try ProjectFile.decode(try ProjectFile.encode(renamed, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)).timeline
+        XCTAssertEqual(back, renamed)
+        // 상한을 넘는 타임라인은 저장하지 않음(다시 열 수 없는 파일을 쓰지 않음)
+        let over = Timeline(clips: t.clips, audioClips: t.audioClips, lanes: t.lanes, media: t.media, mediaFrames: t.mediaFrames,
+                            mediaHasAudio: t.mediaHasAudio, durationFrames: Timeline.maxFrames + 1)
+        XCTAssertFalse(over.withinFrameLimit); XCTAssertFalse(over.isValid)
+        XCTAssertThrowsError(try ProjectFile.encode(over, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)) { XCTAssertTrue($0 is ProjectFile.SaveError) }
+    }
+
     func testRelinkValidatesRangesAndAudioAndKeepsClips() throws {
         let t = try sample()
         let short = ref(ma, "a2.mp4", frames: 80)                          // 클립이 원본 [0,100)을 씀 → 거부
