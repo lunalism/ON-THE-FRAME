@@ -205,6 +205,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await PanelSelfTest.run(folder: folder) }
             return
         }
+        if args.contains("-OTFTimelineDrawTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await TimelineDrawSelfTest.run(folder: folder) }
+            return
+        }
         if args.contains("-OTFTransformPerfTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await TransformPerfSelfTest.run(folder: folder) }
             return

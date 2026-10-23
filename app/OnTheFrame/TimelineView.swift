@@ -329,6 +329,8 @@ final class TimelineNSView: NSView {
         }
     }
     #if DEBUG
+    /// 자체 검사 전용: 보이는 영역 줄이기를 끈다(timeline-draw-test가 전체 그리기와 화소를 비교)
+    var fullDrawForTest = false
     /// 자체 검사 전용: 지금 끌기 상태 이름
     var dragNameForTest: String {
         switch drag { case .none: "none"; case .scrub: "scrub"; case .pending: "pending"; case .free: "free"; case .trim: "trim"; case .fade: "fade" }
@@ -358,15 +360,34 @@ final class TimelineNSView: NSView {
 
     // MARK: 그리기
 
+    /// 보이는 영역 밖 여유(pt): 선택 테두리·재생 헤드 삼각형·영역 바로 밖에서 시작하는 글자의 끝을 덮는다
+    static let drawOverscan: CGFloat = 32
+    /// 그릴 영역(2026-10-23 측정 고침): 재생 중 매 프레임 문서 보기 전체(전체 길이 × 확대)의 항목을 돌며 그려서 클립 500쌍에서 한 번 그리기에 144 ms가 걸렸다.
+    /// AppKit이 마지막에 잘라도 글자 배치·빗금·눈금 글자 만들기는 전부 했다. 이제 보이는 영역(+ 여유)에 겹치는 항목만 그린다.
+    /// 창 밖(보이는 영역 없음)이면 받은 영역 그대로.
+    func drawArea(_ dirtyRect: NSRect) -> NSRect {
+        #if DEBUG
+        if fullDrawForTest { return bounds }   // 자체 검사: 이전처럼 전체를 돌며 그리기(같은 그림인지 비교)
+        #endif
+        let v = visibleRect.isEmpty ? dirtyRect : dirtyRect.intersection(visibleRect)
+        return v.insetBy(dx: -Self.drawOverscan, dy: 0)
+    }
+    /// 그릴 영역의 프레임 범위(양 끝 포함, 가장자리에 걸친 항목 포함)
+    func frameRange(_ area: NSRect) -> ClosedRange<Int> {
+        let lo = Int(((area.minX - Self.inset) / pixelsPerFrame).rounded(.down)), hi = Int(((area.maxX - Self.inset) / pixelsPerFrame).rounded(.up))
+        return lo...max(lo, hi)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard let st = state else { return }
         NSColor.underPageBackgroundColor.setFill(); bounds.fill()
-        drawRuler(st)
+        let area = drawArea(dirtyRect), fr = frameRange(area)
+        drawRuler(st, area: area)
         let t = st.timeline
         let rows = Self.layout(t.lanes)
         for (l, r) in rows where l.kind != .subtitle {   // 자막 레인의 빈 곳은 빈틈이 아니다(자막 없음)
-            for g in t.gaps(inLane: l.id) {
-                drawGap(NSRect(x: x(g.lowerBound), y: r.minY, width: CGFloat(g.count) * pixelsPerFrame, height: r.height), label: l.kind == .video ? "빈틈" : "무음")
+            for g in t.gaps(inLane: l.id) where g.upperBound >= fr.lowerBound && g.lowerBound <= fr.upperBound {
+                drawGap(NSRect(x: x(g.lowerBound), y: r.minY, width: CGFloat(g.count) * pixelsPerFrame, height: r.height), label: l.kind == .video ? "빈틈" : "무음", area: area)
             }
         }
         let top = rows.first?.rect.minY ?? Self.firstLaneY, bottom = rows.last?.rect.maxY ?? Self.firstLaneY
@@ -375,8 +396,9 @@ final class TimelineNSView: NSView {
             NSColor.tertiaryLabelColor.setFill()
             NSRect(x: x(t.durationFrames) - 0.5, y: top - 6, width: 1, height: bottom - top + 12).fill()
         }
-        for c in t.clips + t.audioClips { drawClip(c, st) }
-        for sub in t.subtitles { drawSubtitle(sub, st) }
+        // 보이는 프레임 범위에 걸친 클립·자막만(가장자리에 걸친 항목은 전체 모양 그대로 그려 잘린다). 순서는 그대로.
+        for c in t.clips + t.audioClips where c.end >= fr.lowerBound && c.start <= fr.upperBound { drawClip(c, st) }
+        for sub in t.subtitles where sub.end >= fr.lowerBound && sub.start <= fr.upperBound { drawSubtitle(sub, st) }
         // 음소거한 오디오 레인: 클립 위를 어둡게
         for (l, r) in rows where l.muted && l.kind == .audio {
             NSColor.windowBackgroundColor.withAlphaComponent(0.55).setFill()
@@ -435,17 +457,21 @@ final class TimelineNSView: NSView {
         tri.fill()
     }
 
-    private func drawGap(_ r: NSRect, label: String) {
+    private func drawGap(_ r: NSRect, label: String, area: NSRect) {
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: r).addClip()
-        NSColor.black.withAlphaComponent(0.55).setFill(); r.fill()
+        let shown = r.intersection(area)
+        if !shown.isEmpty { NSColor.black.withAlphaComponent(0.55).setFill(); shown.fill() }
         NSColor.secondaryLabelColor.withAlphaComponent(0.35).setStroke()
         let hatch = NSBezierPath(); hatch.lineWidth = 1
-        var hx = r.minX - r.height
-        while hx < r.maxX { hatch.move(to: NSPoint(x: hx, y: r.maxY)); hatch.line(to: NSPoint(x: hx + r.height, y: r.minY)); hx += 8 }
+        // 빗금은 그릴 영역에 닿는 줄만(위치는 빈틈 시작 기준 8pt 간격 그대로 — 스크롤해도 무늬가 움직이지 않음)
+        let start = r.minX - r.height, skip = max(0, ((area.minX - r.height - start) / 8).rounded(.down))
+        var hx = start + skip * 8
+        let end = min(r.maxX, area.maxX)
+        while hx < end { hatch.move(to: NSPoint(x: hx, y: r.maxY)); hatch.line(to: NSPoint(x: hx + r.height, y: r.minY)); hx += 8 }
         hatch.stroke()
         NSGraphicsContext.restoreGraphicsState()
-        if r.width > 40 {
+        if r.width > 40, r.minX + 6 < area.maxX, r.minX + 60 > area.minX {
             NSString(string: label).draw(at: NSPoint(x: r.minX + 6, y: r.minY + 4), withAttributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.secondaryLabelColor])
         }
     }
@@ -618,7 +644,7 @@ final class TimelineNSView: NSView {
         return best.map { ($0.0, $0.1, $0.2) }
     }
 
-    private func drawRuler(_ st: TimelineDrawState) {
+    private func drawRuler(_ st: TimelineDrawState, area: NSRect) {
         NSColor.windowBackgroundColor.setFill()
         NSRect(x: 0, y: 0, width: bounds.width, height: Self.rulerHeight).fill()
         let fps = Int(store.settings.fps)
@@ -626,8 +652,10 @@ final class TimelineNSView: NSView {
         let candidates = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600]
         let stepSec = candidates.first { CGFloat($0 * fps) * pixelsPerFrame >= 70 } ?? 600
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular), .foregroundColor: NSColor.secondaryLabelColor]
-        let lastFrame = frame(atX: bounds.width)
-        var f = 0
+        let lastFrame = min(frame(atX: bounds.width), frame(atX: area.maxX) + 1)
+        // 그릴 영역 왼쪽 밖 70pt(눈금 글자 폭)부터의 눈금만(위치는 0에서 같은 간격 그대로)
+        let step = stepSec * fps
+        var f = max(0, frame(atX: area.minX - 70) / step * step)
         NSColor.tertiaryLabelColor.setFill()
         while f <= lastFrame {
             let px = x(f)
