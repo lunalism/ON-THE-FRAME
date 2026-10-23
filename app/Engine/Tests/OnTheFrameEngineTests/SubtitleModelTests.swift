@@ -169,9 +169,11 @@ final class SubtitleModelTests: XCTestCase {
         var j = try JSONSerialization.jsonObject(with: d6) as! [String: Any]
         j["version"] = 5
         XCTAssertThrowsError(try ProjectFile.decode(try JSONSerialization.data(withJSONObject: j))) { XCTAssertEqual($0 as? ProjectFile.LoadError, .invalid("레인")) }
-        // 더 새 형식은 열지 않음
+        // 형식 7(효과, D-040)은 읽고, 더 새 형식은 열지 않음
         j["version"] = 7
-        XCTAssertThrowsError(try ProjectFile.decode(try JSONSerialization.data(withJSONObject: j))) { XCTAssertEqual($0 as? ProjectFile.LoadError, .newerVersion(7)) }
+        XCTAssertEqual(try ProjectFile.decode(try JSONSerialization.data(withJSONObject: j)).timeline.subtitles, t.subtitles)
+        j["version"] = 8
+        XCTAssertThrowsError(try ProjectFile.decode(try JSONSerialization.data(withJSONObject: j))) { XCTAssertEqual($0 as? ProjectFile.LoadError, .newerVersion(8)) }
         // 손댄 파일: 영상 레인에 있는 자막, 빈 글자여도 잘못된 모양
         var bad = try JSONSerialization.jsonObject(with: d6) as! [String: Any]
         var subs = bad["subtitles"] as! [[String: Any]]

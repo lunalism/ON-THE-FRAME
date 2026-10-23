@@ -15,6 +15,10 @@ public struct SubtitleStyle: Sendable, Equatable, Codable, Hashable {
     public var alignment: Alignment
     public var xMilli: Int
     public var yMilli: Int
+    /// 효과(2026-10-23, 형식 7, D-040): nil = 설정한 적 없음(꺼짐). 끄면 설정 값은 남는다(enabled = false).
+    public var outline: SubtitleOutline?
+    public var shadow: SubtitleShadow?
+    public var background: SubtitleBackground?
     public init(fontName: String, sizeTenths: Int, red: Int, green: Int, blue: Int, alpha: Int = 255, alignment: Alignment, xMilli: Int, yMilli: Int) {
         self.fontName = fontName; self.sizeTenths = sizeTenths; self.red = red; self.green = green; self.blue = blue; self.alpha = alpha
         self.alignment = alignment; self.xMilli = xMilli; self.yMilli = yMilli
@@ -33,6 +37,75 @@ public struct SubtitleStyle: Sendable, Equatable, Codable, Hashable {
     public var isValid: Bool {
         !fontName.isEmpty && Self.sizeTenthsRange.contains(sizeTenths) && [red, green, blue, alpha].allSatisfy { (0...255).contains($0) }
             && (0...Self.outputWidth * 1000).contains(xMilli) && (0...Self.outputHeight * 1000).contains(yMilli)
+            && (outline?.isValid ?? true) && (shadow?.isValid ?? true) && (background?.isValid ?? true)
+    }
+    /// 켜진 효과가 하나라도 있는가(형식 7이 필요한가)
+    public var hasEnabledEffects: Bool { outline?.enabled == true || shadow?.enabled == true || background?.enabled == true }
+    /// 켜진 효과만(그리기용). 꺼진 효과는 그림에 영향이 없다.
+    public var activeOutline: SubtitleOutline? { outline?.enabled == true ? outline : nil }
+    public var activeShadow: SubtitleShadow? { shadow?.enabled == true ? shadow : nil }
+    public var activeBackground: SubtitleBackground? { background?.enabled == true ? background : nil }
+}
+
+private func rgbaValid(_ r: Int, _ g: Int, _ b: Int, _ a: Int) -> Bool { [r, g, b, a].allSatisfy { (0...255).contains($0) } }
+
+/// 외곽선(글자 윤곽 바깥으로 width만큼, 출력 1080p 픽셀). 단위: 0.1 px 정수(widthTenths). 색 sRGB RGBA 0–255.
+/// 기본(켤 때): 검정 100%, 2 px.
+public struct SubtitleOutline: Sendable, Equatable, Codable, Hashable {
+    public var enabled: Bool
+    public var red: Int, green: Int, blue: Int, alpha: Int
+    public var widthTenths: Int
+    public static let widthRange = 1...200   // 0.1–20 px
+    public static let `default` = SubtitleOutline(enabled: true, red: 0, green: 0, blue: 0, alpha: 255, widthTenths: 20)
+    public init(enabled: Bool, red: Int, green: Int, blue: Int, alpha: Int, widthTenths: Int) {
+        self.enabled = enabled; self.red = red; self.green = green; self.blue = blue; self.alpha = alpha; self.widthTenths = widthTenths
+    }
+    public var width: Double { Double(widthTenths) / 10 }
+    public var isValid: Bool { rgbaValid(red, green, blue, alpha) && Self.widthRange.contains(widthTenths) }
+}
+
+/// 그림자(글자 실루엣 — 외곽선 포함 — 의 그림자, 배경 상자의 그림자 아님). 거리: 오른쪽·아래가 +(출력 픽셀, 0.1 px 정수).
+/// 흐림: CoreGraphics 그림자 blur 값(출력 픽셀, 0.1 px 정수) — 가장자리가 대략 그만큼 퍼진다. 0이면 또렷한 그림자.
+/// 기본(켤 때): 검정 60%, +4/+4 px, 흐림 6 px.
+public struct SubtitleShadow: Sendable, Equatable, Codable, Hashable {
+    public var enabled: Bool
+    public var red: Int, green: Int, blue: Int, alpha: Int
+    public var offsetXTenths: Int, offsetYTenths: Int
+    public var blurTenths: Int
+    public static let offsetRange = -1000...1000   // ±100 px
+    public static let blurRange = 0...500          // 0–50 px
+    public static let `default` = SubtitleShadow(enabled: true, red: 0, green: 0, blue: 0, alpha: 153, offsetXTenths: 40, offsetYTenths: 40, blurTenths: 60)
+    public init(enabled: Bool, red: Int, green: Int, blue: Int, alpha: Int, offsetXTenths: Int, offsetYTenths: Int, blurTenths: Int) {
+        self.enabled = enabled; self.red = red; self.green = green; self.blue = blue; self.alpha = alpha
+        self.offsetXTenths = offsetXTenths; self.offsetYTenths = offsetYTenths; self.blurTenths = blurTenths
+    }
+    public var offsetX: Double { Double(offsetXTenths) / 10 }
+    public var offsetY: Double { Double(offsetYTenths) / 10 }
+    public var blur: Double { Double(blurTenths) / 10 }
+    public var isValid: Bool {
+        rgbaValid(red, green, blue, alpha) && Self.offsetRange.contains(offsetXTenths) && Self.offsetRange.contains(offsetYTenths) && Self.blurRange.contains(blurTenths)
+    }
+}
+
+/// 배경 상자(글자 사각형 — 모든 줄의 합 — 을 가로·세로 여백만큼 넓힌 둥근 사각형 하나, 글자 아래). 단위: 0.1 px 정수.
+/// 기본(켤 때): 검정 50%, 여백 가로 16·세로 10 px, 모서리 8 px.
+public struct SubtitleBackground: Sendable, Equatable, Codable, Hashable {
+    public var enabled: Bool
+    public var red: Int, green: Int, blue: Int, alpha: Int
+    public var padXTenths: Int, padYTenths: Int
+    public var radiusTenths: Int
+    public static let padRange = 0...2000      // 0–200 px
+    public static let radiusRange = 0...2000   // 0–200 px
+    public static let `default` = SubtitleBackground(enabled: true, red: 0, green: 0, blue: 0, alpha: 128, padXTenths: 160, padYTenths: 100, radiusTenths: 80)
+    public init(enabled: Bool, red: Int, green: Int, blue: Int, alpha: Int, padXTenths: Int, padYTenths: Int, radiusTenths: Int) {
+        self.enabled = enabled; self.red = red; self.green = green; self.blue = blue; self.alpha = alpha
+        self.padXTenths = padXTenths; self.padYTenths = padYTenths; self.radiusTenths = radiusTenths
+    }
+    public var padX: Double { Double(padXTenths) / 10 }
+    public var padY: Double { Double(padYTenths) / 10 }
+    public var radius: Double { Double(radiusTenths) / 10 }
+    public var isValid: Bool {
+        rgbaValid(red, green, blue, alpha) && Self.padRange.contains(padXTenths) && Self.padRange.contains(padYTenths) && Self.radiusRange.contains(radiusTenths)
     }
 }
 

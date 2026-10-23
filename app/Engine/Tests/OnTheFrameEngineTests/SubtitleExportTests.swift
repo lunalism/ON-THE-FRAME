@@ -257,4 +257,26 @@ final class SubtitleExportTests: XCTestCase {
         XCTAssertNil(tb.url)                                    // 임시 디렉터리도 만들지 않음
         XCTAssertNotNil(ExportService.unrenderableSubtitle(p))
     }
+
+    /// 효과(2026-10-23): 외곽선·그림자·배경이 든 자막을 구조 R로 내보내 디코딩한다. 배경 여백(글자 왼쪽, 그림자 반대쪽)은 자막 구간 안에서
+    /// 검정 50%로 어두워지고(제한 범위 Y ≈ (Y + 16)/2), 구간 바로 앞·뒤 프레임은 자막 없는 내보내기와 같다(경계).
+    func testEffectsExportAppearanceAndBoundaries() async throws {
+        let ta = try await asset("otf-TA.mp4"), s1 = UUID()
+        var st = SubtitleStyle.default; st.outline = .default; st.shadow = .default; st.background = .default; st.background!.padXTenths = 600
+        var t = try Timeline().registering(ta).inserting(media: ta.id)
+        t = try t.addingLane(.subtitle, name: "자막", id: s1, outward: true).addingSubtitle(lane: s1, at: 20, length: 20, text: "효과 자막", style: st)
+        let item = try XCTUnwrap(t.subtitles.first)
+        let (ro, r, _) = await export(try await CompositionPlanner.plan(t, media: [ta.id: ta]), "fx.mp4", sources: [ta])
+        let (po, plain, _) = await export(try await CompositionPlanner.plan(t.withoutSubtitleItems, media: [ta.id: ta]), "fx-plain.mp4", sources: [ta])
+        XCTAssertEqual(ro, .completed(r)); XCTAssertEqual(po, .completed(plain))
+        let a = try await Self.planes(r, [19, 20, 39, 40]), b = try await Self.planes(plain, [19, 20, 39, 40])
+        let tb = SubtitleRenderer.shared.raster(item).textBounds
+        let xs = Int(tb.minX) - 52...Int(tb.minX) - 16, ys = Int(tb.midY) - 8...Int(tb.midY) + 8   // 배경 여백 안, 글자·외곽선·그림자 밖
+        func mean(_ y: [UInt8]) -> Double { var sum = 0.0; for yy in ys { for xx in xs { sum += Double(y[yy * 1920 + xx]) } }; return sum / Double(xs.count * ys.count) }
+        for k in [20, 39] {
+            let got = mean(a[k]!.y), expect = (mean(b[k]!.y) + 16) / 2
+            XCTAssertEqual(got, expect, accuracy: 4, "frame \(k): 배경 50%")
+        }
+        for k in [19, 40] { XCTAssertEqual(mean(a[k]!.y), mean(b[k]!.y), accuracy: 3, "frame \(k): 구간 밖") }
+    }
 }

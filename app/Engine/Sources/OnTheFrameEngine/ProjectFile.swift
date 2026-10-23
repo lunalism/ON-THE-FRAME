@@ -21,7 +21,9 @@ public enum ProjectFile {
     /// 형식 5 이하에 자막 레인·`subtitles`가 있으면 잘못된 파일로 거부한다.
     /// 자막 글자는 빈 글자도 된다(2026-10-23, D-037: 프리뷰를 누르면 바로 빈 자막을 만든다). 형식 6은 커밋한 적이 없는 작업 중 형식이라
     /// 이 완화로 거부되는 공식 읽기 쪽은 없다(그 전 작업용 Debug 빌드만 빈 자막이 든 파일을 거부한다). 모양·시각·레인 검사는 그대로다.
-    public static let currentVersion = 6
+    public static let currentVersion = 7
+    /// 자막(효과 없음)을 쓸 때의 형식. 켜진 자막 효과(외곽선·그림자·배경)가 있으면 형식 7(2026-10-23, D-040).
+    public static let subtitleVersion = 6
     /// 자막이 없을 때 쓰는 형식(이전 앱 호환)
     public static let subtitleFreeVersion = 5
     public static let oldestReadableVersion = 1
@@ -49,7 +51,13 @@ public enum ProjectFile {
         public var subtitles: [SubtitleItem]?
     }
     /// 이 타임라인을 쓸 형식 버전
-    public static func version(for t: Timeline) -> Int { t.needsSubtitleFormat ? currentVersion : subtitleFreeVersion }
+    /// 쓰는 형식: 켜진 자막 효과가 있으면 7, 자막·자막 레인이 있으면 6, 아니면 5.
+    /// 꺼진 효과의 설정 값(enabled = false)은 형식 6에도 그대로 적는다 — 형식 6을 읽는 이전 빌드는 모르는 키를 무시하고(효과 없음),
+    /// 이 빌드는 다시 읽어 설정을 되살린다. 이전 빌드가 그 파일을 다시 저장하면 꺼진 설정 값은 없어진다(효과가 꺼져 있으므로 그림은 같다).
+    public static func version(for t: Timeline) -> Int {
+        if t.subtitles.contains(where: { $0.style.hasEnabledEffects }) { return currentVersion }
+        return t.needsSubtitleFormat ? subtitleVersion : subtitleFreeVersion
+    }
     private struct Header: Decodable { let format: String?; let version: Int? }
 
     public enum LoadError: Error, Equatable, CustomStringConvertible {
@@ -129,6 +137,8 @@ public enum ProjectFile {
         guard Set(all.map(\.id) + subs.map(\.id)).count == all.count + subs.count else { throw LoadError.invalid("클립 ID 중복") }
         // start + length가 넘치지 않게(손댄 파일, 코드 리뷰)
         guard subs.allSatisfy({ laneKinds[$0.lane] == .subtitle && $0.start >= 0 && $0.length >= 1 && $0.start <= Int.max - $0.length && $0.style.isValid }) else { throw LoadError.invalid("자막") }
+        // 켜진 효과는 형식 7에만 있다(형식 6 이하 파일에 켜진 효과가 있으면 잘못된 파일). 꺼진 효과 설정은 형식 6에도 있을 수 있다.
+        if v < currentVersion, subs.contains(where: { $0.style.hasEnabledEffects }) { throw LoadError.invalid("자막 효과") }
         guard all.allSatisfy({ byID[$0.mediaID] != nil }) else { throw LoadError.invalid("알 수 없는 미디어를 쓰는 클립") }
         guard all.allSatisfy({ $0.start >= 0 && $0.sourceIn >= 0 && $0.length >= 1 }) else { throw LoadError.invalid("클립 위치·길이") }
         guard doc.audioClips.allSatisfy({ byID[$0.mediaID]!.hasAudio }) else { throw LoadError.invalid("소리 없는 미디어를 쓰는 소리 클립") }

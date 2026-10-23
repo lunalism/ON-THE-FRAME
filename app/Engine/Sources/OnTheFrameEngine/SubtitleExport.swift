@@ -32,7 +32,8 @@ enum SubtitleExporter {
     /// 쓰기. 취소는 작업(Task) 취소, 결과는 성공 또는 오류(CancellationError·Injected·그 밖)다. tempFile만 만든다.
     static func encode(_ p: PlannedComposition, to tempFile: URL, failAfterFraction: Double?, progress: @escaping @Sendable (Double) async -> Void) async throws {
         let n = p.durationFrames
-        let footprints = p.subtitles.map { SubtitleFootprint($0, SubtitleRenderer.shared.raster($0)) }
+        // 발자국은 자막 구간에 들어설 때 만들고 끝나면 버린다(2026-10-23 측정: 효과 자막 200개를 미리 만들면 내보내기 내내 약 118 MB를 붙잡았다)
+        let footprints = FootprintWindow(p.subtitles)
         let reader = try AVAssetReader(asset: p.composition)
         var vs: [String: Any] = [kCVPixelBufferPixelFormatTypeKey as String: pixelFormat]
         vs[AVVideoColorPropertiesKey] = color709
@@ -129,7 +130,7 @@ enum SubtitleExporter {
             }
             return nil
         }
-        func videoStep(_ io: IO, _ footprints: [SubtitleFootprint], done: () -> Void) {
+        func videoStep(_ io: IO, _ footprints: FootprintWindow, done: () -> Void) {
             func finish() { if !videoDone { videoDone = true; io.vIn.markAsFinished(); done() } }
             if !primed { primed = true; next = nextSample(io) }
             while io.vIn.isReadyForMoreMediaData && !videoDone {
@@ -142,7 +143,7 @@ enum SubtitleExporter {
                     fail(ExportFailure.export("합성 출력 형식이 예상과 다릅니다(프레임 \(k)).")); finish(); return
                 }
                 var out = src
-                let vis = footprints.filter { $0.visible(k) }
+                let vis = footprints.visible(at: k)
                 if !vis.isEmpty {
                     var o: CVPixelBuffer?
                     guard let pool = io.adaptor.pixelBufferPool, CVPixelBufferPoolCreatePixelBuffer(nil, pool, &o) == kCVReturnSuccess, let ob = o,
@@ -171,6 +172,30 @@ enum SubtitleExporter {
                 if !io.aIn!.append(sb) { fail(ExportFailure.export("소리를 쓰지 못했습니다.")); finish(); return }
             }
         }
+    }
+}
+
+/// 보이는 자막의 발자국만 들고 있는 창(2026-10-23). 프레임은 0부터 차례로 온다(영상 큐에서만 씀).
+/// 자막 구간 [start, end)에 들어서면 발자국을 만들고 끝나면 버린다. 합성 순서는 그리기 순서(입력 차례) 그대로다.
+final class FootprintWindow: @unchecked Sendable {
+    private let items: [(order: Int, item: SubtitleItem)]
+    private var nextIndex = 0
+    private var active: [(order: Int, footprint: SubtitleFootprint)] = []
+    /// 한꺼번에 들고 있던 발자국 수의 최대(시험·기록용)
+    private(set) var peak = 0
+    init(_ subtitles: [SubtitleItem]) {
+        items = subtitles.enumerated().map { ($0.offset, $0.element) }.sorted { ($0.item.start, $0.order) < ($1.item.start, $1.order) }
+    }
+    func visible(at k: Int) -> [SubtitleFootprint] {
+        active.removeAll { $0.footprint.end <= k }
+        var added = false
+        while nextIndex < items.count, items[nextIndex].item.start <= k {
+            let (order, item) = items[nextIndex]; nextIndex += 1
+            if item.end > k { active.append((order, SubtitleFootprint(item, SubtitleRenderer.shared.raster(item)))); added = true }
+        }
+        if added { active.sort { $0.order < $1.order } }
+        peak = max(peak, active.count)
+        return active.map(\.footprint)
     }
 }
 
