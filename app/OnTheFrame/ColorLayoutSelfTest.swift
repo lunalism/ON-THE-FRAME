@@ -14,6 +14,7 @@ enum ColorLayoutSelfTest {
         var checks: [Check] = []
         let s = ProjectStore.shared
         var st = SubtitleStyle.default; st.red = 255; st.green = 214; st.blue = 0   // 팔레트 "노랑"과 같은 색(선택 표시)
+        st.outline = .default; st.shadow = .default; st.background = .default   // 효과 묶음 셋 모두 펼침(켜진 효과는 펼쳐 보임) — 칸·색 상자 모두 폭 검사
         for width in [160.0, 200.0, 268.0, 280.0] {   // 268 = 이 Mac 2560 pt 화면의 기본 창(70%)에서 왼쪽 패널 기본 폭(15%)
             for dark in [false, true] {
                 let root = ScrollView {

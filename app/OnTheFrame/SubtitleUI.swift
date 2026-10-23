@@ -91,10 +91,15 @@ extension ProjectStore {
     /// (처음 값과 같으면 기록 없음). 멈춘 시간은 세션을 나누지 않는다.
     /// - project: 그 색 상자를 그린 프로젝트 회차. 늦게 온 패널 값이 다른 프로젝트·다른 자막(고른 것이 아님)을 바꾸지 않게 거른다.
     func colorEditChange(_ id: UUID, red: Int, green: Int, blue: Int, alpha: Int, project: Int) {
+        styleEditChange(id, project: project) { $0.red = red; $0.green = green; $0.blue = blue; $0.alpha = alpha }
+    }
+    /// 모양 조정 세션(2026-10-23, D-040에서 넓힘): 색과 같은 세션으로 효과(외곽선·그림자·배경)의 켜기·색·숫자 조정을 받는다.
+    /// 첫 실제 변화에 시작, 문서는 그대로 두고 프리뷰 층만 바꾸며(영상 항목 그대로), 끝날 때 한 번 넣는다. 멈춘 시간은 세션을 나누지 않는다.
+    func styleEditChange(_ id: UUID, project: Int, _ change: (inout SubtitleStyle) -> Void) {
         guard project == projectSession, gestureBase == nil, selection == id, let s = timeline.subtitle(id) else { return }
         if let c = colorSession, c.id != id { finishColorSession() }
         var st = colorSession?.id == id ? colorSession!.current : s.style
-        st.red = red; st.green = green; st.blue = blue; st.alpha = alpha
+        change(&st)
         guard st.isValid else { return }
         if var c = colorSession {
             guard c.current != st else { return }
@@ -115,7 +120,12 @@ extension ProjectStore {
         guard let c = colorSession else { return }
         colorSession = nil
         guard c.project == projectSession, let s = timeline.subtitle(c.id) else { return }
-        if c.current != s.style { setSubtitleStyle(c.id, c.current) } else { refreshPreviewSubtitles() }
+        // 처음에 없던 효과를 켰다가 그대로 끈 것(기본값·꺼짐)은 그림이 같으니 처음처럼 없음으로 돌린다 — 바뀐 게 없는 실행 취소 단계를 만들지 않게(2026-10-23 검토)
+        var current = c.current
+        if c.initial.outline == nil, current.outline == SubtitleOutline.default.disabled { current.outline = nil }
+        if c.initial.shadow == nil, current.shadow == SubtitleShadow.default.disabled { current.shadow = nil }
+        if c.initial.background == nil, current.background == SubtitleBackground.default.disabled { current.background = nil }
+        if current != s.style { setSubtitleStyle(c.id, current) } else { refreshPreviewSubtitles() }
     }
     /// 모양 바꾸기(한 단계). 같으면 기록하지 않는다.
     func setSubtitleStyle(_ id: UUID, _ style: SubtitleStyle) {
@@ -395,6 +405,7 @@ struct SubtitleStyleAdjust: View, @preconcurrency Equatable {
                 }
                 .controlSize(.small)
             }
+            EffectsAdjust(store: store, id: id, style: style, project: project)
             HStack(spacing: 4) {
                 Text("정렬").font(.caption).frame(width: 34, alignment: .leading)
                 Picker("정렬", selection: Binding(get: { style.alignment }, set: { setAlignment($0) })) {
@@ -545,3 +556,142 @@ struct CurrentColorWell: NSViewRepresentable {
         if !w.color.isEqual(color) { w.color = color }   // 패널이 보낸 값과 같으면 다시 넣지 않음(되먹임 없음)
     }
 }
+
+// MARK: - 효과(외곽선·그림자·배경, 2026-10-23, D-040)
+
+/// 효과 칸: 접을 수 있는 세 묶음(외곽선·그림자·배경), 묶음 이름 옆 켜기. 켜면 기본값(소유자 지정)으로 시작하고, 껐다 켜면 전에 쓴 값을 되살린다.
+/// 모든 조정(켜기·색·불투명도·숫자)은 모양 조정 세션(styleEditChange) — 한 묶음 = 실행 취소 한 단계, 프리뷰 자막 층만 바뀜(영상 그대로).
+/// 숫자 단위는 출력 1080p 픽셀(0.1 px까지). 효과는 확정된 자막 그림에 보인다(프리뷰 위 글 편집 칸에는 글자만).
+struct EffectsAdjust: View {
+    @Bindable var store: ProjectStore
+    let id: UUID
+    let style: SubtitleStyle
+    let project: Int
+    @State private var openOutline = false
+    @State private var openShadow = false
+    @State private var openBackground = false
+
+    func edit(_ f: (inout SubtitleStyle) -> Void) { store.styleEditChange(id, project: project, f) }
+    func nsColor(_ r: Int, _ g: Int, _ b: Int, _ a: Int) -> NSColor { NSColor(srgbRed: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: CGFloat(a) / 255) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("효과").font(.caption)
+            DisclosureGroup(isExpanded: $openOutline) {
+                if let o = style.outline { VStack(alignment: .leading, spacing: 4) {
+                    colorRow(o.red, o.green, o.blue, o.alpha) { r, g, b, a in edit { $0.outline?.red = r; $0.outline?.green = g; $0.outline?.blue = b; $0.outline?.alpha = a } }
+                    TenthsField(label: "두께", value: o.widthTenths, range: SubtitleOutline.widthRange) { v in edit { $0.outline?.widthTenths = v } }
+                }.frame(maxWidth: .infinity, alignment: .leading) }   // 묶음 안 줄은 왼쪽 맞춤(DisclosureGroup 기본은 가운데)
+            } label: {
+                Toggle("외곽선", isOn: Binding(get: { style.outline?.enabled == true }, set: { on in
+                    edit { if $0.outline == nil { $0.outline = .default }; $0.outline?.enabled = on }; if on { openOutline = true } }))
+                    .font(.caption).toggleStyle(.checkbox)
+            }
+            DisclosureGroup(isExpanded: $openShadow) {
+                if let sh = style.shadow { VStack(alignment: .leading, spacing: 4) {
+                    colorRow(sh.red, sh.green, sh.blue, sh.alpha) { r, g, b, a in edit { $0.shadow?.red = r; $0.shadow?.green = g; $0.shadow?.blue = b; $0.shadow?.alpha = a } }
+                    pair(TenthsField(label: "가로", value: sh.offsetXTenths, range: SubtitleShadow.offsetRange) { v in edit { $0.shadow?.offsetXTenths = v } },
+                         TenthsField(label: "세로", value: sh.offsetYTenths, range: SubtitleShadow.offsetRange) { v in edit { $0.shadow?.offsetYTenths = v } },
+                         caption: "거리(오른쪽·아래 +)")
+                    TenthsField(label: "흐림", value: sh.blurTenths, range: SubtitleShadow.blurRange) { v in edit { $0.shadow?.blurTenths = v } }
+                }.frame(maxWidth: .infinity, alignment: .leading) }   // 묶음 안 줄은 왼쪽 맞춤(DisclosureGroup 기본은 가운데)
+            } label: {
+                Toggle("그림자", isOn: Binding(get: { style.shadow?.enabled == true }, set: { on in
+                    edit { if $0.shadow == nil { $0.shadow = .default }; $0.shadow?.enabled = on }; if on { openShadow = true } }))
+                    .font(.caption).toggleStyle(.checkbox)
+            }
+            DisclosureGroup(isExpanded: $openBackground) {
+                if let bg = style.background { VStack(alignment: .leading, spacing: 4) {
+                    colorRow(bg.red, bg.green, bg.blue, bg.alpha) { r, g, b, a in edit { $0.background?.red = r; $0.background?.green = g; $0.background?.blue = b; $0.background?.alpha = a } }
+                    pair(TenthsField(label: "가로", value: bg.padXTenths, range: SubtitleBackground.padRange) { v in edit { $0.background?.padXTenths = v } },
+                         TenthsField(label: "세로", value: bg.padYTenths, range: SubtitleBackground.padRange) { v in edit { $0.background?.padYTenths = v } },
+                         caption: "여백")
+                    TenthsField(label: "모서리", value: bg.radiusTenths, range: SubtitleBackground.radiusRange) { v in edit { $0.background?.radiusTenths = v } }
+                }.frame(maxWidth: .infinity, alignment: .leading) }   // 묶음 안 줄은 왼쪽 맞춤(DisclosureGroup 기본은 가운데)
+            } label: {
+                Toggle("배경", isOn: Binding(get: { style.background?.enabled == true }, set: { on in
+                    edit { if $0.background == nil { $0.background = .default }; $0.background?.enabled = on }; if on { openBackground = true } }))
+                    .font(.caption).toggleStyle(.checkbox)
+            }
+            Text("효과는 확정된 자막 그림에 보입니다(프리뷰 위 글 편집 칸에서는 글자만). 단위: 출력 1080p 픽셀.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .controlSize(.small)
+        .onAppear {
+            openOutline = style.outline?.enabled == true; openShadow = style.shadow?.enabled == true; openBackground = style.background?.enabled == true
+        }
+    }
+
+    /// 색 상자(시스템 색 패널) + 불투명도(%)
+    func colorRow(_ r: Int, _ g: Int, _ b: Int, _ a: Int, set: @escaping (Int, Int, Int, Int) -> Void) -> some View {
+        HStack(alignment: .center, spacing: 6) {   // 묶음 이름(외곽선·그림자·배경)이 무엇의 색인지 말해 준다 — 좁은 패널에 맞게 "색" 이름표는 두지 않음
+            CurrentColorWell(color: nsColor(r, g, b, a)) { c in
+                let st = SubtitleStyleAdjust.styled(.default, from: c); set(st.red, st.green, st.blue, st.alpha)
+            }
+            .frame(width: 40, height: 21)
+            .accessibilityLabel("효과 색")
+            OpacityField(alpha: a) { na in set(r, g, b, na) }
+        }
+    }
+    /// 숫자 두 칸: 들어가면 한 줄, 아니면 두 줄(글자를 줄이거나 자르지 않음)
+    func pair<A: View, B: View>(_ a: A, _ b: B, caption: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(caption).font(.caption2).foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) { a; b }.fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 4) { a; b }.fixedSize(horizontal: true, vertical: false)
+            }
+        }
+    }
+}
+
+/// 0.1 px 단위 숫자 칸(표시는 px, 소수 첫째 자리). Return에 범위 안으로 맞춰 넘긴다(크기·위치 칸과 같음 — 칸을 떠나기만 하면 넘기지 않는다).
+struct TenthsField: View {
+    let label: String
+    let value: Int
+    let range: ClosedRange<Int>
+    let commit: (Int) -> Void
+    @State private var text = ""
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
+            Text(label).font(.caption).frame(width: 34, alignment: .leading)
+            TextField("px", text: $text).textFieldStyle(.roundedBorder).font(SubtitleStyleAdjust.fieldFont).frame(width: 52)
+                .onSubmit(apply).accessibilityLabel(label + " (px)")
+                .help("\(label): \(NumberText.trim(Double(range.lowerBound) / 10, 1))–\(NumberText.trim(Double(range.upperBound) / 10, 1)) px")
+            Text("px").font(.caption2).fixedSize().accessibilityHidden(true)
+        }
+        .onAppear { text = NumberText.trim(Double(value) / 10, 1) }
+        .onChange(of: value) { _, v in text = NumberText.trim(Double(v) / 10, 1) }
+    }
+    func apply() {
+        guard let v = Double(text.trimmingCharacters(in: .whitespaces)), v.isFinite else { text = NumberText.trim(Double(value) / 10, 1); return }
+        let t = min(max(Int((v * 10).rounded()), range.lowerBound), range.upperBound)
+        commit(t)
+        text = NumberText.trim(Double(value) / 10, 1)   // 받아들이지 않았거나 같은 값이면 지금 값을 보인다(바뀌면 onChange가 새 값으로)
+    }
+}
+
+/// 불투명도(%) 칸
+struct OpacityField: View {
+    let alpha: Int
+    let commit: (Int) -> Void
+    @State private var text = ""
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 2) {
+            TextField("%", text: $text).textFieldStyle(.roundedBorder).font(SubtitleStyleAdjust.fieldFont).frame(width: 36)
+                .onSubmit(apply).accessibilityLabel("불투명도 퍼센트").help("불투명도(%): 0 = 투명, 100 = 불투명")
+            Text("%").font(.caption).fixedSize().accessibilityHidden(true)
+        }
+        .onAppear { text = String(Int((Double(alpha) * 100 / 255).rounded())) }
+        .onChange(of: alpha) { _, a in text = String(Int((Double(a) * 100 / 255).rounded())) }
+    }
+    func apply() {
+        guard let v = Double(text.trimmingCharacters(in: .whitespaces)), v.isFinite else { text = String(Int((Double(alpha) * 100 / 255).rounded())); return }
+        commit(Int((min(max(v, 0), 100) * 255 / 100).rounded()))
+        text = String(Int((Double(alpha) * 100 / 255).rounded()))   // 받아들이지 않았거나 같은 값이면 지금 값을 보인다(바뀌면 onChange가 새 값으로)
+    }
+}
+
+private extension SubtitleOutline { var disabled: Self { var d = self; d.enabled = false; return d } }
+private extension SubtitleShadow { var disabled: Self { var d = self; d.enabled = false; return d } }
+private extension SubtitleBackground { var disabled: Self { var d = self; d.enabled = false; return d } }

@@ -614,6 +614,59 @@ enum SubtitleSelfTest {
         } else { check("color.setup", false, "자막 없음") }
         await focusTimeline()
 
+        // 19e. 효과(D-040, 저장소 경로): 켜기·조정은 모양 세션 — 문서 그대로·프리뷰 층만(항목 교체 없음), 쉼과 무관하게 끝날 때 한 단계, 실행 취소로 효과 없음.
+        //      형식 7로 저장되고 다시 읽으면 효과 그대로. 빈 자막은 효과가 켜져도 그리지 않음.
+        if let piece = s.timeline.subtitles(inLane: s1).first(where: { !$0.isBlank }) {
+            let fid = piece.id, proj = s.projectSession
+            s.select(fid); s.seek(to: piece.start + 2); _ = await previewSettled()
+            let before = s.timeline.subtitle(fid)!.style, dF = s.history.undoDepth, iF = s.itemReplacements
+            let layerBefore = s.previewHost?.subtitleLayerForTest(fid)?.frame
+            s.styleEditChange(fid, project: proj) { $0.outline = .default }
+            s.styleEditChange(fid, project: proj) { $0.shadow = .default }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)   // 쉼(세션을 나누지 않음)
+            s.styleEditChange(fid, project: proj) { $0.background = .default; $0.background!.alpha = 100 }
+            let live = s.previewHost?.subtitleLayerForTest(fid)?.frame
+            let during = s.history.undoDepth == dF && s.timeline.subtitle(fid)?.style == before && s.itemReplacements == iF
+            // 짧은 가운데 글은 효과가 줄바꿈 폭(1728) 안이라 가로는 같고, 세로는 그림자·외곽선만큼 커진다
+            let grew = live.map { lf in layerBefore.map { lf.width >= $0.width && lf.height > $0.height } ?? false } ?? false
+            s.finishColorSession(); _ = await previewSettled()
+            let after = s.timeline.subtitle(fid)!.style
+            let one = s.history.undoDepth == dF + 1 && after.hasEnabledEffects && after.outline == .default && after.background?.alpha == 100 && s.itemReplacements == iF
+            let r = SubtitleRenderer.shared.raster(s.timeline.subtitle(fid)!)
+            let layerOK = s.previewHost?.subtitleLayerForTest(fid).map { abs($0.frame.width - r.rect.width) < 0.5 && abs($0.frame.height - r.rect.height) < 0.5 } == true
+            let pFx = folder.appendingPathComponent("effects.ontheframe")
+            let saved = s.writeProject(to: pFx)
+            let doc = (try? Data(contentsOf: pFx)).flatMap { try? ProjectFile.decode($0) }
+            let persisted = saved && doc?.document.version == 7 && doc?.timeline.subtitle(fid)?.style == after
+            s.undo(); _ = await previewSettled()
+            let undone = s.timeline.subtitle(fid)?.style == before && !s.timeline.subtitles.contains { $0.style.hasEnabledEffects }
+            check("effects.sessionPreviewOneStepFormat7Undo", during && grew && one && layerOK && persisted && undone,
+                  "during \(during) grew \(grew) one \(one) layer \(layerOK) v7 \(persisted) undo \(undone) items \(s.itemReplacements - iF)")
+            // 2026-10-23 검토 고침: 없던 효과를 켰다가 그대로 끄면 단계 없음(문서 그대로) / 세션 중 ⌘C는 세션을 먼저 넣어 보이는 모양을 복사
+            s.select(fid)
+            let d0 = s.history.undoDepth
+            s.styleEditChange(fid, project: proj) { if $0.outline == nil { $0.outline = .default }; $0.outline?.enabled = true }
+            s.styleEditChange(fid, project: proj) { $0.outline?.enabled = false }
+            s.finishColorSession(); _ = await previewSettled()
+            check("effects.toggleOnOffNoStep", s.history.undoDepth == d0 && s.timeline.subtitle(fid)?.style == before, "depth +\(s.history.undoDepth - d0)")
+            s.styleEditChange(fid, project: proj) { if $0.outline == nil { $0.outline = .default }; $0.outline?.enabled = true }
+            s.copySelection()
+            let copied = s.clipClipboard?.content.subtitles.first?.style.activeOutline != nil
+            check("effects.copyFinishesSession", s.colorSession == nil && copied && s.history.undoDepth == d0 + 1 && s.timeline.subtitle(fid)?.style.activeOutline != nil,
+                  "copied \(copied) depth +\(s.history.undoDepth - d0)")
+            s.undo(); _ = await previewSettled()
+            // 빈 자막 + 효과: 프리뷰 층 없음(그리지 않음)
+            if let bid = s.createSubtitleAndEdit(atFrame: 0, output: nil) {
+                pv.syncEditor(); await key(53, "\u{1b}")
+                s.select(bid); s.styleEditChange(bid, project: proj) { $0.outline = .default; $0.background = .default }; s.finishColorSession()
+                _ = await previewSettled()
+                check("effects.blankStaysEmpty", s.timeline.subtitle(bid)?.style.hasEnabledEffects == true && s.previewHost?.subtitleLayerForTest(bid) == nil
+                      && !s.timeline.renderedSubtitles.contains { $0.id == bid })
+                s.select(bid); s.deleteSelection(ripple: false)
+            } else { check("effects.blankStaysEmpty", false, "만들기 실패") }
+        } else { check("effects.setup", false, "자막 없음") }
+        await focusTimeline()
+
         // 19d. 코드 리뷰 고침: 색 조정 세션 중 프리뷰에서 끌어도 새 색이 남는다(끌기 시작 때 색이 먼저 한 단계, 옮기기가 다음 단계)
         if let piece = s.timeline.subtitles(inLane: s1).first(where: { !$0.isBlank }) {
             let cid = piece.id, proj = s.projectSession

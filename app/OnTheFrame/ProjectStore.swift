@@ -645,6 +645,7 @@ final class ProjectStore {
     var canPaste: Bool { clipClipboard?.project == projectID && gestureBase == nil && openProgress == nil && !openRequested }
     /// 복사(⌘C): 고른 클립과 연결된 짝. 프로젝트를 바꾸지 않고 실행 취소 기록도 없다.
     func copySelection() {
+        finishColorSession()   // 열린 모양 조정 세션(효과 켜기 등)을 먼저 넣어 복사본이 보이는 모양을 갖게(2026-10-23 검토)
         guard gestureBase == nil, let id = selection,
               let c = (timeline.subtitle(id) != nil ? try? timeline.copying(subtitle: id) : try? timeline.copying(clip: id)) else { statusMessage = "복사할 클립을 먼저 고르세요."; return }
         clipClipboard = ClipClipboard(project: projectID, content: c, selected: id)
