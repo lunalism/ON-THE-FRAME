@@ -458,6 +458,9 @@ final class PlayerNSView: NSView {
     #if DEBUG
     /// 자체 검사 전용: 탐색 중 유지하는 자막 수
     var seekHeldCount: Int { seekHeld?.count ?? 0 }
+    /// 스펙트럼 프리뷰 실험 전용(SP-0, SpectrumPreviewExperiment): 화면에 나온 것으로 아는 프레임, 완료·취소를 처리하지 않은 탐색이 있는가
+    var displayedFrameForExperiment: Int { displayedFrame }
+    var hasPendingSeeksForExperiment: Bool { !pendingSeeks.isEmpty }
     #endif
     private func shown(_ s: SubtitleItem, _ f: Int) -> Bool { (s.start <= f && f < s.end) || (s.end == subtitleDuration && f == s.end) }
     private var subtitleDuration = 0

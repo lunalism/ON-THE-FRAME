@@ -205,6 +205,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await PanelSelfTest.run(folder: folder) }
             return
         }
+        if args.contains("-OTFSpectrumPreviewTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await SpectrumPreviewExperiment.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFSpectrumPauseReconcile"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await SpectrumPreviewExperiment.runPauseReconcile(folder: folder) }
+            return
+        }
+        if args.contains("-OTFRealMediaCheck"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            let media = urls.first { !$0.hasDirectoryPath }
+            Task { await SpectrumPreviewExperiment.runRealCheck(folder: folder, media: media) }
+            return
+        }
+        if args.contains("-OTFSpectrumPausePhase"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await SpectrumPreviewExperiment.runPausePhase(folder: folder) }
+            return
+        }
+        if args.contains("-OTFSpectrumPauseProbe"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await SpectrumPreviewExperiment.runPauseProbe(folder: folder) }
+            return
+        }
+        if args.contains("-OTFSpectrumMarkerGeometry"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await SpectrumPreviewExperiment.runGeometry(folder: folder) }
+            return
+        }
+        if args.contains("-OTFSpectrumPreviewManual"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            let media = urls.first { !$0.hasDirectoryPath }   // 함께 연 실제 미디어(있으면, 읽기만)
+            Task { await SpectrumPreviewExperiment.runManual(folder: folder, media: media) }
+            return
+        }
         if args.contains("-OTFSubtitleWindowTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await SubtitleWindowSelfTest.run(folder: folder) }
             return
