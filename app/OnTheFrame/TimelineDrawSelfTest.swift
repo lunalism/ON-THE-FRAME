@@ -99,6 +99,91 @@ enum TimelineDrawSelfTest {
         // 재생 헤드가 보이는 영역 안: 그림 같음(재생 헤드는 줄이지 않고 그대로 그림)
         s.seek(to: tv.frame(atX: tv.visibleRect.midX)); await LaneSelfTest.settle()
         compare("playheadVisible")
+
+        // 가로 확대 기준(2026-10-24, 소유자 요청): 슬라이더와 같은 값(store.timelineZoom)을 바꾼다. 재생 헤드가 보이면 그 시각을 보이는 영역의 같은 자리에,
+        // 밖이면 보이는 영역 가운데 시각을 가운데에 둔다. 처음·끝에서는 스크롤 범위 안. 재생 헤드·클립·선택·재생 상태·레인 높이는 그대로.
+        s.timelineZoom = 2; await LaneSelfTest.settle()
+        let t0 = s.timeline, sel0 = s.selection, h0 = tv.bounds.height
+        func zoom(_ z: Double) async { s.timelineZoom = z; await LaneSelfTest.settle() }
+        func scroll(originX x: CGFloat) async { tv.scroll(NSPoint(x: max(0, x), y: tv.visibleRect.minY)); await LaneSelfTest.settle() }
+        func phX() -> CGFloat { tv.x(s.playhead) - tv.visibleRect.minX }
+        func maxOrigin() -> CGFloat { max(0, tv.bounds.width - tv.visibleRect.width) }
+        let zMid = s.timeline.durationFrames / 2
+        for (name, frac) in [("left", 0.1), ("middle", 0.5), ("right", 0.9)] {
+            await zoom(2); s.seek(to: zMid); await LaneSelfTest.settle()
+            let want = CGFloat(frac) * tv.visibleRect.width
+            await scroll(originX: tv.x(zMid) - want)
+            let start = phX()
+            var worst: CGFloat = 0, log: [String] = []
+            for z in [4.0, 9.0, 12.0, 1.0, 0.5, 2.0] {
+                await zoom(z)
+                let clamped = tv.visibleRect.minX <= 0.5 || tv.visibleRect.minX >= maxOrigin() - 0.5
+                if !clamped { worst = max(worst, abs(phX() - start)) }
+                log.append("\(z):\(Int(phX()))\(clamped ? "c" : "")")
+            }
+            check("zoom.playhead.\(name)", worst <= 1 && s.playhead == zMid, "start \(Int(start)) worst \(worst) \(log.joined(separator: " "))")
+        }
+        // 처음: 재생 헤드 0 → 스크롤 0 그대로(왼쪽 끝 맞춤)
+        await zoom(2); s.seek(to: 0); await scroll(originX: 0)
+        var startOK = true
+        for z in [6.0, 0.4, 12.0, 2.0] { await zoom(z); startOK = startOK && tv.visibleRect.minX < 0.5 && abs(phX() - TimelineNSView.inset) < 0.5 }
+        check("zoom.boundary.start", startOK && s.playhead == 0, "origin \(tv.visibleRect.minX) phX \(phX())")
+        // 끝: 끝 근처 재생 헤드, 스크롤 끝 → 확대해도 그 자리, 크게 줄이면 스크롤 범위 안(끝)으로 맞춤, 재생 헤드는 보임
+        let end = s.timeline.durationFrames - 3
+        await zoom(2); s.seek(to: end); await scroll(originX: maxOrigin())
+        let endStart = phX()
+        await zoom(5)
+        let endIn = abs(phX() - endStart) <= 1 || tv.visibleRect.minX >= maxOrigin() - 0.5
+        await zoom(0.2)
+        let endOut = tv.visibleRect.minX <= maxOrigin() + 0.5 && tv.visibleRect.minX >= -0.5 && phX() >= 0 && phX() <= tv.visibleRect.width
+        check("zoom.boundary.end", endIn && endOut && s.playhead == end, "in \(endIn) out \(endOut) origin \(Int(tv.visibleRect.minX)) max \(Int(maxOrigin())) phX \(Int(phX()))")
+        // 손으로 스크롤해 재생 헤드가 밖: 보이는 영역 가운데 시각이 가운데에 남고 재생 헤드로 뛰지 않음
+        await zoom(2); s.seek(to: zMid); await LaneSelfTest.settle()
+        await scroll(originX: tv.x(zMid) + 2500)   // 재생 헤드는 왼쪽 밖
+        let cFrame = Double((tv.visibleRect.midX - TimelineNSView.inset) / tv.pixelsPerFrame)
+        var offOK = true, offLog: [String] = []
+        for z in [4.0, 1.0, 8.0] {
+            await zoom(z)
+            let c = Double((tv.visibleRect.midX - TimelineNSView.inset) / tv.pixelsPerFrame)
+            let phVisible = phX() >= 0 && phX() <= tv.visibleRect.width
+            let clamped = tv.visibleRect.minX <= 0.5 || tv.visibleRect.minX >= maxOrigin() - 0.5
+            offOK = offOK && (clamped || abs(c - cFrame) * Double(tv.pixelsPerFrame) <= 1) && !phVisible
+            offLog.append("\(z):c\(String(format: "%.1f", c)) ph\(phVisible ? "visible" : "off")")
+        }
+        check("zoom.offscreenKeepsCenter", offOK, "center0 \(String(format: "%.1f", cFrame)) \(offLog.joined(separator: " "))")
+        // 슬라이더를 이어서 많이 움직인 뒤 처음 배율로: 흔들림(밀림) 없음
+        await zoom(2); s.seek(to: zMid); await LaneSelfTest.settle()
+        await scroll(originX: tv.x(zMid) - 0.37 * tv.visibleRect.width)
+        let o0 = tv.visibleRect.minX, p0 = phX()
+        var x: UInt64 = 0x2545F4914F6CDD1D
+        for _ in 0..<60 { x ^= x << 13; x ^= x >> 7; x ^= x << 17; s.timelineZoom = 0.6 + Double(x % 1000) / 1000 * 11; await LaneSelfTest.settle() }
+        await zoom(2)
+        check("zoom.repeatedNoDrift", abs(tv.visibleRect.minX - o0) <= 1 && abs(phX() - p0) <= 1, "origin \(o0) → \(tv.visibleRect.minX), phX \(p0) → \(phX())")
+        // Codex 검토: 밖에서 확대 → (스크롤 없이) 보이는 곳을 눌러 재생 헤드를 옮김 → 다시 확대: 이제 보이는 재생 헤드가 그 자리에 남는다
+        await zoom(2); s.seek(to: zMid); await LaneSelfTest.settle()
+        await scroll(originX: tv.x(zMid) + 2500)
+        await zoom(3)                                           // 가운데 기준(재생 헤드 밖)
+        let clickF = tv.frame(atX: tv.visibleRect.minX + tv.visibleRect.width * 0.2)
+        s.seek(to: clickF); await LaneSelfTest.settle()         // 보이는 곳(가운데 아님)으로 재생 헤드
+        let beforeX = phX()
+        await zoom(6)
+        check("zoom.offscreenThenVisiblePlayhead", abs(phX() - beforeX) <= 1 && s.playhead == clickF, "phX \(beforeX) → \(phX())")
+        // 확대 사이에 창 크기를 바꿈: 새 보이는 폭에서 재생 헤드 자리를 지킨다(예전 기준을 다시 쓰지 않음)
+        if let w = s.editorWindow {
+            let size0 = w.frame.size
+            await zoom(2); s.seek(to: zMid); await LaneSelfTest.settle()
+            await scroll(originX: tv.x(zMid) - 0.6 * tv.visibleRect.width)
+            await zoom(4)
+            w.setContentSize(NSSize(width: size0.width - 260, height: size0.height)); await LaneSelfTest.settle()
+            let bx = phX(), inView = bx >= 0 && bx <= tv.visibleRect.width
+            await zoom(8)
+            check("zoom.afterWindowResize", inView && abs(phX() - bx) <= 1, "phX \(bx) → \(phX()) width \(Int(tv.visibleRect.width))")
+            w.setFrame(NSRect(origin: w.frame.origin, size: size0), display: true); await LaneSelfTest.settle()
+        }
+        // 바뀌지 않는 것, 그리고 보이는 영역만 그린 그림 = 전체 그림(확대·스크롤 뒤)
+        check("zoom.invariants", s.timeline == t0 && s.selection == sel0 && !s.isPlaying && tv.bounds.height == h0, "")
+        await zoom(7); compare("afterZoom.in")
+        await zoom(0.5); compare("afterZoom.out")
         finish(folder, checks)
     }
 

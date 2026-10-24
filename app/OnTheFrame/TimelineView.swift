@@ -82,9 +82,13 @@ struct TimelineRepresentable: NSViewRepresentable {
     func updateNSView(_ c: TimelineContainerView, context: Context) {
         let v = c.timelineView, sv = c.scrollView
         v.state = state
-        v.pixelsPerFrame = CGFloat(pixelsPerFrame)
+        let oldPPF = v.pixelsPerFrame, newPPF = CGFloat(pixelsPerFrame)
+        // 가로 확대(2026-10-24, 소유자 요청): 확대 배율이 바뀌면 기준 시각을 보이는 영역의 같은 가로 자리에 둔다(아래 zoomAnchor)
+        let anchor = oldPPF != newPPF ? c.zoomAnchor(playhead: state.playhead, oldPPF: oldPPF) : nil
+        v.pixelsPerFrame = newPPF
         let w = max(sv.contentSize.width, TimelineNSView.inset * 2 + CGFloat(state.timeline.durationFrames) * v.pixelsPerFrame + 200)
         v.setFrameSize(NSSize(width: w, height: max(sv.contentSize.height, TimelineNSView.contentHeight(state.timeline.lanes))))
+        if let anchor { c.applyZoomAnchor(anchor, ppf: newPPF) }
         v.needsDisplay = true
         v.window?.invalidateCursorRects(for: v)
         c.header.lanes = state.timeline.lanes
@@ -116,6 +120,41 @@ final class TimelineContainerView: NSView {
         }
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    // MARK: 가로 확대 기준(2026-10-24, 소유자 요청: 0프레임이 아니라 빨간 재생 헤드를 기준으로 확대)
+    //
+    // 확대 배율이 바뀌면 기준 시각(프레임, 소수 가능)을 보이는 영역 안 같은 가로 자리(viewX)에 두도록 가로 스크롤을 함께 옮긴다.
+    // - 재생 헤드가 보이는 영역 안이면 재생 헤드 시각과 그 자리. 밖이면 보이는 영역 가운데 시각과 가운데(재생 헤드로 뛰지 않음).
+    // - 타임라인 처음·끝에서 그 자리를 지킬 수 없으면 스크롤 범위 안으로 맞춘다.
+    // - 슬라이더를 이어서 움직이는 동안(그사이 손으로 스크롤하지 않았고 재생 헤드가 그대로면) 처음 잡은 기준을 다시 쓴다:
+    //   매번 반올림된 스크롤 위치에서 다시 재면 조금씩 밀린다.
+    // 세로 스크롤·레인 높이·클립·선택·재생 상태는 건드리지 않는다.
+    struct ZoomAnchor: Equatable { let frame: Double; let viewX: CGFloat; let playhead: Int?; let usePlayhead: Bool }
+    private var lastZoomAnchor: ZoomAnchor?
+    private var lastZoomOriginX: CGFloat?, lastZoomWidth: CGFloat?
+    func zoomAnchor(playhead: Int, oldPPF: CGFloat) -> ZoomAnchor {
+        let vis = scrollView.contentView.bounds
+        let px = TimelineNSView.inset + CGFloat(playhead) * oldPPF
+        let playheadVisible = px >= vis.minX && px <= vis.maxX
+        // 이어지는 확대: 마지막으로 맞춘 스크롤·보이는 폭 그대로(손으로 스크롤·창 크기 바꾸지 않음)이고, 기준 종류가 지금도 맞을 때만 다시 쓴다 —
+        // 재생 헤드 기준이면 같은 재생 헤드가 여전히 보이고, 가운데 기준이면 재생 헤드가 여전히 밖(Codex 검토: 밖에서 확대한 뒤 보이는 곳을 눌러
+        // 재생 헤드를 옮기고 다시 확대하면 예전 가운데 기준을 다시 써서 재생 헤드가 밀렸다)
+        if let a = lastZoomAnchor, let x0 = lastZoomOriginX, let w0 = lastZoomWidth, abs(vis.minX - x0) < 0.5, abs(vis.width - w0) < 0.5,
+           a.usePlayhead ? (a.playhead == playhead && playheadVisible) : !playheadVisible { return a }
+        if playheadVisible {
+            return ZoomAnchor(frame: Double(playhead), viewX: px - vis.minX, playhead: playhead, usePlayhead: true)
+        }
+        return ZoomAnchor(frame: Double((vis.midX - TimelineNSView.inset) / oldPPF), viewX: vis.width / 2, playhead: nil, usePlayhead: false)
+    }
+    func applyZoomAnchor(_ a: ZoomAnchor, ppf: CGFloat) {
+        let clip = scrollView.contentView, vis = clip.bounds
+        let maxX = max(0, timelineView.frame.width - vis.width)
+        let x = min(max(TimelineNSView.inset + CGFloat(a.frame) * ppf - a.viewX, 0), maxX)
+        clip.scroll(to: NSPoint(x: x, y: vis.minY))
+        scrollView.reflectScrolledClipView(clip)
+        lastZoomAnchor = a; lastZoomOriginX = clip.bounds.minX; lastZoomWidth = clip.bounds.width
+    }
+
     override var isFlipped: Bool { true }
     override func layout() {
         super.layout()
