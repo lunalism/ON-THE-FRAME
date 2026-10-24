@@ -1,12 +1,14 @@
 #!/bin/zsh
 # 자막 색 칸 배치 검사(Debug, 2026-10-23): 패널 폭 160·200·280 × 밝은·어두운 모양 그림과 조작 자리. 결과 폴더를 남긴다(그림 확인용, 일회용).
 set -euo pipefail
+source "${0:A:h}/derived-data.sh"   # cd 앞에서(상대 경로로 부를 때 ${0:A}가 cd 뒤 위치로 풀리지 않게)
 cd "${0:A:h}/.."
-APP=${APP:-.build/DerivedData/Build/Products/Debug/OnTheFrame.app}
+APP=${APP:-$OTF_DERIVED_DATA/Build/Products/Debug/OnTheFrame.app}
+APP=${APP:A}   # 절대 경로(APP를 상대 경로로 줘도 됨)
 [[ -d $APP ]] || { echo "build first: scripts/build.sh"; exit 2 }
 RUN=selftest-work/colorlayout-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p $RUN
-( open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout -OTFColorLayoutTest ) &
+( open -n -W -a "$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout -OTFColorLayoutTest ) &
 OPENPID=$!
 for i in {1..120}; do [[ -f $RUN/colorlayout-result.json ]] && break; sleep 1; done
 wait $OPENPID || true

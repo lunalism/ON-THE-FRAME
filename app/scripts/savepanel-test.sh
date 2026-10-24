@@ -3,14 +3,16 @@
 # 확인 단추를 눌러 처음 저장·이후 저장·다른 이름으로 저장·다시 열기를 본다. 기본 위치는 실행 폴더(out). DESKTOP=1이면 바탕화면에
 # 새 고유 이름으로 저장하고 끝나면 그 두 파일을 지운다(기존 파일은 건드리지 않음). 앱 경로를 APP으로 바꿀 수 있다.
 set -euo pipefail
+source "${0:A:h}/derived-data.sh"   # cd 앞에서(상대 경로로 부를 때 ${0:A}가 cd 뒤 위치로 풀리지 않게)
 cd "${0:A:h}/.."
-APP=${APP:-.build/DerivedData/Build/Products/Debug/OnTheFrame.app}
+APP=${APP:-$OTF_DERIVED_DATA/Build/Products/Debug/OnTheFrame.app}
+APP=${APP:A}   # 절대 경로(APP를 상대 경로로 줘도 됨)
 [[ -d $APP ]] || { echo "build first"; exit 2 }
 RUN=selftest-work/savepanel-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p $RUN/sources
 cp -c .build/test-work/fixtures/otf-A.mp4 $RUN/sources/
 EXTRA=(); [[ "${DESKTOP:-0}" == 1 ]] && EXTRA=(-OTFSavePanelDesktop)
-( open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout -OTFSavePanelTest $EXTRA ) &
+( open -n -W -a "$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout -OTFSavePanelTest $EXTRA ) &
 OPENPID=$!
 wait $OPENPID || true
 set +e

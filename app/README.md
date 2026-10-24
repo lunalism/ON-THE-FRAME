@@ -41,8 +41,8 @@
 
 ```sh
 cd app
-scripts/build.sh            # Debug 빌드 → app/.build/DerivedData/Build/Products/Debug/OnTheFrame.app
-open .build/DerivedData/Build/Products/Debug/OnTheFrame.app
+scripts/build.sh            # Debug 빌드 → $HOME/Library/Developer/ON-THE-FRAME/DerivedData/Build/Products/Debug/OnTheFrame.app(scripts/derived-data.sh, 2026-10-24부터; 이전 기록의 .build/DerivedData는 옛 위치)
+open ~/Library/Developer/ON-THE-FRAME/DerivedData/Build/Products/Debug/OnTheFrame.app
 ```
 
 - Xcode에서 열려면 `app/OnTheFrame.xcodeproj`를 열고 OnTheFrame 스킴을 실행(⌘R)한다.
@@ -69,7 +69,7 @@ cd app && scripts/transform-test.sh  # 영상 크기·위치 자체 검사(Debug
 
 `scripts/selftest.sh`의 결과는 `app/selftest-work/last-verify-result.json`에 남는다.
 
-빌드·검증 산출물은 모두 Git에서 무시한다: `app/.build/`, `app/Engine/.build/`, `app/selftest-work/`. 이 산출물은 실험 산출물과 함께 4 GiB 상한 안에서 관리한다.
+빌드·검증 산출물은 모두 Git에서 무시한다: `app/.build/`, `app/Engine/.build/`, `app/selftest-work/`, 그리고 저장소 밖 내부 APFS의 앱 DerivedData `$HOME/Library/Developer/ON-THE-FRAME/DerivedData`(2026-10-24부터). 이 산출물은 실험 산출물과 함께 20 GiB 관리 예산 안에서 관리한다(2026-10-24 소유자 승인, 이전 4 GiB).
 
 ## 2. 화면과 연결된 작업 흐름
 

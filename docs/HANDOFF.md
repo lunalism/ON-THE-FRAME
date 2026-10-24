@@ -8,7 +8,7 @@
 - 최근 커밋: `51cef3c` 타임라인 클립 복사·붙여넣기 · `9d14a9f` 프로젝트 저장·열기 패널 순서 수정 · `8b01322` 가져오기 진행 막대와 체크포인트 전 리뷰 수정 · `cc2724c` 편집기 작업 백업.
 - 프로젝트 형식 5(`.ontheframe` JSON, 형식 1–4 읽기, D-023). `feature/subtitles` 작업 트리(커밋 안 함)는 형식 6(자막)을 더했다: 자막·자막 레인이 있을 때만 6으로 쓰고 아니면 5, 1–6 읽기(D-035).
 - 출력: 1920×1080 30 fps SDR H.264/AAC MP4.
-- 빌드: `cd app && scripts/build.sh`(Debug, `app/.build/DerivedData/Build/Products/Debug/OnTheFrame.app`). 자체 검사는 `app/scripts/*-test.sh`.
+- 빌드: `cd app && scripts/build.sh`(Debug, `$HOME/Library/Developer/ON-THE-FRAME/DerivedData/Build/Products/Debug/OnTheFrame.app` — 내부 APFS 전용 DerivedData, `app/scripts/derived-data.sh`, 2026-10-24부터). 자체 검사는 `app/scripts/*-test.sh`.
 
 ## 구현된 것(요약)
 

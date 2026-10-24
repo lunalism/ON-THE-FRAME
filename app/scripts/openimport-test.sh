@@ -3,8 +3,10 @@
 # 생성 fixture와 진단 파일만: otf-TA·otf-TB·aud-steady48s, 3분 1080p MP4(long-180s), 형식 1(커밋 44943ea 저장기)·2–5 프로젝트.
 # 끝나면 이 실행의 진단 기록(가져오기·열기 단계와 걸린 시간, 경로 없음)을 보인다.
 set -euo pipefail
+source "${0:A:h}/derived-data.sh"   # cd 앞에서(상대 경로로 부를 때 ${0:A}가 cd 뒤 위치로 풀리지 않게)
 cd "${0:A:h}/.."
-APP=${APP:-.build/DerivedData/Build/Products/Debug/OnTheFrame.app}
+APP=${APP:-$OTF_DERIVED_DATA/Build/Products/Debug/OnTheFrame.app}
+APP=${APP:A}   # 절대 경로(APP를 상대 경로로 줘도 됨)
 [[ -d $APP ]] || { echo "build first: scripts/build.sh"; exit 2 }
 DIAG=.build/test-work/diag OLD=.build/test-work/oldproj
 for f in $DIAG/long-180s.mp4 $OLD/p-v1.ontheframe $OLD/p-v5.ontheframe; do [[ -f $f ]] || { echo "missing $f (app/README.md §21 재현 명령으로 만든다)"; exit 2 }; done
@@ -16,7 +18,7 @@ for f in otf-TA.mp4 otf-TB.mp4 aud-steady48s.wav; do cp -c .build/test-work/fixt
 cp -c $DIAG/long-180s.mp4 $RUN/sources/
 cp -c $OLD/p-*.ontheframe $RUN/
 START=$(date "+%Y-%m-%d %H:%M:%S")
-( open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout -OTFLayoutReset -OTFOpenImportTest ) &
+( open -n -W -a "$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout -OTFLayoutReset -OTFOpenImportTest ) &
 OPENPID=$!
 for i in {1..240}; do [[ -f $RUN/openimport-result.json ]] && break; sleep 1; done
 wait $OPENPID || true

@@ -2,15 +2,17 @@
 # 누름 대기 중 편집 명령 보호 자체 검사(Debug, 2026-10-12, CP-08). 실제 마우스·키 이벤트(앱 이벤트 큐).
 # 생성 fixture(otf-TA)만, 저장하지 않는다. 앱 경로를 APP으로 바꿀 수 있다.
 set -euo pipefail
+source "${0:A:h}/derived-data.sh"   # cd 앞에서(상대 경로로 부를 때 ${0:A}가 cd 뒤 위치로 풀리지 않게)
 cd "${0:A:h}/.."
-APP=${APP:-.build/DerivedData/Build/Products/Debug/OnTheFrame.app}
+APP=${APP:-$OTF_DERIVED_DATA/Build/Products/Debug/OnTheFrame.app}
+APP=${APP:A}   # 절대 경로(APP를 상대 경로로 줘도 됨)
 [[ -d $APP ]] || { echo "build first: scripts/build.sh"; exit 2 }
 swift build --package-path Engine --product otf-dev 2>&1 | grep -E "error|warning:" || true
 Engine/.build/debug/otf-dev fixtures .build/test-work/fixtures > /dev/null
 RUN=selftest-work/pendingpress-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p $RUN/sources
 cp -c .build/test-work/fixtures/otf-TA.mp4 $RUN/sources/
-( open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout -OTFLayoutReset -OTFPendingPressTest ) &
+( open -n -W -a "$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout -OTFLayoutReset -OTFPendingPressTest ) &
 OPENPID=$!
 for i in {1..300}; do [[ -f $RUN/pendingpress-result.json ]] && break; kill -0 $OPENPID 2>/dev/null || break; sleep 1; done
 wait $OPENPID || true

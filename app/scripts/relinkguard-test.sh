@@ -2,15 +2,17 @@
 # 진행 중인 미디어 재연결 보호(CP-04) 자체 검사(Debug, 2026-10-12). 재연결 확인을 지연 훅으로 늦춘다.
 # 생성 fixture(otf-TA)만. 실제 열기 패널은 띄우지 않고, 프로젝트 파일·재연결 사본은 검사 폴더 안에만 둔다.
 set -euo pipefail
+source "${0:A:h}/derived-data.sh"   # cd 앞에서(상대 경로로 부를 때 ${0:A}가 cd 뒤 위치로 풀리지 않게)
 cd "${0:A:h}/.."
-APP=${APP:-.build/DerivedData/Build/Products/Debug/OnTheFrame.app}
+APP=${APP:-$OTF_DERIVED_DATA/Build/Products/Debug/OnTheFrame.app}
+APP=${APP:A}   # 절대 경로(APP를 상대 경로로 줘도 됨)
 [[ -d $APP ]] || { echo "build first: scripts/build.sh"; exit 2 }
 swift build --package-path Engine --product otf-dev 2>&1 | grep -E "error|warning:" || true
 Engine/.build/debug/otf-dev fixtures .build/test-work/fixtures > /dev/null
 RUN=selftest-work/relinkguard-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p $RUN/sources
 cp -c .build/test-work/fixtures/otf-TA.mp4 $RUN/sources/
-( open -n -W -a "$PWD/$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout -OTFLayoutReset -OTFRelinkGuardTest ) &
+( open -n -W -a "$APP" "$PWD/$RUN" --args -OTFLayoutSuite dev.ontheframe.test.layout -OTFLayoutReset -OTFRelinkGuardTest ) &
 OPENPID=$!
 for i in {1..300}; do [[ -f $RUN/relinkguard-result.json ]] && break; kill -0 $OPENPID 2>/dev/null || break; sleep 1; done
 wait $OPENPID || true
