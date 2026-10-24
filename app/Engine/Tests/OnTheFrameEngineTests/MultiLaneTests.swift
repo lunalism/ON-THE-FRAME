@@ -1,6 +1,7 @@
 import AVFoundation
 import E2Core
 import Foundation
+import os
 @testable import OnTheFrameEngine
 import OTFDevSupport
 import XCTest
@@ -330,6 +331,9 @@ final class MultiLaneExportTests: XCTestCase {
     /// 오디오 레인 4개 + 영상 레인 1개(TA 영상만):
     /// A1: WAV(48k 스테레오) @10 원본 0 길이 60. A2: AIFF(44.1k 모노) @40 원본 3 길이 42. A3(음소거): AAC @0 길이 48. A4(음량 50%): ALAC @70 길이 30.
     func testAudioLanesMixMuteVolumeExportAndPreview() async throws {
+        let t0 = Date()   // 단계 시간(2026-10-25 느림 조사, 시험 출력만)
+        @Sendable func mark(_ s: String) { print(String(format: "MLX %8.3f s %@", Date().timeIntervalSince(t0), s)) }
+        mark("start")
         let ta = try await MediaProbe.inspect(fixtures.appendingPathComponent("otf-TA.mp4"))
         var assets: [String: MediaAsset] = [:]
         for fx in AudioFixture.all { assets[fx.file] = try await MediaProbe.inspect(fixtures.appendingPathComponent(fx.file)) }
@@ -343,13 +347,21 @@ final class MultiLaneExportTests: XCTestCase {
         for a in [ta, w, f, c, l] { t = t.registering(a) }
         t = try t.placing(media: w.id, at: 10, videoLane: nil, audioLane: Lane.audioID)
         XCTAssertTrue(t.isValid); XCTAssertEqual(t.durationFrames, 120)
+        mark("probe+timeline")
         let media = Dictionary(uniqueKeysWithValues: [ta, w, f, c, l].map { ($0.id, $0) })
         let plan = try await CompositionPlanner.plan(t, media: media)
+        mark("plan")
         XCTAssertNotNil(plan.audioMix)
         let dest = out.appendingPathComponent("mix.mp4")
-        let outcome = await ExportService.export(plan, to: .fromSavePanel(dest), sources: [ta, w, f, c, l]) { _ in }
+        let lastProgress = OSAllocatedUnfairLock(initialState: -1.0)
+        let outcome = await ExportService.export(plan, to: .fromSavePanel(dest), sources: [ta, w, f, c, l], stage: { st in mark("export stage \(st)") }) { p in
+            let show = lastProgress.withLock { last in if p - last >= 0.1 || p >= 1 { last = p; return true }; return false }
+            if show { mark(String(format: "export progress %.2f", p)) }
+        }
+        mark("export done \(outcome)")
         XCTAssertEqual(outcome, .completed(dest))
         let d = try await E2Decoder.decode(dest)
+        mark("decode export")
         XCTAssertEqual(d.frames.count, 120)
 
         // 클릭 위치(48 kHz 표본): 원본 시각 = 클릭 표본/표본율(프레임 반올림 없음). 손 계산:
@@ -378,7 +390,9 @@ final class MultiLaneExportTests: XCTestCase {
         XCTAssertEqual(lAmp, 0.1, accuracy: 0.02)
 
         // 프리뷰 경로(같은 composition + 오디오 믹스): 같은 클릭 위치, 같은 음소거·음량
+        mark("export checks")
         let pm = try await LaneExportTests.compositionMono(plan)
+        mark("composition read 1")
         let pOnsets = E2Decoder.onsets(pm)
         // composition(무손실 읽기)은 표본 단위: ±4표본(빈 편집을 쓰던 때는 44.1 kHz 원본이 −79표본 앞당겨졌다 — CompositionPlanner 무음 채우기 참고)
         XCTAssertEqual(pOnsets.count, 3); XCTAssertTrue(zip(pOnsets, expected).allSatisfy { abs($0 - $1) <= 4 }, "composition onsets \(pOnsets)")
@@ -390,7 +404,9 @@ final class MultiLaneExportTests: XCTestCase {
         let loud = try t.settingLaneAudio(a3, muted: false).settingLaneAudio(a4, volumePercent: 100)
         let planLoud = try await CompositionPlanner.plan(loud, media: media)
         XCTAssertNotNil(planLoud.audioMix)   // 모두 100%여도 믹스를 붙인다(2026-10-11)
+        mark("plan loud")
         let lm = try await LaneExportTests.compositionMono(planLoud)
+        mark("composition read 2")
         let lC = amp(lm, 2_500, 5, 40), lL = amp(lm, 700, 75, 95)
         XCTAssertGreaterThan(lC, 0.15)
         XCTAssertEqual(pL / lL, 0.5, accuracy: 0.02)
@@ -409,6 +425,7 @@ final class MultiLaneExportTests: XCTestCase {
             lane("audio", "A3", muted: true, [.init(file: AudioFixture.aac.file, start: 0, sourceIn: 0, length: 48)]),
             lane("audio", "A4", vol: 50, [.init(file: AudioFixture.alac.file, start: 70, sourceIn: 0, length: 30)])])
         let ok = try await J.judge(dest, right)
+        mark("judge right")
         XCTAssertTrue(ok.pass, "\(ok.tones) \(ok.measuredOnsets)")
         var lanes = right.lanes; lanes[4] = lane("audio", "A4", [.init(file: AudioFixture.alac.file, start: 70, sourceIn: 0, length: 30)])   // 음량 100%라고 주장
         do { let r = try await J.judge(dest, J.Manifest(exportFile: "", durationFrames: 120, lanes: lanes)); XCTAssertFalse(r.pass) }
@@ -416,6 +433,7 @@ final class MultiLaneExportTests: XCTestCase {
         do { let r = try await J.judge(dest, J.Manifest(exportFile: "", durationFrames: 120, lanes: lanes)); XCTAssertFalse(r.pass) }
         lanes = right.lanes; lanes.insert(lane("video", "Top", [.init(file: "otf-TB.mp4", start: 30, sourceIn: 0, length: 40)]), at: 0)  // 위 레인이 있다고 주장
         do { let r = try await J.judge(dest, J.Manifest(exportFile: "", durationFrames: 120, lanes: lanes)); XCTAssertFalse(r.pass) }
+        mark("end")
     }
 
     /// 사인 진폭 추정: 구간 [from, to) 표본과 cos·sin의 상관(창 없음, 구간이 수십 주기라 누설이 작다)
