@@ -212,7 +212,7 @@ struct SubtitleFootprint: Sendable {
     init(_ item: SubtitleItem, _ r: SubtitleRaster) {
         start = item.start; end = item.end
         let img = r.image, iw = img.width, ih = img.height, bpr = img.bytesPerRow
-        let x0 = Int(r.rect.minX), y0 = Int(r.rect.minY)
+        let x0 = Int(r.drawRect.minX), y0 = Int(r.drawRect.minY)   // 그림은 칠한 부분만 잘라 낸 것(drawRect, 2026-10-23)
         let data = img.dataProvider!.data! as Data
         // 사각형 안 지역 배열(화면 밖은 0)
         var A = [Double](repeating: 0, count: iw * ih), AY = A, ACb = A, ACr = A

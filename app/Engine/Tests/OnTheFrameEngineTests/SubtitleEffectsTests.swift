@@ -12,8 +12,9 @@ final class SubtitleEffectsTests: XCTestCase {
     /// 그림의 출력 좌표 (x, y) 화소(B, G, R, A — 미리 곱함). 그림 밖이면 nil.
     func px(_ r: SubtitleRaster, _ x: CGFloat, _ y: CGFloat) -> (b: Int, g: Int, r: Int, a: Int)? {
         let ix = Int((x - r.rect.minX).rounded(.down)), iy = Int((y - r.rect.minY).rounded(.down))
-        guard ix >= 0, iy >= 0, ix < r.image.width, iy < r.image.height else { return nil }
-        let d = r.image.dataProvider!.data! as Data, o = iy * r.image.bytesPerRow + ix * 4
+        let img = r.fullImage
+        guard ix >= 0, iy >= 0, ix < img.width, iy < img.height else { return nil }
+        let d = img.dataProvider!.data! as Data, o = iy * img.bytesPerRow + ix * 4
         return (Int(d[o]), Int(d[o + 1]), Int(d[o + 2]), Int(d[o + 3]))
     }
     func bytes(_ i: CGImage) -> [UInt8] { [UInt8](i.dataProvider!.data! as Data) }
@@ -41,7 +42,7 @@ final class SubtitleEffectsTests: XCTestCase {
         for text in ["가나다 English", "두 줄\n둘째 줄", (1...40).map(String.init).joined(separator: "\n")] {   // 보통 글·키 큰 글
             let a = SubtitleRenderer.shared.raster(text: text, style: plain), b = SubtitleRenderer.shared.raster(text: text, style: disabled)
             XCTAssertEqual(a.rect, b.rect); XCTAssertEqual(a.textBounds, b.textBounds); XCTAssertEqual(a.hitRect, a.textBounds)
-            XCTAssertEqual(bytes(a.image), bytes(b.image), text)
+            XCTAssertEqual(bytes(a.image), bytes(b.image), text); XCTAssertEqual(a.drawRect, b.drawRect, text)
         }
     }
 
@@ -179,13 +180,14 @@ final class SubtitleEffectsTests: XCTestCase {
         let fullImg = try XCTUnwrap(full.makeImage())
         let (logical, _) = SubtitleRenderer.geometry(l, style: tall)
         let fullRect = SubtitleRenderer.toOutput(l.ext, logical: logical, h: l.height)
-        XCTAssertEqual(band.rect.minX, fullRect.minX); XCTAssertEqual(band.image.width, fullImg.width)
+        XCTAssertEqual(band.rect.minX, fullRect.minX); XCTAssertEqual(band.fullImage.width, fullImg.width)
         let off = Int(band.rect.minY - fullRect.minY)
-        let fb = bytes(fullImg), bb = bytes(band.image)
+        let bandImg = band.fullImage
+        let fb = bytes(fullImg), bb = bytes(bandImg)
         var differ = 0, ink = 0
-        for y in 0..<band.image.height {
-            for x in stride(from: 0, to: band.image.width * 4, by: 4) {
-                let a = Int(bb[y * band.image.bytesPerRow + x + 3]), b = Int(fb[(y + off) * fullImg.bytesPerRow + x + 3])
+        for y in 0..<bandImg.height {
+            for x in stride(from: 0, to: bandImg.width * 4, by: 4) {
+                let a = Int(bb[y * bandImg.bytesPerRow + x + 3]), b = Int(fb[(y + off) * fullImg.bytesPerRow + x + 3])
                 if abs(a - b) > 1 { differ += 1 }; if a > 0 { ink += 1 }
             }
         }
@@ -213,32 +215,41 @@ final class SubtitleEffectsTests: XCTestCase {
 
     // MARK: 메모리 보유(2026-10-23 검토: 측정한 낭비를 고친 것의 회귀 시험)
 
-    /// 캐시가 자막 그림 묶음을 다시 그리지 않고 들고 있다(2026-10-23 전체 검토 고침): 바이트 예산(160 MiB, 전체 비움)이 있을 때는 작업 묶음이
-    /// 예산을 넘으면 같은 자막을 그리기마다 다시 그렸다(측정: 두 줄 자막 500개에서 타임라인 한 번 그리기에 약 1000장). 개수 상한(512)만 두면
-    /// 두 번째 차례는 모두 캐시에서 나온다. 새 그리개를 써서 다른 시험이 채운 캐시와 상관없게 한다.
-    func testRasterCacheKeepsLargeWorkingSetWithoutRerendering() {
+    /// 캐시(2026-10-23 §49): 가장 오래 안 쓴 것부터 하나씩 버리는 바이트 상한(64 MiB) + 개수 상한.
+    /// - 상한 안의 묶음은 두 번째 차례에 다시 그리지 않는다(예전 전체 비움 예산은 묶음이 예산보다 크면 매번 다시 그렸다 — §48.6).
+    /// - 상한보다 큰 묶음을 넣어도 붙잡는 바이트는 상한 안이다(메모리 상한).
+    /// - 자주 쓰는 항목은 다른 항목이 계속 들어와도 남는다(전체 비움이 아님).
+    func testRasterCacheIsByteBoundedLRU() {
         let r = SubtitleRenderer()
-        var st = SubtitleStyle.default; st.background = .default
-        let items = (0..<300).map { i -> SubtitleItem in
-            var s = st; s.green = i % 256; s.blue = i / 256 * 50 + 1
-            return SubtitleItem(id: UUID(), lane: UUID(), start: i * 10, length: 10, text: "두 줄 자막\n둘째 줄입니다", style: s)
+        func item(_ i: Int, _ text: String = "두 줄 자막\n둘째 줄입니다") -> SubtitleItem {
+            var s = SubtitleStyle.default; s.background = .default; s.green = i % 256; s.blue = i / 256 + 1
+            return SubtitleItem(id: UUID(), lane: UUID(), start: i * 10, length: 10, text: text, style: s)
         }
-        var bytes = 0
-        for it in items { let x = r.raster(it); bytes += x.image.bytesPerRow * x.image.height }
-        XCTAssertGreaterThan(bytes, 160 << 20, "작업 묶음이 되돌린 예산보다 크다(이 시험이 뜻이 있게)")
-        XCTAssertEqual(r.renderCount, 300)
-        for it in items { _ = r.raster(it) }
-        XCTAssertEqual(r.renderCount, 300, "두 번째 차례는 다시 그리지 않음")
-        // 키 큰 글 띠(한 장 약 6.5 MB) 60개도 두 번째 차례는 캐시에서
+        // 1) 상한 안의 묶음(40개)
+        let small = (0..<40).map { item($0) }
+        for it in small { _ = r.raster(it) }
+        let n1 = r.renderCount
+        for it in small { _ = r.raster(it) }
+        XCTAssertEqual(r.renderCount, n1, "상한 안 묶음은 다시 그리지 않음")
+        XCTAssertLessThan(r.cachedImageBytes, SubtitleRenderer.cacheByteBudget)
+        // 2) 상한보다 큰 흐름(600개, 자르기 전 크기로 약 500 MB): 붙잡는 바이트는 상한 안, 개수도 512 안
+        let hot = item(10_000, "자주 쓰는 자막")
+        var streamed = 0
+        for i in 0..<600 {
+            let x = r.raster(item(1000 + i)); streamed += Int(x.rect.width * x.rect.height) * 4
+            if i % 10 == 0 { _ = r.raster(hot) }   // 3) 자주 쓰는 항목
+            XCTAssertLessThanOrEqual(r.cachedImageBytes, SubtitleRenderer.cacheByteBudget + 8 << 20)
+        }
+        XCTAssertGreaterThan(streamed, SubtitleRenderer.cacheByteBudget * 4, "흐름이 상한보다 충분히 크다")
+        XCTAssertLessThanOrEqual(r.cachedImageBytes, SubtitleRenderer.cacheByteBudget)
+        let n2 = r.renderCount
+        _ = r.raster(hot)
+        XCTAssertEqual(r.renderCount, n2, "자주 쓰는 항목은 남아 있다")
+        // 키 큰 글 띠(한 장 수 MB)도 상한 안
         var tall = SubtitleStyle.default; tall.sizeTenths = 1200; tall.background = .default
-        let tallItems = (0..<60).map { i -> SubtitleItem in
-            var s = tall; s.green = i
-            return SubtitleItem(id: UUID(), lane: UUID(), start: i, length: 1, text: (1...12).map(String.init).joined(separator: "\n"), style: s)
-        }
-        for it in tallItems { _ = r.raster(it) }
-        let afterTall = r.renderCount
-        for it in tallItems { _ = r.raster(it) }
-        XCTAssertEqual(r.renderCount, afterTall)
+        for i in 0..<40 { var s = tall; s.green = i; _ = r.raster(SubtitleItem(id: UUID(), lane: UUID(), start: i, length: 1, text: (1...12).map(String.init).joined(separator: "\n"), style: s)) }
+        XCTAssertLessThanOrEqual(r.cachedImageBytes, SubtitleRenderer.cacheByteBudget)
+        r.removeAll(); XCTAssertEqual(r.cachedImageBytes, 0)
     }
 
     /// 내보내기 발자국 창: 보이는 자막만 들고(고치기 전에는 효과 자막 200개를 내보내기 내내 약 118 MB 보유 — 측정), 겹칠 때 그리기 순서 그대로
@@ -270,13 +281,42 @@ final class SubtitleEffectsTests: XCTestCase {
             return m
         }
         var a = SubtitleStyle.default; a.alignment = .left; a.outline = .default; a.outline!.widthTenths = 200
-        XCTAssertEqual(edgeAlpha(SubtitleRenderer.shared.raster(text: "jjj fff", style: a).image), 0, "왼쪽 맞춤 j + 외곽선 20 px")
+        XCTAssertEqual(edgeAlpha(SubtitleRenderer.shared.raster(text: "jjj fff", style: a).fullImage), 0, "왼쪽 맞춤 j + 외곽선 20 px")
         var o = SubtitleStyle.default; o.outline = .default
-        XCTAssertEqual(edgeAlpha(SubtitleRenderer.shared.raster(text: "ÅÉÎ jgy", style: o).image), 0, "위·아래로 넘는 글자 + 외곽선")
+        XCTAssertEqual(edgeAlpha(SubtitleRenderer.shared.raster(text: "ÅÉÎ jgy", style: o).fullImage), 0, "위·아래로 넘는 글자 + 외곽선")
         for (dx, dy) in [(0, 0), (1000, 1000), (-1000, -1000)] {
             var s = SubtitleStyle.default; s.shadow = .default; s.shadow!.blurTenths = SubtitleShadow.blurRange.upperBound; s.shadow!.alpha = 255
             s.shadow!.offsetXTenths = dx; s.shadow!.offsetYTenths = dy; s.alignment = .left
-            XCTAssertEqual(edgeAlpha(SubtitleRenderer.shared.raster(text: "그림자 Shadow", style: s).image), 0, "흐림 50 px 거리 \(dx), \(dy)")
+            XCTAssertEqual(edgeAlpha(SubtitleRenderer.shared.raster(text: "그림자 Shadow", style: s).fullImage), 0, "흐림 50 px 거리 \(dx), \(dy)")
         }
+    }
+
+    /// 그림 자르기(2026-10-23, 자막 그림 메모리): 칠한 부분만 잘라 낸 그림을 rect 크기로 되돌리면 자르기 전 그림과 바이트까지 같고,
+    /// drawRect는 rect 안이며 16 화소 격자에 맞고, 그림 바이트가 줄어든다. 효과·정렬·화면 가장자리·키 큰 글(띠)·공백뿐·대체 글꼴을 본다.
+    func testTightCropKeepsEveryDrawnPixel() {
+        var cases: [(String, String, SubtitleStyle)] = []
+        let d = SubtitleStyle.default
+        cases.append(("plain", "두 줄 자막\n둘째 줄입니다", d))
+        for al in [SubtitleStyle.Alignment.left, .right] { var s = d; s.alignment = al; cases.append(("align \(al)", "jjj fff 가나", s)) }
+        var fx = d; fx.outline = .default; fx.shadow = .default; fx.background = .default; cases.append(("effects", "효과 Effects\n둘째", fx))
+        var neg = fx; neg.shadow!.offsetXTenths = -400; neg.shadow!.offsetYTenths = -300; neg.shadow!.blurTenths = 200; cases.append(("shadow -", "그림자", neg))
+        var edge = fx; edge.xMilli = 20_000; edge.yMilli = 60_000; cases.append(("edge", "가장자리 밖으로 나가는 글", edge))
+        var tall = fx; tall.sizeTenths = 1200; cases.append(("tall band", (1...12).map(String.init).joined(separator: "\n"), tall))
+        cases.append(("spaces", "   ", d))
+        cases.append(("fallback", "日本語 한국어 ✓", d))
+        var shrunk = 0, total = 0
+        for (name, text, st) in cases {
+            let cropped = SubtitleRenderer().raster(text: text, style: st)
+            SubtitleRenderer.tightCropForTest = false
+            let full = SubtitleRenderer().raster(text: text, style: st)
+            SubtitleRenderer.tightCropForTest = true
+            XCTAssertEqual(cropped.rect, full.rect, name); XCTAssertEqual(full.drawRect, full.rect, name)
+            XCTAssertTrue(cropped.rect.contains(cropped.drawRect), name)
+            XCTAssertEqual(Int(cropped.drawRect.minX - cropped.rect.minX) % 16, 0, name); XCTAssertEqual(Int(cropped.drawRect.minY - cropped.rect.minY) % 16, 0, name)
+            XCTAssertEqual(bytes(cropped.fullImage), bytes(full.image), name)
+            XCTAssertEqual(cropped.textBounds, full.textBounds, name); XCTAssertEqual(cropped.hitRect, full.hitRect, name)
+            shrunk += cropped.image.bytesPerRow * cropped.image.height; total += full.image.bytesPerRow * full.image.height
+        }
+        XCTAssertLessThan(Double(shrunk), Double(total) * 0.6, "잘라 낸 그림이 확실히 작다 \(shrunk)/\(total)")
     }
 }

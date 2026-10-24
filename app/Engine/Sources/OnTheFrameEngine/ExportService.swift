@@ -96,7 +96,7 @@ public enum ExportService {
     /// stage: 인코딩 시작(.encoding)과 인코딩이 끝나 검증·승격에 들어감(.finalizing)을 순서대로 알린다(표시용, 진행률은 바꾸지 않음).
     /// 그리지 못하는 자막(첫 번째). 앱은 내보내기 전에 같은 판정으로 막고 알린다.
     public static func unrenderableSubtitle(_ p: PlannedComposition) -> SubtitleItem? {
-        p.subtitles.first { SubtitleRenderer.shared.raster($0).failed }
+        p.subtitles.first { SubtitleRenderer.shared.renderFailed($0) }   // 결과만 기억하는 판정(그림 캐시보다 큰 묶음에서 다시 그리지 않음, §49)
     }
     public static func export(_ p: PlannedComposition, to d: ExportDestination, sources: [MediaAsset],
                               options: Options = Options(), stage: @escaping @Sendable (ExportStage) async -> Void = { _ in },

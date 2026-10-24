@@ -24,6 +24,9 @@ public struct SubtitleRaster: @unchecked Sendable {
     public let clipped: Bool
     /// 누름·선택 사각형(글자 + 외곽선 + 배경 상자, 그림자 제외, 출력 좌표). 효과가 없으면 textBounds와 같다(2026-10-23).
     public let hitRect: CGRect
+    /// image를 놓는 출력 사각형(2026-10-23, 그림 메모리): 그림은 rect 안의 칠한 부분만 잘라 낸 것이고(tightCrop) 여기에 놓는다.
+    /// rect 밖이나 drawRect 밖의 rect 부분은 모두 투명이었다. 프리뷰 층·내보내기는 이 사각형에 그림을 놓는다.
+    public let drawRect: CGRect
 }
 
 /// CoreText 자막 그리기. 같은 (글자, 모양)이면 같은 그림을 돌려준다(결정적, 캐시). 스레드 안전(잠금).
@@ -47,15 +50,41 @@ public final class SubtitleRenderer: @unchecked Sendable {
         var outlineFrame: CTFrame? = nil
         var style: SubtitleStyle? = nil
         var shadowReach = 0
+        /// 그림에서 잘라 낸 부분(그림 화소 좌표, 위 왼쪽 원점). null이면 그림 범위 전체(2026-10-23, tightCrop).
+        var crop: CGRect = .null
     }
     private var cache: [Key: Layout] = [:]
-    // 캐시 상한은 개수(그림 512, 키 큰 글 띠 64)뿐이다. 2026-10-23에 넣었던 바이트 예산(160 MiB를 넘으면 전체 비움)은 되돌렸다:
-    // 자막이 많으면(측정: 두 줄 자막 500개) 그리기마다 거의 모든 그림을 다시 그렸고(타임라인 한 번 그리기에 약 1000장, 자막 편집 34 ms → 되돌린 뒤 2.8 ms),
-    // 프리뷰 자막 층이 그림을 붙잡고 있어 메모리는 줄지 않았다. 프리뷰 그림 메모리(자막 수에 비례)는 이 캐시로 풀리지 않는 별도 문제다(설계 §48.6).
     /// 키 큰 글의 띠 그림(위치마다 다름, 위치 포함 키)
     private var bandCache: [Key: SubtitleRaster] = [:]
+    // 캐시 상한(2026-10-23, 자막 그림 메모리 §49): 가장 오래 안 쓴 것부터 하나씩 버린다(전체를 비우지 않음) — 그림 바이트 64 MiB, 그림 512개, 띠 64개.
+    // 예전 바이트 예산(넘으면 전체 비움, §48.6에서 되돌림)은 프리뷰가 모든 자막 그림을 한꺼번에 요구해 묶음이 예산보다 커서 매번 다시 그렸다.
+    // 이제 프리뷰는 재생 헤드 근처만 요구하고(시간 창) 타임라인은 보이는 것만 요구해 묶음이 작다. 버린 그림은 그것을 붙잡은 층이 없으면 메모리에서 빠진다.
+    public static let cacheByteBudget = 64 << 20
+    private var lastUse: [Key: Int] = [:], bandLastUse: [Key: Int] = [:], useTick = 0, cachedBytes = 0
+    /// 지금 캐시가 붙잡은 그림 바이트(측정·시험용)
+    public var cachedImageBytes: Int { lock.lock(); defer { lock.unlock() }; return cachedBytes }
+    static func bytes(_ i: CGImage?) -> Int { i.map { $0.bytesPerRow * $0.height } ?? 0 }
+    /// 잠금 안에서: 상한을 넘으면 가장 오래 안 쓴 항목부터 버린다(방금 넣은 항목은 남긴다)
+    private func evictLocked(keep: Key) {
+        while cachedBytes > Self.cacheByteBudget || cache.count > 512 || bandCache.count > 64 {
+            let a = lastUse.filter { $0.key != keep }.min { $0.value < $1.value }
+            let b = bandLastUse.filter { $0.key != keep }.min { $0.value < $1.value }
+            let pickBand: Bool
+            switch (a, b) {
+            case (nil, nil): return
+            case (nil, _): pickBand = true
+            case (_, nil): pickBand = false
+            case let (x?, y?): pickBand = bandCache.count > 64 || (cache.count <= 512 && y.value < x.value)
+            }
+            if pickBand, let k = b?.key { cachedBytes -= Self.bytes(bandCache[k]?.image); bandCache[k] = nil; bandLastUse[k] = nil }
+            else if let k = a?.key { cachedBytes -= Self.bytes(cache[k]?.image); cache[k] = nil; lastUse[k] = nil }
+            else { return }
+        }
+    }
     /// 시험 전용 상한(바이트): 이보다 큰 그림은 만들지 못한 것으로 본다(그리기 실패 길 시험). 보통 무한.
     nonisolated(unsafe) static var maxBitmapBytesForTest = Int.max
+    /// 시험 전용: false면 자르지 않는다(자르기 전 그림과 화소 비교용). 보통 true.
+    nonisolated(unsafe) static var tightCropForTest = true
     private let lock = NSLock()
     private var renders = 0
     /// 지금까지 실제로 조판·그린 수(캐시에 없을 때만 늘어남). 끌기 중 다시 그리기 여부를 재는 데 쓴다.
@@ -78,22 +107,56 @@ public final class SubtitleRenderer: @unchecked Sendable {
     public func raster(text: String, style: SubtitleStyle) -> SubtitleRaster {
         var base = style; base.xMilli = 0; base.yMilli = 0
         let key = Key(text: text, style: base)
-        lock.lock(); let hit = cache[key]; lock.unlock()
+        lock.lock(); let hit = cache[key]; if hit != nil { useTick += 1; lastUse[key] = useTick }; lock.unlock()
         let l: Layout
         if let hit { l = hit } else {
             l = Self.layout(text: text, style: base)
-            lock.lock(); if cache.count > 512 { cache.removeAll() }; cache[key] = l; renders += 1; lock.unlock()
+            lock.lock()
+            if let old = cache[key] { cachedBytes -= Self.bytes(old.image) }   // 다른 스레드가 같은 키를 먼저 넣었으면 바꿔 넣는다
+            cache[key] = l; cachedBytes += Self.bytes(l.image); useTick += 1; lastUse[key] = useTick; renders += 1
+            evictLocked(keep: key)
+            lock.unlock()
         }
         guard l.image == nil, !l.failed else { return Self.placed(l, style: style) }
         // 키 큰 글: 이 자리의 화면 안 띠
         let full = Key(text: text, style: style)
-        lock.lock(); let bandHit = bandCache[full]; lock.unlock()
+        lock.lock(); let bandHit = bandCache[full]; if bandHit != nil { useTick += 1; bandLastUse[full] = useTick }; lock.unlock()
         if let bandHit { return bandHit }
         let r = Self.band(l, style: style)
-        lock.lock(); if bandCache.count > 64 { bandCache.removeAll() }; bandCache[full] = r; renders += 1; lock.unlock()
+        lock.lock()
+        if let old = bandCache[full] { cachedBytes -= Self.bytes(old.image) }
+        bandCache[full] = r; cachedBytes += Self.bytes(r.image); useTick += 1; bandLastUse[full] = useTick; renders += 1
+        evictLocked(keep: full)
+        lock.unlock()
         return r
     }
     public func raster(_ item: SubtitleItem) -> SubtitleRaster { raster(text: item.text, style: item.style) }
+    /// 그리지 못하는 자막인가(2026-10-23 §49): 결과(참·거짓)만 따로 기억한다 — 그림 캐시에서 빠져도 다시 그리지 않는다.
+    /// 내보내기 막힘 판정(화면이 갱신될 때마다 모든 자막을 묻는다)이 그림 캐시 상한보다 큰 묶음에서 매번 다시 그리지 않게.
+    /// 그림이 없는 작은 표(글자·모양 → 참·거짓)이고, 2만 개를 넘으면 비운다(다음 물음에 다시 계산).
+    public func renderFailed(_ item: SubtitleItem) -> Bool {
+        let key = Key(text: item.text, style: item.style)
+        lock.lock(); let known = failedStatus[key]; lock.unlock()
+        if let known { return known }
+        let v = raster(item).failed
+        lock.lock(); if failedStatus.count > 20_000 { failedStatus.removeAll() }; failedStatus[key] = v; lock.unlock()
+        return v
+    }
+    private var failedStatus: [Key: Bool] = [:]
+    /// 캐시에 있으면 그 그림(새로 그리지 않음), 없으면 nil(2026-10-23, 프리뷰 시간 창). 키 큰 글은 띠 캐시를 본다.
+    public func cachedRaster(_ item: SubtitleItem) -> SubtitleRaster? {
+        var base = item.style; base.xMilli = 0; base.yMilli = 0
+        lock.lock(); defer { lock.unlock() }
+        guard let l = cache[Key(text: item.text, style: base)] else { return nil }
+        useTick += 1; lastUse[Key(text: item.text, style: base)] = useTick
+        if l.image != nil || l.failed { return Self.placed(l, style: item.style) }
+        let full = Key(text: item.text, style: item.style)
+        guard let b = bandCache[full] else { return nil }
+        bandLastUse[full] = useTick
+        return b
+    }
+    /// 캐시를 모두 비운다(붙잡은 그림을 놓는다). 다음 요청은 다시 그린다.
+    public func removeAll() { lock.lock(); cache.removeAll(); bandCache.removeAll(); lastUse.removeAll(); bandLastUse.removeAll(); failedStatus.removeAll(); cachedBytes = 0; lock.unlock() }
 
     /// 그리는 글꼴: 저장한 이름의 글꼴, 없으면 시스템 글꼴 같은 크기(이름은 저장값 그대로)
     static func font(for style: SubtitleStyle) -> (font: CTFont, missing: Bool) {
@@ -156,13 +219,15 @@ public final class SubtitleRenderer: @unchecked Sendable {
         let (rect, bounds) = geometry(l, style: style)
         let hit = l.hitExt.isNull ? bounds : toOutput(l.hitExt, logical: rect, h: l.height)
         if l.failed || l.image == nil {   // 그리지 못함: 투명 1줄 그림(그림·사각형 크기 일치)
-            return SubtitleRaster(image: transparentRow(l.width), rect: CGRect(x: rect.minX, y: min(max(rect.maxY - 1, 0), 1079), width: CGFloat(l.width), height: 1),
+            let row = CGRect(x: rect.minX, y: min(max(rect.maxY - 1, 0), 1079), width: CGFloat(l.width), height: 1)
+            return SubtitleRaster(image: transparentRow(l.width), rect: row,
                                   fontUsed: l.fontUsed, missingFont: l.missing, fallbackFonts: l.fallbackFonts, lines: l.lines, textBounds: bounds,
-                                  failed: true, clipped: isClipped(l, bounds), hitRect: hit)
+                                  failed: true, clipped: isClipped(l, bounds), hitRect: hit, drawRect: row)
         }
-        let img = l.ext.isNull ? rect : toOutput(l.ext, logical: rect, h: l.height)   // 효과가 없으면 rect 그대로
-        return SubtitleRaster(image: l.image!, rect: img, fontUsed: l.fontUsed, missingFont: l.missing,
-                              fallbackFonts: l.fallbackFonts, lines: l.lines, textBounds: bounds, failed: false, clipped: isClipped(l, bounds), hitRect: hit)
+        let full = l.ext.isNull ? rect : toOutput(l.ext, logical: rect, h: l.height)   // 효과가 없으면 rect 그대로
+        let draw = l.crop.isNull ? full : full.offsetBy(dx: l.crop.minX, dy: l.crop.minY).with(size: l.crop.size)
+        return SubtitleRaster(image: l.image!, rect: full, fontUsed: l.fontUsed, missingFont: l.missing,
+                              fallbackFonts: l.fallbackFonts, lines: l.lines, textBounds: bounds, failed: false, clipped: isClipped(l, bounds), hitRect: hit, drawRect: draw)
     }
     static func transparentRow(_ w: Int) -> CGImage {
         CGContext(data: nil, width: w, height: 1, bitsPerComponent: 8, bytesPerRow: w * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -195,11 +260,60 @@ public final class SubtitleRenderer: @unchecked Sendable {
             ctx.translateBy(x: -ext.minX, y: CGFloat(dBottom) - full.minY - CGFloat(l.height))
             drawContent(ctx, fill: frame, outline: l.outlineFrame, style: l.style, tight: l.tight)
         }
-        var image = ctx.makeImage()!
-        if visible, dTop < top || dBottom > bottom, let c = image.cropping(to: CGRect(x: 0, y: top - dTop, width: w, height: bottom - top)) { image = c }
-        let rect = CGRect(x: img.minX, y: CGFloat(visible ? top : min(max(Int(img.minY), 0), SubtitleStyle.outputHeight - 1)), width: CGFloat(w), height: CGFloat(visible ? bottom - top : 1))
-        return SubtitleRaster(image: image, rect: rect, fontUsed: l.fontUsed, missingFont: l.missing, fallbackFonts: l.fallbackFonts,
-                              lines: l.lines, textBounds: bounds, failed: false, clipped: isClipped(l, bounds), hitRect: hit)
+        // 띠 행만 남기고 그 안의 그린 부분으로 잘라 복사한다(2026-10-23: 예전 cropping(to:)은 위아래 그림자 여유 행까지 든 원래 버퍼를 붙잡았다)
+        let rows = visible ? (top - dTop)..<(bottom - dTop) : 0..<1
+        let bandRect = CGRect(x: img.minX, y: CGFloat(visible ? top : min(max(Int(img.minY), 0), SubtitleStyle.outputHeight - 1)), width: CGFloat(w), height: CGFloat(rows.count))
+        let (image, box) = tightCrop(ctx, rows: rows)
+        let draw = box.isNull ? bandRect : bandRect.offsetBy(dx: box.minX, dy: box.minY).with(size: box.size)
+        return SubtitleRaster(image: image, rect: bandRect, fontUsed: l.fontUsed, missingFont: l.missing, fallbackFonts: l.fallbackFonts,
+                              lines: l.lines, textBounds: bounds, failed: false, clipped: isClipped(l, bounds), hitRect: hit, drawRect: draw)
+    }
+
+    /// 그린 그림을 실제로 칠한 부분(0이 아닌 화소)만 남겨 새 버퍼로 복사한다(2026-10-23, 자막 그림 메모리).
+    /// 줄바꿈 폭 전체(1728 px) 그림이 두 줄 자막 하나에 약 0.9 MB였고 프리뷰 층·캐시가 자막마다 붙잡았다(측정: 500개에 그림 432 MB, 칠한 부분만이면 약 94 MB).
+    /// - 0인 화소(미리 곱한 값이라 투명이면 색도 0)만 버리므로 프리뷰·내보내기가 그리는 화소는 그대로다(내보내기는 같은 그림·사각형을 쓴다).
+    /// - 경계는 원래 그림 원점 기준 16 화소 배수로 맞춘다: 프리뷰 층을 줄여 그릴 때 밉맵 묶음이 예전 그림과 같은 자리에 오게(1/16까지).
+    /// - CGImage.cropping은 원래 버퍼를 함께 붙잡으므로 쓰지 않고 행을 복사한다. 복사할 버퍼를 얻지 못하면 자르지 않은 그림을 쓴다.
+    /// rows: 쓸 행(위에서부터). 돌려주는 box는 그 행 범위 안의 화소 좌표(위 왼쪽 원점, rows.lowerBound가 0). 칠한 곳이 없으면 1×1 투명.
+    static func tightCrop(_ ctx: CGContext, rows: Range<Int>) -> (image: CGImage, box: CGRect) {
+        let w = ctx.width, bpr = ctx.bytesPerRow
+        let whole = CGRect(x: 0, y: 0, width: w, height: rows.count)
+        guard let base = ctx.data?.assumingMemoryBound(to: UInt32.self), !rows.isEmpty else {
+            return (ctx.makeImage()!, .null)
+        }
+        let stride = bpr / 4
+        var minR = Int.max, maxR = -1, minC = Int.max, maxC = -1
+        for r in rows {
+            let row = base + r * stride
+            var c0 = 0
+            while c0 < w, row[c0] == 0 { c0 += 1 }
+            guard c0 < w else { continue }
+            var c1 = w - 1
+            while row[c1] == 0 { c1 -= 1 }
+            minR = min(minR, r - rows.lowerBound); maxR = r - rows.lowerBound
+            minC = min(minC, c0); maxC = max(maxC, c1)
+        }
+        let a = 16
+        let box: CGRect
+        if !tightCropForTest { box = whole }   // 시험: 행만 남기고 자르지 않음
+        else if maxR < 0 { box = CGRect(x: 0, y: 0, width: 1, height: 1) }
+        else {
+            let x0 = minC / a * a, x1 = min((maxC + a) / a * a, w), y0 = minR / a * a, y1 = min((maxR + a) / a * a, rows.count)
+            box = CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+        }
+        if box == whole && rows.lowerBound == 0 && rows.count == ctx.height { return (ctx.makeImage()!, .null) }
+        guard let out = bitmap(Int(box.width), Int(box.height)), let dst = out.data else {
+            // 버퍼를 얻지 못함: 행 범위만 맞춘 전체 폭(잘라 내지 못해도 그림은 같다)
+            if rows.lowerBound == 0 && rows.count == ctx.height { return (ctx.makeImage()!, .null) }
+            let img = ctx.makeImage()!.cropping(to: CGRect(x: 0, y: rows.lowerBound, width: w, height: rows.count))!
+            return (img, .null)
+        }
+        let ob = out.bytesPerRow, x0 = Int(box.minX), y0 = Int(box.minY), bw = Int(box.width) * 4
+        let src = UnsafeRawPointer(base)
+        for r in 0..<Int(box.height) {
+            memcpy(dst + r * ob, src + (rows.lowerBound + y0 + r) * bpr + x0 * 4, bw)
+        }
+        return (out.makeImage()!, box)
     }
 
     /// 효과 그리기(조판 좌표, 2026-10-23, D-040). 효과가 없으면 예전과 같이 글자만 그린다.
@@ -313,8 +427,14 @@ public final class SubtitleRenderer: @unchecked Sendable {
             if let f = (CTRunGetAttributes(r) as NSDictionary)[kCTFontAttributeName] { used.insert(CTFontCopyPostScriptName(f as! CTFont) as String) }
         } }
         let fontUsed = CTFontCopyPostScriptName(font) as String
-        return Layout(image: ctx?.makeImage(), width: w, height: h, tight: tight, fontUsed: fontUsed, missing: missing,
+        let cropped = ctx.map { tightCrop($0, rows: 0..<$0.height) }
+        return Layout(image: cropped?.image, width: w, height: h, tight: tight, fontUsed: fontUsed, missing: missing,
                       fallbackFonts: used.subtracting([fontUsed]).sorted(), lines: lines.count, frame: tall ? frame : nil, failed: !tall && ctx == nil,
-                      ext: fx ? ext : .null, hitExt: fx ? hitExt : .null, outlineFrame: outlineFrame, style: fx ? style : nil, shadowReach: reach)
+                      ext: fx ? ext : .null, hitExt: fx ? hitExt : .null, outlineFrame: outlineFrame, style: fx ? style : nil, shadowReach: reach, crop: cropped?.box ?? .null)
     }
+}
+
+extension CGRect {
+    /// 같은 원점, 다른 크기
+    func with(size: CGSize) -> CGRect { CGRect(origin: origin, size: size) }
 }

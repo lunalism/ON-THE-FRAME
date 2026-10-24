@@ -181,7 +181,8 @@ final class SubtitlePreviewEditTests: XCTestCase {
         XCTAssertEqual(r.lines, 20)                                               // 모든 줄을 조판(자르지 않음)
         XCTAssertLessThanOrEqual(r.image.height, SubtitleStyle.outputHeight)        // 그림은 화면 높이 이하
         XCTAssertEqual(Int(r.rect.minY), 0); XCTAssertEqual(Int(r.rect.maxY), Int((st.y - 0).rounded()))   // 띠 = [0, 기준점) — 아래 끝 기준
-        XCTAssertEqual(r.image.width, Int(r.rect.width)); XCTAssertEqual(r.image.height, Int(r.rect.height))
+        XCTAssertEqual(r.fullImage.width, Int(r.rect.width)); XCTAssertEqual(r.fullImage.height, Int(r.rect.height))
+        XCTAssertTrue(r.rect.contains(r.drawRect)); XCTAssertEqual(r.image.width, Int(r.drawRect.width)); XCTAssertEqual(r.image.height, Int(r.drawRect.height))
         // 띠 = 전체 그림(직접 그림)의 같은 줄
         let l = SubtitleRenderer.layout(text: text, style: st)
         XCTAssertNil(l.image); let frame = try XCTUnwrap(l.frame)
@@ -190,10 +191,11 @@ final class SubtitlePreviewEditTests: XCTestCase {
         let (fullRect, _) = SubtitleRenderer.geometry(l, style: st)
         let rowOffset = Int(r.rect.minY - fullRect.minY)
         func bytes(_ img: CGImage) -> [UInt8] { let d = img.dataProvider!.data! as Data; return [UInt8](d) }
-        let fb = bytes(fullImg), bb = bytes(r.image), bpr = r.image.bytesPerRow, fbpr = fullImg.bytesPerRow
+        let rImg = r.fullImage   // 잘라 낸 그림을 띠 크기로 되돌려 비교(2026-10-23)
+        let fb = bytes(fullImg), bb = bytes(rImg), bpr = rImg.bytesPerRow, fbpr = fullImg.bytesPerRow
         var differ = 0, ink = 0
-        for y in 0..<r.image.height {
-            for x in stride(from: 0, to: r.image.width * 4, by: 4) {
+        for y in 0..<rImg.height {
+            for x in stride(from: 0, to: rImg.width * 4, by: 4) {
                 let a = bb[y * bpr + x + 3], b = fb[(y + rowOffset) * fbpr + x + 3]
                 if a != b { differ += 1 }; if a > 0 { ink += 1 }
             }

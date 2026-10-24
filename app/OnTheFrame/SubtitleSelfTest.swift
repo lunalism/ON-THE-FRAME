@@ -262,7 +262,7 @@ enum SubtitleSelfTest {
         await LaneSelfTest.mouse(.leftMouseDragged, NSPoint(x: grab1.x - 90, y: grab1.y), w)
         await key(53, "\u{1b}")
         await LaneSelfTest.mouse(.leftMouseUp, NSPoint(x: grab1.x - 90, y: grab1.y), w)
-        let expectFrame = SubtitleRenderer.shared.raster(s.timeline.subtitle(sid)!).rect
+        let expectFrame = SubtitleRenderer.shared.raster(s.timeline.subtitle(sid)!).drawRect   // 층은 잘라 낸 그림 자리(drawRect, §49)
         let lf = s.previewHost?.subtitleLayerForTest(sid)?.frame
         check("drag.escCancels", s.timeline.subtitle(sid)?.style == st1 && s.history.undoDepth == d3 + 1 && s.gestureBase == nil
               && lf.map { abs($0.minX - expectFrame.minX) < 0.5 && abs($0.maxY - (1080 - expectFrame.minY)) < 0.5 } == true, "layer \(lf.map { "\($0)" } ?? "nil") expect \(expectFrame)")
@@ -513,7 +513,7 @@ enum SubtitleSelfTest {
                 let tb = SubtitleRenderer.shared.hitBounds(cur)
                 pvStats[legacy] = await measure(pv, from: win(CGPoint(x: tb.midX, y: tb.midY)), circle)
                 if !legacy, let now = s.timeline.subtitle(pid), let lf = s.previewHost?.subtitleLayerForTest(pid)?.frame {
-                    let r = SubtitleRenderer.shared.raster(now).rect
+                    let r = SubtitleRenderer.shared.raster(now).drawRect
                     consistent = abs(lf.minX - r.minX) < 0.5 && abs(lf.maxY - (1080 - r.minY)) < 0.5 && s.selectedSubtitle?.style == now.style
                 }
             }
@@ -633,7 +633,7 @@ enum SubtitleSelfTest {
             let after = s.timeline.subtitle(fid)!.style
             let one = s.history.undoDepth == dF + 1 && after.hasEnabledEffects && after.outline == .default && after.background?.alpha == 100 && s.itemReplacements == iF
             let r = SubtitleRenderer.shared.raster(s.timeline.subtitle(fid)!)
-            let layerOK = s.previewHost?.subtitleLayerForTest(fid).map { abs($0.frame.width - r.rect.width) < 0.5 && abs($0.frame.height - r.rect.height) < 0.5 } == true
+            let layerOK = s.previewHost?.subtitleLayerForTest(fid).map { abs($0.frame.width - r.drawRect.width) < 0.5 && abs($0.frame.height - r.drawRect.height) < 0.5 } == true
             let pFx = folder.appendingPathComponent("effects.ontheframe")
             let saved = s.writeProject(to: pFx)
             let doc = (try? Data(contentsOf: pFx)).flatMap { try? ProjectFile.decode($0) }
@@ -743,8 +743,8 @@ enum SubtitleSelfTest {
             let item = s.timeline.subtitle(cid)!, rr = SubtitleRenderer.shared.raster(item)
             let layer = s.previewHost?.subtitleLayerForTest(cid)
             check("longText.visibleBandNotSilent", item.text == tall && !rr.failed && rr.clipped && rr.lines == 60 && rr.image.height <= 1080
-                  && layer != nil && layer!.frame.height == rr.rect.height && s.exportBlockReason == nil,
-                  "failed \(rr.failed) clipped \(rr.clipped) lines \(rr.lines) band \(rr.rect) layer \(layer.map { "\($0.frame)" } ?? "nil") block \(s.exportBlockReason ?? "nil")")
+                  && layer != nil && layer!.frame.height == rr.drawRect.height && s.exportBlockReason == nil,
+                  "failed \(rr.failed) clipped \(rr.clipped) lines \(rr.lines) band \(rr.rect) draw \(rr.drawRect) layer \(layer.map { "\($0.frame)" } ?? "nil") block \(s.exportBlockReason ?? "nil")")
             s.setSubtitleText(cid, keepLong)
         } else { check("review.setup", false, "자막 없음") }
         await focusTimeline()

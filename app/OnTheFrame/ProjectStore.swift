@@ -63,7 +63,10 @@ final class ProjectStore {
         if let c = linkCandidate { s.insert(c) }
         return s
     }
-    private(set) var playhead = 0              // 0…durationFrames(끝 위치 포함)
+    private(set) var playhead = 0 {            // 0…durationFrames(끝 위치 포함)
+        // 프리뷰 자막 그림의 시간 창(§49): 재생 헤드 근처 자막만 그림을 붙잡는다. 보임·숨김은 동기 층 애니메이션 그대로다.
+        didSet { if playhead != oldValue { previewHost?.subtitlePlayheadMoved(to: playhead) } }
+    }
     /// 타임라인 확대(프레임당 포인트). 보기를 다시 만들어도 유지한다.
     var timelineZoom: Double = 2
     private(set) var isPlaying = false
@@ -1319,11 +1322,22 @@ final class ProjectStore {
     }
     func pauseForEdit() { if isPlaying { pause() } }
     func step(_ k: Int) { pauseForEdit(); seek(to: playhead + k) }
+    @ObservationIgnored private(set) var seekToken = 0
     func seek(to frame: Int) {
         if hasPendingSubtitleEdits, frame != playhead { commitInlineEditIfAny() }   // 재생 헤드를 옮기면 글 편집 확정(§44)
         let f = max(0, min(frame, timeline.durationFrames))
+        // 프리뷰 자막 창에 탐색 시작·끝(완료·취소)을 번호와 함께 알린다(§49.6, Codex 검토): 탐색이 끝날 때까지 화면은 이전에 끝난 탐색의 프레임이라
+        // 그 프레임과 아직 끝나지 않은 탐색의 프레임에 보이는 자막 그림을 놓지 않는다. 재생 헤드를 바꾸기 전에 알린다(재생 헤드 didSet이 창을 맞춘다).
+        seekToken &+= 1
+        let token = seekToken
+        previewHost?.subtitleSeekRequested(token: token, frame: f)
         playhead = f
-        player.seek(to: settings.time(f), toleranceBefore: .zero, toleranceAfter: .zero)
+        nonisolated(unsafe) let seekDone: (Bool) -> Void = { [weak self] finished in
+            MainActor.assumeIsolated { self?.previewHost?.subtitleSeekFinished(token: token, frame: f, finished: finished) }
+        }
+        player.seek(to: settings.time(f), toleranceBefore: .zero, toleranceAfter: .zero) { finished in
+            DispatchQueue.main.async { seekDone(finished) }
+        }
     }
 
     /// 재생 중에만 디스플레이 유휴 절전을 막는다(E3-1: 디스플레이가 꺼지면 화면 표시가 멈춤).
@@ -1658,7 +1672,8 @@ extension ProjectStore {
             return "영상 원본이 없어 내보낼 수 없습니다(소리 파일만 있음). 출력 영상(1920×1080)의 바탕을 만들 영상 파일을 하나 이상 가져오세요."
         }
         // 그리지 못하는 자막(2026-10-23): 내보내기 서비스도 같은 판정으로 대상 파일을 건드리기 전에 거부한다
-        if let bad = timeline.renderedSubtitles.first(where: { SubtitleRenderer.shared.raster($0).failed }) {
+        // 화면 갱신마다 불리므로 그림이 아니라 결과만 기억하는 판정을 쓴다(§49: 그림 캐시보다 많은 자막에서 매번 다시 그렸다)
+        if let bad = timeline.renderedSubtitles.first(where: { SubtitleRenderer.shared.renderFailed($0) }) {
             return "그릴 수 없는 자막이 있어 내보낼 수 없습니다(\(settings.timecode(bad.start))에서 시작하는 자막). 그 자막의 글을 줄이거나 글자 크기를 줄이세요."
         }
         return nil
@@ -1700,6 +1715,7 @@ extension ProjectStore {
         interruptGesture(reason: "replaceProject", clearViewDrags: true)   // 끌기 중이면 취소하고 보기의 끌기 상태(옮기기 누름 대기 포함)도 지운다(D-031)
         inlineEdit = nil   // 남은 글 편집은 이 프로젝트에 넣지 않고 버린다(교체 요청 앞에서 이미 확정했다, §44)
         colorSession = nil   // 색 조정 세션도 버린다(회차 확인으로 늦은 패널 값이 새 프로젝트를 바꾸지 않음)
+        SubtitleRenderer.shared.removeAll()   // 이전 프로젝트의 자막 그림을 놓는다(§49: 캐시는 상한 안이지만 프로젝트를 바꾸면 쓸 일이 없다)
         panelTextCommit = nil   // 정보 패널 글 칸도(칸이 늦게 초점을 잃어도 회차 확인으로 넣지 않음)
         dropStill()
         history = EditHistory(t)

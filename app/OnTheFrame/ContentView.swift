@@ -380,8 +380,152 @@ final class PlayerNSView: NSView {
         let r = SubtitleRenderer.shared.raster(s)
         CATransaction.begin(); CATransaction.setDisableActions(true)
         l.contents = r.image
-        l.frame = CGRect(x: r.rect.minX, y: renderSize.height - r.rect.maxY, width: r.rect.width, height: r.rect.height)
+        l.frame = CGRect(x: r.drawRect.minX, y: renderSize.height - r.drawRect.maxY, width: r.drawRect.width, height: r.drawRect.height)
         CATransaction.commit()
+        subtitleOverrides.insert(s.id); resident.insert(s.id)   // 시간 창이 건드리지 않음(다음 setSubtitles까지)
+    }
+
+    // MARK: 자막 그림 시간 창(2026-10-23, docs/SUBTITLE-DESIGN.md §49)
+    //
+    // 층은 모든 자막에 두고(보임·숨김 = 동기 층의 불투명도 애니메이션, 그리기 순서 그대로) 그림(contents)은 재생 헤드 근처 창 안의 자막만 붙잡는다.
+    // 예전에는 자막마다 줄바꿈 폭 그림을 층이 붙잡아 두 줄 자막 500개에 약 880 MB였다(측정). 창 밖으로 나가면 그림을 놓는다.
+    // - 창: 재생 헤드 1초 전 ~ 10초 뒤. 재생은 앞의 자막을 미리 준비한다(한 번에 하나, 뒤에서 그림 → 주 스레드에서 넣음).
+    // - 건너뛰기(탐색·끌기·되감기·처음부터 다시)와 묶음 바꿈: 그 프레임에 보이는 자막은 바로(동기) 그림을 넣는다 — 멈춘 화면에 빠지지 않게.
+    // - 뒤에서 온 그림은 자막 묶음 회차·글자·모양·창 안인지 확인하고 아니면 버린다(편집·탐색·프로젝트 바꿈 뒤 늦은 결과).
+    static let residentBefore = 30, residentAhead = 300
+    /// 자막 묶음(시작 순서)과 회차
+    private var subtitleEntries: [SubtitleItem] = []
+    private var subtitleLookup: [UUID: SubtitleItem] = [:]
+    private var subtitleGeneration = 0
+    /// 그림을 가진 층, 끌기·모양 조정 미리 보기로 덮어쓴 층(창이 건드리지 않음)
+    private var resident = Set<UUID>(), subtitleOverrides = Set<UUID>()
+    private var subtitleFrame = 0, residencyCenter = Int.min
+    /// 뒤에서 그리는 중인 자막(한 번에 하나)
+    private var rasterInFlight: UUID?
+    private static let rasterQueue = DispatchQueue(label: "dev.ontheframe.subtitle-raster", qos: .userInitiated)
+    #if DEBUG
+    /// 자체 검사 전용: 그림을 가진 층 수, 뒤에서 넣은 그림 수, 뒤에서 그리는 중인가
+    var residentSubtitleCount: Int { resident.count }
+    private(set) var residentAsyncAssigns = 0
+    var subtitleRasterPending: Bool { rasterInFlight != nil }
+    #endif
+
+    /// 재생 헤드가 움직였다(저장소 재생 헤드의 didSet). 차례로 나아가면 15프레임마다, 건너뛰면 바로 창을 다시 맞춘다.
+    func subtitlePlayheadMoved(to f: Int) {
+        let jump = abs(f - subtitleFrame) > 2
+        // 건너뛰기: 탐색이 끝날 때까지 화면은 이전 프레임이다(Codex 검토 2026-10-24). 화면에 나와 있을 수 있는 프레임 — 마지막으로 처리한 완료 탐색의
+        // 프레임, 완료·취소를 아직 처리하지 않은 탐색들의 프레임, 바로 전 재생 헤드 — 에 보이는 자막 그림은 놓지 않는다(heldIDs).
+        // 유지는 저장소를 거친 탐색이 진행 중일 때만 만든다(Codex 검토: 재생 중 멈칫해 3프레임 넘게 건너뛴 갱신이 탐색 없이 유지를 만들어 풀리지 않았다).
+        // 진행 중인 탐색이 없으면 화면 프레임 = 재생 헤드이고 남은 유지도 없다.
+        if jump && !pendingSeeks.isEmpty {
+            seekHeld = (seekHeld ?? []).union(heldIDs(extra: subtitleFrame))
+        } else if pendingSeeks.isEmpty {
+            displayedFrame = f; seekHeld = nil
+        }
+        subtitleFrame = f
+        guard !subtitleEntries.isEmpty else { return }
+        if jump || abs(f - residencyCenter) >= 15 { updateResidency(syncVisible: true) }
+        else { fillShown(f) }   // 한 칸씩 넘김·재생: 지금 보일 자막에 그림이 없으면 바로 넣는다(Codex 검토: 뒤에서 그리는 동안 한 칸 넘기면 빈 층이 보였다)
+    }
+    /// 그 프레임에 보이는 자막인가: [시작, 끝), 타임라인 끝에서 끝나는 자막은 끝 위치도(불투명도 애니메이션과 같은 규칙)
+    /// 탐색 중 화면에 남았을 수 있는 자막(가장 새 탐색이 끝나면 비우고 창을 다시 맞춘다)
+    private var seekHeld: Set<UUID>?
+    /// 화면에 나온 것으로 아는 마지막 프레임(처리한 완료 탐색 또는 차례로 나아간 재생 헤드)
+    private var displayedFrame = 0
+    /// 완료·취소를 아직 처리하지 않은 탐색(번호 순). 플레이어는 새 탐색이 오면 이전 탐색을 취소하므로 몇 개를 넘지 않는다.
+    private var pendingSeeks: [(token: Int, frame: Int)] = []
+    /// 화면에 나와 있을 수 있는 프레임들에 보이는, 그림을 가진 자막
+    private func heldIDs(extra: Int? = nil) -> Set<UUID> {
+        let frames = [displayedFrame] + pendingSeeks.map(\.frame) + (extra.map { [$0] } ?? [])
+        return Set(subtitleEntries.filter { s in resident.contains(s.id) && frames.contains { s.start <= $0 && shown(s, $0) } }.map(\.id))
+    }
+    /// 저장소가 탐색을 시작한다(재생 헤드를 바꾸기 전)
+    func subtitleSeekRequested(token: Int, frame: Int) { pendingSeeks.append((token, frame)) }
+    /// 플레이어 탐색이 끝났다(저장소가 주 스레드에서 알림, 완료 또는 취소).
+    /// 완료: 그 프레임이 화면에 나왔고, 그보다 앞서 요청한 탐색은 이제 화면에 나올 수 없다. 취소: 그 탐색만 화면에 나오지 않는다.
+    /// 남은 탐색이 없으면 유지를 풀고 창을 다시 맞추고, 있으면 아직 화면에 나올 수 있는 프레임의 자막만 남긴다.
+    func subtitleSeekFinished(token: Int, frame: Int, finished: Bool) {
+        if finished { displayedFrame = frame; pendingSeeks.removeAll { $0.token <= token } }
+        else { pendingSeeks.removeAll { $0.token == token } }
+        guard seekHeld != nil else { return }
+        if pendingSeeks.isEmpty {
+            seekHeld = nil
+            if !subtitleEntries.isEmpty { updateResidency(syncVisible: true) }
+        } else {
+            seekHeld = heldIDs()
+        }
+    }
+    #if DEBUG
+    /// 자체 검사 전용: 탐색 중 유지하는 자막 수
+    var seekHeldCount: Int { seekHeld?.count ?? 0 }
+    #endif
+    private func shown(_ s: SubtitleItem, _ f: Int) -> Bool { (s.start <= f && f < s.end) || (s.end == subtitleDuration && f == s.end) }
+    private var subtitleDuration = 0
+    /// 지금 보이는데 그림이 없는 층에 그림을 바로 넣는다(캐시 또는 그 자리에서 그림, 보통 한두 개)
+    private func fillShown(_ f: Int) {
+        var changed = false
+        for s in subtitleEntries where s.start <= f && shown(s, f) && !resident.contains(s.id) && !subtitleOverrides.contains(s.id) {
+            if !changed { CATransaction.begin(); CATransaction.setDisableActions(true); changed = true }
+            assign(s, SubtitleRenderer.shared.cachedRaster(s) ?? SubtitleRenderer.shared.raster(s))
+        }
+        if changed { CATransaction.commit() }
+    }
+    private func inWindow(_ s: SubtitleItem, _ c: Int) -> Bool { s.end > c - Self.residentBefore && s.start < c + Self.residentAhead }
+    /// 창을 다시 맞춘다: 창 밖 그림을 놓고, 창 안에서 그림이 없는 것은 캐시에 있으면 바로, 지금 보이는 것은(syncVisible) 바로 그리고, 나머지는 뒤에서.
+    private func updateResidency(syncVisible: Bool) {
+        let c = subtitleFrame
+        residencyCenter = c
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        for id in resident where !subtitleOverrides.contains(id) && seekHeld?.contains(id) != true {
+            if let s = subtitleLookup[id], inWindow(s, c) { continue }
+            if let l = subtitleLayers[id] { l.contents = nil; l.frame = .zero }
+            resident.remove(id)
+        }
+        for s in subtitleEntries where inWindow(s, c) && !resident.contains(s.id) && !subtitleOverrides.contains(s.id) {
+            if let r = SubtitleRenderer.shared.cachedRaster(s) ?? (syncVisible && shown(s, c) ? SubtitleRenderer.shared.raster(s) : nil) {
+                assign(s, r)
+            }
+        }
+        startNextRaster()
+    }
+    private func assign(_ s: SubtitleItem, _ r: SubtitleRaster) {
+        guard let l = subtitleLayers[s.id] else { return }
+        l.contents = r.image
+        l.frame = CGRect(x: r.drawRect.minX, y: renderSize.height - r.drawRect.maxY, width: r.drawRect.width, height: r.drawRect.height)
+        resident.insert(s.id)
+    }
+    /// 창 안에서 그림이 없는 자막 가운데 재생 헤드에 가장 가까운 것 하나를 뒤에서 그린다(끝나면 다음). 기다리는 일은 늘 하나다.
+    private func startNextRaster() {
+        guard rasterInFlight == nil else { return }
+        let c = subtitleFrame
+        let want = subtitleEntries.filter { inWindow($0, c) && !resident.contains($0.id) && !subtitleOverrides.contains($0.id) }
+            .min { max(0, $0.start - c) < max(0, $1.start - c) }
+        guard let s = want else { return }
+        rasterInFlight = s.id
+        let gen = subtitleGeneration
+        // 주 스레드에서 받을 곳(약하게 붙잡음)을 먼저 만들고, 뒤에서는 그림만 그린다
+        nonisolated(unsafe) let done: (SubtitleRaster) -> Void = { [weak self] r in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.rasterInFlight = nil
+                // 늦은 결과 거름: 같은 자막 묶음 회차, 같은 글자·모양, 아직 창 안, 덮어쓰지 않음
+                if gen == self.subtitleGeneration, let now = self.subtitleLookup[s.id], now == s, self.inWindow(s, self.subtitleFrame),
+                   !self.resident.contains(s.id), !self.subtitleOverrides.contains(s.id) {
+                    CATransaction.begin(); CATransaction.setDisableActions(true)
+                    self.assign(s, r)
+                    CATransaction.commit()
+                    #if DEBUG
+                    self.residentAsyncAssigns += 1
+                    #endif
+                }
+                self.startNextRaster()
+            }
+        }
+        Self.rasterQueue.async {
+            let r = SubtitleRenderer.shared.raster(s)
+            DispatchQueue.main.async { done(r) }
+        }
     }
     private var subtitleKVO: NSKeyValueObservation?
     private var pendingSubtitleItem: AVPlayerItem?
@@ -397,7 +541,13 @@ final class PlayerNSView: NSView {
         subtitleKVO = nil; pendingSubtitleItem = nil
         subtitleSync?.removeFromSuperlayer(); subtitleSync = nil
         subtitleCanvas.removeFromSuperlayer(); subtitleCanvas.sublayers = nil; subtitleLayers = [:]
+        subtitleGeneration += 1
+        subtitleEntries = []; subtitleLookup = [:]; resident = []; subtitleOverrides = []; residencyCenter = Int.min; seekHeld = nil
+        displayedFrame = subtitleFrame   // 진행 중인 탐색 목록(pendingSeeks)은 그대로: 저장소의 탐색 알림은 자막 묶음과 무관하게 온다
         guard let item, !items.isEmpty else { return }
+        subtitleEntries = items.sorted { $0.start < $1.start }
+        subtitleDuration = durationFrames
+        subtitleLookup = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let sync = AVSynchronizedLayer()
         sync.actions = Self.noActions
         sync.frame = subtitleHost.bounds
@@ -405,15 +555,11 @@ final class PlayerNSView: NSView {
         subtitleCanvas.masksToBounds = true
         subtitleCanvas.actions = Self.noActions
         fit(subtitleCanvas, in: sync.bounds.size)
-        let h = renderSize.height
         var layers: [CALayer] = []
         for s in items {
-            let r = SubtitleRenderer.shared.raster(s)
-            let l = CALayer()
+            let l = CALayer()   // 그림·자리는 시간 창이 넣는다(창 밖 층은 비어 있음, §49). 그리기 순서는 items 차례 그대로.
             l.actions = Self.noActions
-            l.contents = r.image
             l.magnificationFilter = .linear; l.minificationFilter = .trilinear
-            l.frame = CGRect(x: r.rect.minX, y: h - r.rect.maxY, width: r.rect.width, height: r.rect.height)   // 출력(위 원점) → 캔버스(아래 원점)
             l.opacity = 0
             let a = CABasicAnimation(keyPath: "opacity")
             a.fromValue = 1; a.toValue = 1
@@ -431,6 +577,7 @@ final class PlayerNSView: NSView {
         sync.addSublayer(subtitleCanvas)
         subtitleHost.addSublayer(sync)
         subtitleSync = sync
+        updateResidency(syncVisible: true)   // 지금 보이는 자막은 바로, 창 안 나머지는 캐시에 있으면 바로·없으면 뒤에서
         pendingSubtitleItem = item
         if item.status == .readyToPlay { bindPendingSubtitles(); return }
         subtitleKVO = item.observe(\.status, options: [.new]) { [weak self] _, _ in

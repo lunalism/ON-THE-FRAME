@@ -60,7 +60,7 @@ final class SubtitleExportTests: XCTestCase {
                 var need = 0, ink = 0
                 data.withUnsafeBytes { (p: UnsafeRawBufferPointer) in
                     for y in 0..<img.height { for x in 0..<img.width where p[y * bpr + x * 4 + 3] >= 128 {
-                        let fx = Int(ras.rect.minX) + x, fy = Int(ras.rect.minY) + y
+                        let fx = Int(ras.drawRect.minX) + x, fy = Int(ras.drawRect.minY) + y   // 그림은 drawRect에 놓인다(2026-10-23)
                         guard fx >= 0, fx < 1920, fy >= 0, fy < 1080 else { continue }
                         need += 1; if abs(Int(a[k]!.y[fy * 1920 + fx]) - Int(b[k]!.y[fy * 1920 + fx])) > 40 { ink += 1 }
                     } }
