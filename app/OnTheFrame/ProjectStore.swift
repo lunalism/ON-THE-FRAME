@@ -1952,6 +1952,11 @@ extension ProjectStore {
         do { decoded = try ProjectFile.decode(data, settings: s) } catch let e as ProjectFile.LoadError {
             return fail(e.description, "decode")
         } catch { return fail(error.localizedDescription, "decode") }
+        // 스펙트럼(형식 8, 2026-10-25 SP-1A 1단계): 이 빌드의 편집기는 스펙트럼 레인·클립을 아직 보이거나 편집하지 못한다.
+        // 열어서 다른 종류처럼 다루거나 저장하며 잃지 않도록 열지 않는다.
+        if decoded.timeline.needsSpectrumFormat {
+            return fail("이 프로젝트에는 스펙트럼이 있습니다. 이 빌드는 스펙트럼 편집을 아직 지원하지 않아 열지 않습니다(파일은 그대로 둡니다).", "spectrum")
+        }
         Self.trace.info("open decoded version=\(decoded.document.version, privacy: .public) media=\(decoded.document.media.count, privacy: .public) clips=\(decoded.document.videoClips.count + decoded.document.audioClips.count, privacy: .public) at \(self.monoSeconds() - t0, format: .fixed(precision: 3), privacy: .public)s")
         openProgress?.total = decoded.document.media.count
         openProgress?.stage = "원본 미디어 확인 중"

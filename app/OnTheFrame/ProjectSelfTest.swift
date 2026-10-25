@@ -51,8 +51,10 @@ enum ProjectSelfTest {
         check("save.firstNoCompletion", saved1 && fm.fileExists(atPath: p1.path) && !s.isDirty && s.projectURL?.lastPathComponent == "p1.ontheframe" && s.windowTitle == "p1"
               && s.recentProjects.first?.path == p1.standardizedFileURL.path, "title \(s.windowTitle) recents \(s.recentProjects.map(\.name))")
         if let data = try? Data(contentsOf: p1), let (t, doc) = try? ProjectFile.decode(data) {
-            check("save.fileContents", t == savedTimeline && doc.version == ProjectFile.subtitleFreeVersion && doc.media.allSatisfy { $0.bookmark != nil } && doc.projectID == s.projectID,
-                  "bookmarks \(doc.media.filter { $0.bookmark != nil }.count)/\(doc.media.count)")
+            // 연결 쌍을 잘라 소리 계보가 생김 → 스펙트럼 없이 계보만 든 형식 8(P-S1 (나), 2026-10-25)
+            let lineageOnly = savedTimeline.audioClips.contains { $0.origin != nil } && !savedTimeline.needsSpectrumFormat
+            check("save.fileContents", t == savedTimeline && doc.version == ProjectFile.spectrumVersion && lineageOnly && doc.media.allSatisfy { $0.bookmark != nil } && doc.projectID == s.projectID,
+                  "version \(doc.version) lineageOnly \(lineageOnly) bookmarks \(doc.media.filter { $0.bookmark != nil }.count)/\(doc.media.count)")
         } else { check("save.fileContents", false, "decode") }
         // 2b. 회귀(2026-10-10 저장 실패): 메뉴·⌘S와 같은 완료 처리기 없는 저장도 실제로 파일을 쓴다
         s.renameLane(Lane.audioID, to: "메뉴 저장")
@@ -106,7 +108,7 @@ enum ProjectSelfTest {
         let p1Now = (try? Data(contentsOf: p1)).flatMap { try? ProjectFile.decode($0).timeline }
         check("pending.newProject", shape && cancelled && savedThenNew && p1Now?.lanes[1].name == "바뀐 이름",
               "buttons \(b.map(\.title)) keys \(b.map { $0.keyEquivalent.unicodeScalars.map { String($0.value, radix: 16) } })")
-        // 6. 다시 열기: 같은 타임라인(ID·연결·어긋남·빈틈·레인 이름), 저장 상태
+        // 6. 다시 열기: 같은 타임라인(ID·연결·어긋남·빈틈·레인 이름·소리 계보 — 계보만 든 형식 8도 연다), 저장 상태
         let opened = await s.openProject(at: p1)
         let reopened = s.timeline
         check("open.roundTrip", opened && reopened.clips == p1Now?.clips && reopened.audioClips == p1Now?.audioClips && reopened.lanes == p1Now?.lanes
@@ -137,6 +139,15 @@ enum ProjectSelfTest {
         let newerMsg = s.alert?.message ?? ""; await dismiss()
         check("open.rejectsMalformedAndNewer", !okBad && !okNewer && s.timeline == reopened && s.projectURL == p1.standardizedFileURL && s.recentProjects == recents2
               && badMsg.contains("손상") && newerMsg.contains("더 새로운 버전"), "bad '\(badMsg)' newer '\(newerMsg)'")
+        // 7b. 스펙트럼이 든 프로젝트(형식 8)는 이 빌드의 앱이 아직 열지 않는다(SP-1A 1단계 임시 장치) — 파일·현재 상태 그대로
+        let spec = out.appendingPathComponent("spectrum.ontheframe")
+        let specData = (try? reopened.addingLane(.spectrum, name: "SP", id: UUID()))
+            .flatMap { try? ProjectFile.encode($0, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: spec) }
+        try? specData?.write(to: spec)
+        let okSpec = await s.openProject(at: spec)
+        let specMsg = s.alert?.message ?? ""; await dismiss()
+        check("open.rejectsSpectrumProject", specData != nil && !okSpec && specMsg.contains("스펙트럼") && s.timeline == reopened && s.projectURL == p1.standardizedFileURL
+              && (try? Data(contentsOf: spec)) == specData, "opened \(okSpec) msg '\(specMsg)'")
         // 8. 가져오는 중에는 프로젝트를 바꾸지 않는다
         s.importFiles([src.appendingPathComponent("otf-A.mp4")])
         s.requestOpenProject(p1)

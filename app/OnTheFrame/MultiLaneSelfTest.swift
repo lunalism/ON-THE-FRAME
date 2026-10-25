@@ -217,7 +217,10 @@ enum MultiLaneSelfTest {
         let proj = out.appendingPathComponent("multilane.ontheframe")
         let saved = s.writeProject(to: proj)
         let doc = (try? Data(contentsOf: proj)).flatMap { try? ProjectFile.decode($0) }
-        check("project.saveV2", saved && !s.isDirty && doc?.document.version == ProjectFile.subtitleFreeVersion && s.recentProjects.first?.path == proj.standardizedFileURL.path)
+        // 자른 연결 쌍(TB)의 소리 조각이 남아 있으면 계보 → 형식 8, 없으면 형식 5(P-S1 (나), 2026-10-25)
+        let wantVersion = s.timeline.audioClips.contains { $0.origin != nil } ? ProjectFile.spectrumVersion : ProjectFile.subtitleFreeVersion
+        check("project.saveV2", saved && !s.isDirty && doc?.document.version == wantVersion && doc?.timeline == s.timeline && s.recentProjects.first?.path == proj.standardizedFileURL.path,
+              "version \(doc?.document.version ?? -1) want \(wantVersion)")
         s.resetProject()
         let reopened = await s.openProject(at: proj)
         check("project.reopenV2", reopened && s.timeline == edited && s.missingMedia.isEmpty && !s.isDirty && s.timeline.laneInfo(laneTB)?.muted == true

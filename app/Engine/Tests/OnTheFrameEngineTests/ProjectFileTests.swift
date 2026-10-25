@@ -32,7 +32,13 @@ final class ProjectFileTests: XCTestCase {
         let (back, doc) = try ProjectFile.decode(data)
         XCTAssertEqual(back, t)                                            // 클립·연결·레인·미디어·길이(빈틈 포함) 모두 같음
         XCTAssertEqual(doc.projectID, pid)
-        XCTAssertEqual(doc.version, ProjectFile.version(for: t)); XCTAssertEqual(doc.version, 5)   // 자막 없음 → 형식 5(2026-10-22)
+        // 자막 없음, 연결 쌍 자르기로 소리 계보가 생김 → 형식 8(P-S1 (나), 2026-10-25). 계보까지 같게 다시 읽는다.
+        XCTAssertEqual(doc.version, ProjectFile.version(for: t)); XCTAssertEqual(doc.version, 8)
+        XCTAssertEqual(back.audioClips.map(\.lineageKey), t.audioClips.map(\.lineageKey)); XCTAssertTrue(t.audioClips.contains { $0.origin != nil })
+        // 같은 타임라인에 계보가 없으면(이전 앱이 자른 모양) 형식 5(2026-10-22)
+        let legacy = t.rebuilt(audio: t.audioClips.map { $0.with(origin: .some(nil)) })
+        XCTAssertEqual(ProjectFile.version(for: legacy), 5)
+        XCTAssertEqual(try ProjectFile.decode(try ProjectFile.encode(legacy, projectID: pid, settings: .m1, bookmarks: [:], projectURL: nil)).timeline, legacy)
         XCTAssertEqual(doc.format, "dev.ontheframe.project")
         XCTAssertEqual(doc.settings, .init(width: 1920, height: 1080, fps: 30))
         XCTAssertEqual(doc.media.first { $0.ref.id == ma }?.bookmark, bm)
@@ -86,6 +92,11 @@ final class ProjectFileTests: XCTestCase {
         let t = try sample()
         let base = try JSONSerialization.jsonObject(with: try ProjectFile.encode(t, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)) as! [String: Any]
         func mutated(_ edit: (inout [String: Any]) -> Void) throws -> Data { var j = base; edit(&j); return try JSONSerialization.data(withJSONObject: j) }
+        // 형식 3 변형 경우는 계보(형식 8 값)를 뺀 바탕을 쓴다 — 계보 때문이 아니라 넘치는 변형 값으로 거부되는지 본다(sample()은 소리를 자름)
+        func legacy3(_ j: inout [String: Any]) {
+            j["version"] = 3
+            j["audioClips"] = (j["audioClips"] as! [[String: Any]]).map { var c = $0; c.removeValue(forKey: "origin"); return c }
+        }
         func clip(_ key: String, _ field: String, _ value: Any) -> (inout [String: Any]) -> Void {
             { j in var cs = j[key] as! [[String: Any]]; cs[0][field] = value; j[key] = cs }
         }
@@ -100,12 +111,16 @@ final class ProjectFileTests: XCTestCase {
             ("fade length max+1", clip("audioClips", "audio", ["fadeIn": ["length": huge, "offset": 0]])),
             ("duration Int.max", { $0["durationFrames"] = Int.max }),
             ("media frames Int.max", { j in var m = j["media"] as! [[String: Any]]; var r = m[0]["ref"] as! [String: Any]; r["frameCount"] = Int.max; m[0]["ref"] = r; j["media"] = m }),
-            ("legacy transform Int.min", { j in j["version"] = 3; var cs = j["videoClips"] as! [[String: Any]]; cs[0]["transform"] = ["scalePermille": Int.min, "offsetX": 0, "offsetY": 0]; j["videoClips"] = cs }),
-            ("legacy offset Int.min", { j in j["version"] = 3; var cs = j["videoClips"] as! [[String: Any]]; cs[0]["transform"] = ["scalePermille": 1000, "offsetX": Int.min, "offsetY": 0]; j["videoClips"] = cs }),
+            ("legacy transform Int.min", { j in legacy3(&j); var cs = j["videoClips"] as! [[String: Any]]; cs[0]["transform"] = ["scalePermille": Int.min, "offsetX": 0, "offsetY": 0]; j["videoClips"] = cs }),
+            ("legacy offset Int.min", { j in legacy3(&j); var cs = j["videoClips"] as! [[String: Any]]; cs[0]["transform"] = ["scalePermille": 1000, "offsetX": Int.min, "offsetY": 0]; j["videoClips"] = cs }),
         ]
-        for (name, edit) in cases { XCTAssertThrowsError(try ProjectFile.decode(try mutated(edit)), name) }
+        for (name, edit) in cases {
+            XCTAssertThrowsError(try ProjectFile.decode(try mutated(edit)), name) {   // 넘침 검사로 거부(계보 거부가 먼저 막지 않음)
+                XCTAssertNotEqual($0 as? ProjectFile.LoadError, .invalid("스펙트럼·계보(형식 8 값)"), name)
+            }
+        }
         // 정상 값은 그대로 읽힌다(형식 3 변형·페이드 포함)
-        let okLegacy = try mutated { j in j["version"] = 3; var cs = j["videoClips"] as! [[String: Any]]; cs[0]["transform"] = ["scalePermille": 500, "offsetX": -10, "offsetY": 20]; j["videoClips"] = cs }
+        let okLegacy = try mutated { j in legacy3(&j); var cs = j["videoClips"] as! [[String: Any]]; cs[0]["transform"] = ["scalePermille": 500, "offsetX": -10, "offsetY": 20]; j["videoClips"] = cs }
         XCTAssertEqual(try ProjectFile.decode(okLegacy).timeline.clips.first { $0.transform != nil }?.transform, ClipTransform(scalePermille: 500, offsetX: -10, offsetY: 20))
         let okFade = try mutated(clip("audioClips", "audio", ["fadeIn": ["length": 6, "offset": 2]]))
         XCTAssertEqual(try ProjectFile.decode(okFade).timeline.audioClips.first?.audio?.fadeIn, ClipAudio.Fade(length: 6, offset: 2))

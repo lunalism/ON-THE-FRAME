@@ -217,7 +217,8 @@ extension Timeline {
         if occupied(c.start, c.end, excluding: ids) { throw EditError.crossingContent }
         let rest = rebuilt(subtitles: subtitles.filter { $0.id != id })
         let v = rest.shifted(rest.clips, from: c.end, by: -c.length), a = rest.shifted(rest.audioClips, from: c.end, by: -c.length)
-        return try checked(rest.rebuilt(video: v, audio: a, subtitles: rest.shiftedSubtitles(from: c.end, by: -c.length), duration: durationFrames - c.length))
+        return try checked(rest.rebuilt(video: v, audio: a, subtitles: rest.shiftedSubtitles(from: c.end, by: -c.length), spectra: rest.shiftedSpectra(from: c.end, by: -c.length),
+                                         duration: durationFrames - c.length))
     }
     /// 끌어 옮기기 붙음(자막): 시작·끝이 다른 항목의 시작·끝·0·extra에서 threshold 프레임 안이면 붙인다(클립의 snappedDelta와 같은 규칙).
     public func snappedSubtitleDelta(_ id: UUID, delta raw: Double, threshold: Double, extra: [Int] = []) -> (delta: Int, snap: Int?) {

@@ -19,6 +19,9 @@ public struct PlannedComposition: @unchecked Sendable {
     /// 자막(2026-10-22): 그리기 순서(아래 레인 먼저). 비어 있으면 지금까지의 내보내기 세션 경로, 있으면 구조 R(SubtitleExporter)로 내보낸다.
     /// 프리뷰는 composition 위에 같은 그림(SubtitleRenderer)의 층을 얹는다(앱).
     public var subtitles: [SubtitleItem] = []
+    /// 스펙트럼(2026-10-25, SP-1A 1단계): 계획에 함께 들고 간다. 내보내기 그리기는 아직 없어 ExportService가 이것이 있으면 대상 파일 전에 거부한다
+    /// (조용히 빼고 내보내지 않음). 프리뷰 그리기도 아직 없다(앱은 스펙트럼이 든 프로젝트를 열지 않는다).
+    public var spectra: [SpectrumItem] = []
 }
 
 public enum PlanError: Error, CustomStringConvertible {
@@ -228,7 +231,7 @@ public enum CompositionPlanner {
         vc.instructions = instructions
         return PlannedComposition(composition: comp.copy() as! AVComposition, videoComposition: vc.copy() as! AVVideoComposition,
                                   durationFrames: t.durationFrames, settings: settings, hasAudio: anyAudio, audioMix: mix, hasVideo: hasVideo, assets: keep,
-                                  subtitles: t.renderedSubtitles)   // 빈 자막은 그리지 않는다(D-037)
+                                  subtitles: t.renderedSubtitles, spectra: t.spectra)   // 빈 자막은 그리지 않는다(D-037)
     }
 
     /// 소리 트랙 음량 경사(2026-10-11): 클립마다 페이드 모양의 꺾이는 점 사이를 한 구간으로, 구간 양 끝의 배율

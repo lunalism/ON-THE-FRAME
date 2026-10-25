@@ -135,19 +135,26 @@ final class ClipAudioTests: XCTestCase {
                          mediaFrames: [m: 1_000], mediaHasAudio: [m: true], mediaHasVideo: [m: false])
         t = try t.settingLaneAudio(Lane.audioID, volumePercent: 70)
         let r = UUID()
-        t = try t.settingClipAudio(clip: a, volumePercent: 55, muted: true, fadeInFrames: 40).splitting(clip: a, atFrame: 15, newIDs: (UUID(), r))
+        // 자막·계보가 없는 프로젝트는 형식 5로 쓴다(2026-10-22 형식 6 도입 뒤에도, 이전 앱 호환): 자르기 전 같은 클립 설정
+        let unsplit = try t.settingClipAudio(clip: a, volumePercent: 55, muted: true, fadeInFrames: 40)
+        XCTAssertEqual(ProjectFile.version(for: unsplit), 5)
+        t = try unsplit.splitting(clip: a, atFrame: 15, newIDs: (UUID(), r))
         let data = try ProjectFile.encode(t, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)
         let (back, doc) = try ProjectFile.decode(data)
-        // 자막이 없는 프로젝트는 형식 5로 쓴다(2026-10-22 형식 6 도입 뒤에도, 이전 앱 호환). 읽을 수 있는 최신 형식은 6이다.
-        XCTAssertEqual(doc.version, 5); XCTAssertEqual(ProjectFile.subtitleFreeVersion, 5); XCTAssertEqual(ProjectFile.currentVersion, 7); XCTAssertEqual(ProjectFile.subtitleVersion, 6)
+        // 소리를 자르면 계보가 생겨 형식 8(P-S1 (나), 2026-10-25). 읽을 수 있는 최신 형식은 8이다.
+        XCTAssertEqual(doc.version, 8); XCTAssertEqual(ProjectFile.subtitleFreeVersion, 5); XCTAssertEqual(ProjectFile.currentVersion, 8); XCTAssertEqual(ProjectFile.subtitleEffectsVersion, 7); XCTAssertEqual(ProjectFile.subtitleVersion, 6)
         XCTAssertEqual(back, t)
         XCTAssertEqual(back.clip(r)?.effectiveAudio, ClipAudio(volumePercent: 55, muted: true, fadeIn: .init(length: 40, offset: 15)))
         let json = String(data: data, encoding: .utf8)!
         XCTAssertEqual(json.components(separatedBy: "\"audio\" :").count - 1, 2, "기본값 클립(b)에는 audio를 쓰지 않는다")
-        // 형식 4 파일(클립 audio 없음): 기본 클립 값, 레인 음량 그대로
+        // 형식 4 파일(클립 audio·계보 없음 — 형식 4에는 둘 다 없다): 기본 클립 값, 레인 음량 그대로
         var obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         obj["version"] = 4
         obj["audioClips"] = (obj["audioClips"] as! [[String: Any]]).map { var c = $0; c.removeValue(forKey: "audio"); return c }
+        XCTAssertThrowsError(try ProjectFile.decode(try JSONSerialization.data(withJSONObject: obj))) {   // 계보가 남은 형식 4는 거부(버리지 않음)
+            XCTAssertEqual($0 as? ProjectFile.LoadError, .invalid("스펙트럼·계보(형식 8 값)"))
+        }
+        obj["audioClips"] = (obj["audioClips"] as! [[String: Any]]).map { var c = $0; c.removeValue(forKey: "origin"); return c }
         let (old, _) = try ProjectFile.decode(try JSONSerialization.data(withJSONObject: obj))
         XCTAssertTrue(old.audioClips.allSatisfy { $0.audio == nil })
         XCTAssertEqual(old.laneInfo(Lane.audioID)?.volumePercent, 70)

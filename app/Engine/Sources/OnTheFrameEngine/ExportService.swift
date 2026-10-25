@@ -102,6 +102,10 @@ public enum ExportService {
                               options: Options = Options(), stage: @escaping @Sendable (ExportStage) async -> Void = { _ in },
                               progress: @escaping @Sendable (Double) async -> Void) async -> ExportOutcome {
         if let f = validate(d, sources: sources) { return .failed(f) }
+        // 스펙트럼(2026-10-25, SP-1A 1단계): 내보내기 그리기가 아직 없다 — 스펙트럼을 조용히 빼고 내보내지 않도록 대상 파일·임시 폴더 전에 거부한다.
+        if !p.spectra.isEmpty {
+            return .failed(.export("이 빌드는 스펙트럼을 아직 내보내지 못합니다(스펙트럼 \(p.spectra.count)개). 스펙트럼 없이 내보내려면 스펙트럼을 지우세요."))
+        }
         // A-014: 영상 원본이 하나도 없으면(소리 파일만) 영상 트랙을 만들 수 없다 — 내보내지 않는다(앱은 미리 막는다)
         guard p.hasVideo else { return .failed(.export("영상이 있는 원본이 없습니다. 영상 파일을 하나 이상 가져오세요.")) }
         // 그려야 할 자막을 그리지 못하면(2026-10-23) 임시 파일·대상 파일을 건드리기 전에 거부한다. 빈 자막은 plan.subtitles에 없다.

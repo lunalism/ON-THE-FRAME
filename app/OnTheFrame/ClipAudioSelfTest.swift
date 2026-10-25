@@ -175,14 +175,15 @@ enum ClipAudioSelfTest {
             check("preview.mixFollowsSettings", !x.isEmpty && bad.isEmpty, bad.map { String(format: "f%.1f %.4f vs %.4f", $0.0, amp($0.0), $0.1) }.joined(separator: ", "))
         } else { check("preview.mixFollowsSettings", false, "no plan") }
 
-        // 10. 저장·다시 열기: 모든 클립 설정 그대로(형식 5)
+        // 10. 저장·다시 열기: 모든 클립 설정·자른 조각의 계보 그대로(자른 소리의 계보 → 형식 8, P-S1 (나) 2026-10-25)
         let p = folder.appendingPathComponent("clipaudio.ontheframe")
         let saved = s.writeProject(to: p)
         let ver = (try? Data(contentsOf: p)).flatMap { try? ProjectFile.decode($0).document.version }
         s.resetProject(); await LaneSelfTest.settle()
         let opened = await s.openProject(at: p)
-        let same = [left, right, tbA].allSatisfy { s.timeline.clip($0)?.audio == states4.clip($0)?.audio } && s.timeline.lanes == states4.lanes
-        check("project.saveReopen", saved && opened && ver == 5 && same, "saved \(saved) opened \(opened) version \(ver ?? -1)")
+        let same = [left, right, tbA].allSatisfy { s.timeline.clip($0)?.audio == states4.clip($0)?.audio && s.timeline.clip($0)?.lineageKey == states4.clip($0)?.lineageKey }
+            && s.timeline.lanes == states4.lanes && s.timeline.clip(left)?.lineageKey == s.timeline.clip(right)?.lineageKey
+        check("project.saveReopen", saved && opened && ver == ProjectFile.spectrumVersion && same, "saved \(saved) opened \(opened) version \(ver ?? -1)")
         finish(folder, checks)
     }
 

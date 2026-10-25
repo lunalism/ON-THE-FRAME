@@ -78,8 +78,8 @@ final class SubtitleEffectsTests: XCTestCase {
         var j = try JSONSerialization.jsonObject(with: d7) as! [String: Any]
         j["version"] = 6
         XCTAssertThrowsError(try ProjectFile.decode(try JSONSerialization.data(withJSONObject: j))) { XCTAssertEqual($0 as? ProjectFile.LoadError, .invalid("자막 효과")) }
-        j["version"] = 8
-        XCTAssertThrowsError(try ProjectFile.decode(try JSONSerialization.data(withJSONObject: j))) { XCTAssertEqual($0 as? ProjectFile.LoadError, .newerVersion(8)) }
+        j["version"] = ProjectFile.currentVersion + 1   // 형식 8(스펙트럼, 2026-10-25)부터 읽으므로 "더 새 형식"은 그다음
+        XCTAssertThrowsError(try ProjectFile.decode(try JSONSerialization.data(withJSONObject: j))) { XCTAssertEqual($0 as? ProjectFile.LoadError, .newerVersion(ProjectFile.currentVersion + 1)) }
         // 범위 밖 값은 거부(형식 7)
         j["version"] = 7
         for (key, field, bad) in [("outline", "widthTenths", 0), ("outline", "widthTenths", 201), ("shadow", "offsetXTenths", 1001), ("shadow", "blurTenths", 501),

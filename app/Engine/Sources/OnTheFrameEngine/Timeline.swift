@@ -18,12 +18,18 @@ public struct Clip: Sendable, Equatable, Identifiable, Codable {
     public let transform: ClipTransform?
     /// 소리 클립의 음량·음소거·페이드(형식 5). nil이면 기본값(100%, 음소거 아님, 페이드 없음). 영상 클립은 늘 nil.
     public let audio: ClipAudio?
+    /// 계보 키의 원천(2026-10-25, SP-1A, 형식 8 — docs/SPECTRUM-DESIGN.md §1.3·§15): 자르기로 나온 소리 조각은 원래 클립의 계보 키를 이어받는다(스펙트럼 유무와 무관, P-S1 (나)).
+    /// nil이면 자기 ID가 키다(자기 ID와 같은 값은 nil로 맞춤). 복사·붙여넣기한 클립은 새 계보(nil). 스펙트럼 소스가 이 키를 참조한다.
+    public let origin: UUID?
     public init(id: UUID = UUID(), mediaID: UUID, start: Int, sourceIn: Int, length: Int, link: UUID? = nil, lane: UUID? = nil, transform: ClipTransform? = nil,
-                audio: ClipAudio? = nil) {
+                audio: ClipAudio? = nil, origin: UUID? = nil) {
         self.id = id; self.mediaID = mediaID; self.start = start; self.sourceIn = sourceIn; self.length = length; self.link = link; self.lane = lane
         self.transform = transform?.isIdentity == true ? nil : transform
         self.audio = audio?.isDefault == true ? nil : audio
+        self.origin = origin == id ? nil : origin
     }
+    /// 계보 키(스펙트럼 소스): origin, 없으면 자기 ID
+    public var lineageKey: UUID { origin ?? id }
     /// 소리 설정(없으면 기본값)
     public var effectiveAudio: ClipAudio { audio ?? .default }
     public var end: Int { start + length }
@@ -33,11 +39,12 @@ public struct Clip: Sendable, Equatable, Identifiable, Codable {
     /// 변형(없으면 기본값)
     public var effectiveTransform: ClipTransform { transform ?? .identity }
     func moved(by d: Int) -> Clip { with(start: start + d) }
+    /// 바꾼 사본. 계보는 그대로 따라간다(origin을 주지 않으면 지금 값 — ID를 바꿔도 지금 계보 키를 유지하려면 origin: lineageKey를 준다).
     func with(start: Int? = nil, sourceIn: Int? = nil, length: Int? = nil, id: UUID? = nil, link: UUID?? = nil, lane: UUID?? = nil,
-              transform: ClipTransform?? = nil, audio: ClipAudio?? = nil) -> Clip {
+              transform: ClipTransform?? = nil, audio: ClipAudio?? = nil, origin: UUID?? = nil) -> Clip {
         Clip(id: id ?? self.id, mediaID: mediaID, start: start ?? self.start, sourceIn: sourceIn ?? self.sourceIn,
              length: length ?? self.length, link: link ?? self.link, lane: lane ?? self.lane, transform: transform ?? self.transform,
-             audio: audio ?? self.audio)
+             audio: audio ?? self.audio, origin: origin ?? self.origin)
     }
 }
 
@@ -229,7 +236,8 @@ public struct MediaRef: Sendable, Equatable, Codable, Identifiable {
 
 /// 레인(A-012, A-014). 이름은 클립·파일 이름과 따로이며 안정된 레인 ID에 붙는다.
 /// 종류는 영상·소리·자막(2026-10-22, 형식 6)이다. 스펙트럼 레인은 이후 종류를 더해 넣는다.
-public enum LaneKind: String, Sendable, Codable { case video, audio, subtitle }
+/// 레인 종류. spectrum(2026-10-25, SP-1A, 형식 8): 독립 스펙트럼 클립의 레인 — 순서는 자막 → 스펙트럼 → 영상 → 오디오.
+public enum LaneKind: String, Sendable, Codable { case video, audio, subtitle, spectrum }
 public struct Lane: Sendable, Equatable, Codable, Identifiable {
     public let id: UUID
     public let kind: LaneKind
@@ -288,9 +296,18 @@ public enum EditError: Error, Equatable, CustomStringConvertible {
     case subtitleStyleRange
     /// 프레임 값 상한(Timeline.maxFrames)을 넘음
     case frameLimit
+    /// 스펙트럼(2026-10-25): 그 자리에 1프레임도 들어갈 빈 곳이 없음(같은 레인의 다른 스펙트럼)
+    case spectrumNoRoom
+    /// 스펙트럼: 모양·분석 값이 범위 밖
+    case spectrumStyleRange
+    /// 스펙트럼: 소스로 고른 계보가 이 타임라인의 소리 클립에 없음
+    case spectrumUnknownSource
     public var description: String {
         switch self {
         case .frameLimit: return "타임라인이 너무 깁니다(프레임 값 상한을 넘습니다)."
+        case .spectrumNoRoom: return "그 자리에는 다른 스펙트럼이 있어 새 스펙트럼을 넣을 수 없습니다. 스펙트럼 레인의 빈 곳을 고르세요."
+        case .spectrumStyleRange: return "스펙트럼 모양·분석 값이 범위 밖입니다."
+        case .spectrumUnknownSource: return "고른 소스 오디오가 타임라인에 없습니다."
         case .unknownClip: return "클립을 찾을 수 없습니다."
         case .unknownMedia: return "미디어를 찾을 수 없습니다."
         case .splitAtBoundary: return "클립 경계, 빈틈, 클립 밖에서는 자를 수 없습니다."
@@ -309,7 +326,7 @@ public enum EditError: Error, Equatable, CustomStringConvertible {
         case .relinkTooShort(let need, let have): return "고른 파일이 너무 짧습니다(필요 \(need)프레임, 파일 \(have)프레임). 클립을 줄이지 않으므로 같은 원본을 고르세요."
         case .relinkNoAudio: return "고른 파일에 소리가 없습니다. 오디오 레인의 클립이 이 원본의 소리를 씁니다."
         case .relinkNoVideo: return "고른 파일에 영상이 없습니다. 영상 레인의 클립이 이 원본의 영상을 씁니다."
-        case .laneKindMismatch: return "영상 클립은 영상 레인으로, 소리 클립은 오디오 레인으로, 자막은 자막 레인으로만 옮길 수 있습니다."
+        case .laneKindMismatch: return "영상 클립은 영상 레인으로, 소리 클립은 오디오 레인으로, 자막은 자막 레인으로, 스펙트럼은 스펙트럼 레인으로만 옮길 수 있습니다."
         case .lastLane: return "영상 레인과 오디오 레인은 하나 이상 있어야 합니다. 이 레인은 지울 수 없습니다."
         case .volumeRange: return "음량은 0%(무음)에서 100%(원래 크기) 사이입니다."
         case .transformNotVideo: return "크기·위치는 영상 클립에만 있습니다."
@@ -349,6 +366,8 @@ public struct Timeline: Sendable, Equatable {
     public let audioClips: [Clip]
     /// 자막 항목(2026-10-22, 형식 6): 자막 레인의 미디어 없는 글자 항목(레인 순서, 같은 레인 안에서는 시작 순). Subtitles.swift 참고.
     public let subtitles: [SubtitleItem]
+    /// 스펙트럼 클립(2026-10-25, SP-1A, 형식 8): 스펙트럼 레인의 독립 항목(레인 순서, 같은 레인 안에서는 시작 순). Spectrum.swift 참고.
+    public let spectra: [SpectrumItem]
     public let lanes: [Lane]
     /// 프로젝트의 원본 미디어 목록(가져온 순서). 타임라인에 쓰지 않은 미디어도 포함한다(A-013).
     public let media: [MediaRef]
@@ -361,8 +380,8 @@ public struct Timeline: Sendable, Equatable {
     public let durationFrames: Int
 
     /// durationFrames를 주지 않으면 마지막 클립 끝을 길이로 한다. 주면 마지막 클립 끝보다 짧을 수 없다.
-    public init(clips: [Clip] = [], audioClips: [Clip] = [], subtitles: [SubtitleItem] = [], lanes: [Lane] = Lane.defaults, media: [MediaRef] = [], mediaFrames: [UUID: Int] = [:],
-                mediaHasAudio: [UUID: Bool] = [:], mediaHasVideo: [UUID: Bool] = [:], durationFrames: Int? = nil) {
+    public init(clips: [Clip] = [], audioClips: [Clip] = [], subtitles: [SubtitleItem] = [], spectra: [SpectrumItem] = [], lanes: [Lane] = Lane.defaults, media: [MediaRef] = [],
+                mediaFrames: [UUID: Int] = [:], mediaHasAudio: [UUID: Bool] = [:], mediaHasVideo: [UUID: Bool] = [:], durationFrames: Int? = nil) {
         let order = Dictionary(uniqueKeysWithValues: lanes.enumerated().map { ($1.id, $0) })
         func normalize(_ cs: [Clip], _ kind: LaneKind) -> [Clip] {
             // 레인을 정하지 않은 클립(형식 1·레인 없는 생성)은 그 종류의 기본 레인(경계에 가장 가까운 V1·A1)에 둔다(CP-12).
@@ -374,16 +393,17 @@ public struct Timeline: Sendable, Equatable {
         }
         let v = normalize(clips, .video), a = normalize(audioClips, .audio)
         let s = subtitles.sorted { (order[$0.lane] ?? Int.max, $0.start) < (order[$1.lane] ?? Int.max, $1.start) }
-        self.clips = v; self.audioClips = a; self.subtitles = s; self.lanes = lanes; self.media = media
+        let sp = spectra.sorted { (order[$0.lane] ?? Int.max, $0.start) < (order[$1.lane] ?? Int.max, $1.start) }
+        self.clips = v; self.audioClips = a; self.subtitles = s; self.spectra = sp; self.lanes = lanes; self.media = media
         // 미디어 목록에 있는데 영상 유무 표가 비어 있으면 목록 값으로 채운다(같은 뜻의 두 표현을 같게)
         var hv = mediaHasVideo
         for r in media where hv[r.id] == nil { hv[r.id] = r.hasVideo }
         self.mediaFrames = mediaFrames; self.mediaHasAudio = mediaHasAudio; self.mediaHasVideo = hv
-        self.durationFrames = max(durationFrames ?? 0, v.map(\.end).max() ?? 0, a.map(\.end).max() ?? 0, s.map(\.end).max() ?? 0)
+        self.durationFrames = max(durationFrames ?? 0, v.map(\.end).max() ?? 0, a.map(\.end).max() ?? 0, s.map(\.end).max() ?? 0, sp.map(\.end).max() ?? 0)
     }
-    func rebuilt(video: [Clip]? = nil, audio: [Clip]? = nil, subtitles subs: [SubtitleItem]? = nil, lanes: [Lane]? = nil, media: [MediaRef]? = nil, mediaFrames: [UUID: Int]? = nil,
-                 mediaHasAudio: [UUID: Bool]? = nil, mediaHasVideo: [UUID: Bool]? = nil, duration: Int? = nil) -> Timeline {
-        Timeline(clips: video ?? clips, audioClips: audio ?? audioClips, subtitles: subs ?? subtitles, lanes: lanes ?? self.lanes, media: media ?? self.media, mediaFrames: mediaFrames ?? self.mediaFrames,
+    func rebuilt(video: [Clip]? = nil, audio: [Clip]? = nil, subtitles subs: [SubtitleItem]? = nil, spectra sps: [SpectrumItem]? = nil, lanes: [Lane]? = nil, media: [MediaRef]? = nil,
+                 mediaFrames: [UUID: Int]? = nil, mediaHasAudio: [UUID: Bool]? = nil, mediaHasVideo: [UUID: Bool]? = nil, duration: Int? = nil) -> Timeline {
+        Timeline(clips: video ?? clips, audioClips: audio ?? audioClips, subtitles: subs ?? subtitles, spectra: sps ?? spectra, lanes: lanes ?? self.lanes, media: media ?? self.media, mediaFrames: mediaFrames ?? self.mediaFrames,
                  mediaHasAudio: mediaHasAudio ?? self.mediaHasAudio, mediaHasVideo: mediaHasVideo ?? self.mediaHasVideo, durationFrames: duration ?? durationFrames)
     }
 
@@ -396,6 +416,7 @@ public struct Timeline: Sendable, Equatable {
     /// 가운데 경계에서 바깥쪽 순서의 레인(2026-10-11 배치): 영상은 경계 바로 위(배열의 마지막 영상 레인)부터 위로,
     /// 오디오는 경계 바로 아래(첫 오디오 레인)부터 아래로. 배열 순서(화면 위 → 아래, 영상 쌓음 우선순위)는 그대로다.
     /// 자막 레인은 영상 레인 묶음 위에 있고, 영상 묶음과의 경계(배열의 마지막 자막 레인)부터 위로 S1, S2…다.
+    /// 스펙트럼 레인(2026-10-25)은 자막 묶음과 영상 묶음 사이에 있고, 영상 묶음과의 경계(배열의 마지막 스펙트럼 레인)부터 위로 SP1, SP2…다.
     public func lanesFromBoundary(_ kind: LaneKind) -> [Lane] { kind == .audio ? lanes(.audio) : lanes(kind).reversed() }
     /// 기본 레인: 경계에 가장 가까운 레인(V1·A1)
     public func baseLane(_ kind: LaneKind) -> Lane? { lanesFromBoundary(kind).first }
@@ -407,23 +428,31 @@ public struct Timeline: Sendable, Equatable {
     /// 표시용 레인 번호 라벨: "V1", "A2"
     public func laneLabel(_ id: UUID) -> String {
         guard let l = laneInfo(id), let n = laneNumber(id) else { return "" }
-        return (l.kind == .video ? "V" : l.kind == .audio ? "A" : "S") + "\(n)"
+        let prefix: String
+        switch l.kind { case .video: prefix = "V"; case .audio: prefix = "A"; case .subtitle: prefix = "S"; case .spectrum: prefix = "SP" }
+        return prefix + "\(n)"
     }
     /// 같은 번호의 반대 종류 레인(V2 ↔ A2). 없으면 nil. 자막 레인에는 짝이 없다.
     public func pairedLane(of id: UUID) -> Lane? {
-        guard let l = laneInfo(id), l.kind != .subtitle, let n = laneNumber(id) else { return nil }
+        guard let l = laneInfo(id), l.kind == .video || l.kind == .audio, let n = laneNumber(id) else { return nil }
         let other = lanesFromBoundary(l.kind == .video ? .audio : .video)
         return n <= other.count ? other[n - 1] : nil
     }
     /// 레인에서 마지막으로 차지한 끝(클립이 없으면 0)
-    public func occupiedEnd(lane id: UUID) -> Int { max(clips(inLane: id).map(\.end).max() ?? 0, subtitles(inLane: id).map(\.end).max() ?? 0) }
+    public func occupiedEnd(lane id: UUID) -> Int {
+        max(clips(inLane: id).map(\.end).max() ?? 0, subtitles(inLane: id).map(\.end).max() ?? 0, spectra(inLane: id).map(\.end).max() ?? 0)
+    }
     public func laneInfo(_ id: UUID) -> Lane? { lanes.first { $0.id == id } }
     /// 클립이 있는 레인 ID
     public func laneID(of clipID: UUID) -> UUID? { clip(clipID)?.lane }
     /// 레인의 클립(시작 순)
     public func clips(inLane id: UUID) -> [Clip] { (clips + audioClips).filter { $0.lane == id } }
     public func gaps(inLane id: UUID) -> [Range<Int>] {
-        laneInfo(id)?.kind == .subtitle ? Self.gaps(ranges: subtitles(inLane: id).map { $0.start..<$0.end }, durationFrames) : Self.gaps(clips(inLane: id), durationFrames)
+        switch laneInfo(id)?.kind {
+        case .subtitle: return Self.gaps(ranges: subtitles(inLane: id).map { $0.start..<$0.end }, durationFrames)
+        case .spectrum: return Self.gaps(ranges: spectra(inLane: id).map { $0.start..<$0.end }, durationFrames)
+        default: return Self.gaps(clips(inLane: id), durationFrames)
+        }
     }
 
     /// 두 레인 종류 모두 클립이 없는가(길이가 0보다 커도 전부 빈틈이면 true)
@@ -458,6 +487,7 @@ public struct Timeline: Sendable, Equatable {
                     && [c.audio?.fadeIn, c.audio?.fadeOut].allSatisfy { f in f.map { (0...m).contains($0.length) && (0...m).contains($0.offset) } ?? true }
             }
             && subtitles.allSatisfy { (0...m).contains($0.start) && (0...m).contains($0.length) }
+            && spectra.allSatisfy { (0...m).contains($0.start) && (0...m).contains($0.length) }
     }
     public var isValid: Bool {
         guard withinFrameLimit else { return false }
@@ -465,7 +495,10 @@ public struct Timeline: Sendable, Equatable {
               let lastVideo = lanes.lastIndex(where: { $0.kind == .video }), let firstAudio = lanes.firstIndex(where: { $0.kind == .audio }),
               lastVideo < firstAudio, lanes.allSatisfy({ (0...100).contains($0.volumePercent) }) else { return false }
         if let lastSub = lanes.lastIndex(where: { $0.kind == .subtitle }), let firstVideo = lanes.firstIndex(where: { $0.kind == .video }), lastSub > firstVideo { return false }
-        let allIDs = clips.map(\.id) + audioClips.map(\.id) + subtitles.map(\.id)
+        // 스펙트럼 레인(2026-10-25): 자막 레인 아래, 영상 레인 위
+        if let lastSpec = lanes.lastIndex(where: { $0.kind == .spectrum }), let firstVideo = lanes.firstIndex(where: { $0.kind == .video }), lastSpec > firstVideo { return false }
+        if let firstSpec = lanes.firstIndex(where: { $0.kind == .spectrum }), let lastSub = lanes.lastIndex(where: { $0.kind == .subtitle }), lastSub > firstSpec { return false }
+        let allIDs = clips.map(\.id) + audioClips.map(\.id) + subtitles.map(\.id) + spectra.map(\.id)
         guard Set(allIDs).count == allIDs.count else { return false }
         guard (clips + audioClips).allSatisfy({ mediaFrames[$0.mediaID] != nil }) else { return false }
         let kinds = Dictionary(uniqueKeysWithValues: lanes.map { ($0.id, $0.kind) })
@@ -473,6 +506,8 @@ public struct Timeline: Sendable, Equatable {
         guard clips.allSatisfy({ $0.transform?.isValid ?? true }), audioClips.allSatisfy({ $0.transform == nil }) else { return false }
         guard clips.allSatisfy({ $0.audio == nil }), audioClips.allSatisfy({ $0.audio?.isValid(length: $0.length) ?? true }) else { return false }
         guard subtitles.allSatisfy({ kinds[$0.lane] == .subtitle && $0.length >= 1 && $0.start >= 0 && $0.style.isValid }) else { return false }
+        guard spectra.allSatisfy({ kinds[$0.lane] == .spectrum && $0.length >= 1 && $0.start >= 0 && $0.style.isValid }) else { return false }
+        guard clips.allSatisfy({ $0.origin == nil }) else { return false }   // 계보는 소리 클립만
         for lane in lanes {
             var cursor = 0
             for c in clips(inLane: lane.id).sorted(by: { $0.start < $1.start }) {
@@ -481,6 +516,7 @@ public struct Timeline: Sendable, Equatable {
                 cursor = c.end
             }
             for s in subtitles(inLane: lane.id) { guard s.start >= cursor else { return false }; cursor = s.end }
+            for s in spectra(inLane: lane.id) { guard s.start >= cursor else { return false }; cursor = s.end }
             if cursor > durationFrames { return false }
         }
         var groups: [UUID: (v: Int, a: Int, media: Set<UUID>)] = [:]
@@ -586,10 +622,12 @@ public struct Timeline: Sendable, Equatable {
     /// 지점 p에 묶음이 아닌 클립·자막이 걸쳐 있는가(start < p < end, 모든 레인)
     func crossing(at p: Int, excluding ids: Set<UUID>) -> Bool {
         (clips + audioClips).contains { !ids.contains($0.id) && $0.start < p && p < $0.end } || subtitles.contains { !ids.contains($0.id) && $0.start < p && p < $0.end }
+            || spectra.contains { !ids.contains($0.id) && $0.start < p && p < $0.end }
     }
     /// 구간 [lo, hi)과 겹치는 묶음이 아닌 클립·자막이 있는가(모든 레인)
     func occupied(_ lo: Int, _ hi: Int, excluding ids: Set<UUID>) -> Bool {
         (clips + audioClips).contains { !ids.contains($0.id) && $0.start < hi && lo < $0.end } || subtitles.contains { !ids.contains($0.id) && $0.start < hi && lo < $0.end }
+            || spectra.contains { !ids.contains($0.id) && $0.start < hi && lo < $0.end }
     }
     /// 시작 ≥ p인(묶음이 아닌) 클립을 d만큼 옮긴다(모든 레인)
     func shifted(_ cs: [Clip], from p: Int, by d: Int, excluding ids: Set<UUID> = []) -> [Clip] {
@@ -598,6 +636,10 @@ public struct Timeline: Sendable, Equatable {
     /// 리플 편집이 자막도 함께 민다(2026-10-22): 시작 ≥ p인 자막을 d만큼
     func shiftedSubtitles(from p: Int, by d: Int, excluding ids: Set<UUID> = []) -> [SubtitleItem] {
         subtitles.map { !ids.contains($0.id) && $0.start >= p ? $0.with(start: $0.start + d) : $0 }
+    }
+    /// 리플 편집이 스펙트럼도 함께 민다(2026-10-25, 자막과 같은 규칙): 시작 ≥ p인 스펙트럼을 d만큼
+    func shiftedSpectra(from p: Int, by d: Int, excluding ids: Set<UUID> = []) -> [SpectrumItem] {
+        spectra.map { !ids.contains($0.id) && $0.start >= p ? $0.with(start: $0.start + d) : $0 }
     }
     private func replacing(_ cs: [Clip], _ m: [UUID: Clip]) -> [Clip] { cs.map { m[$0.id] ?? $0 } }
 
@@ -618,7 +660,7 @@ public struct Timeline: Sendable, Equatable {
         let link: UUID? = video && audio ? linkID : nil
         if video { v.append(Clip(id: clipID, mediaID: id, start: p, sourceIn: 0, length: n, link: link, lane: primaryLane(.video)?.id)) }
         if audio { a.append(Clip(id: video ? audioClipID : clipID, mediaID: id, start: p, sourceIn: 0, length: n, link: link, lane: primaryLane(.audio)?.id)) }
-        return try checked(rebuilt(video: v, audio: a, subtitles: shiftedSubtitles(from: p, by: n), duration: durationFrames + n))
+        return try checked(rebuilt(video: v, audio: a, subtitles: shiftedSubtitles(from: p, by: n), spectra: shiftedSpectra(from: p, by: n), duration: durationFrames + n))
     }
 
     /// 놓기(A-014): 미디어 전체를 고른 레인의 start에 놓는다(리플 없음). 영상(videoLane)과 연결된 소리(audioLane)를 함께 놓고,
@@ -694,8 +736,11 @@ public struct Timeline: Sendable, Equatable {
             let ids = m.id == id ? newIDs : (UUID(), UUID())
             // 소리 설정: 두 조각의 페이드 모양이 자르기 전 같은 시각의 모양과 같도록 나눈다(ClipAudio.split)
             let parts = m.audio.map { $0.split(at: atM - m.start, length: m.length) }
-            let left = m.with(length: atM - m.start, id: ids.0, audio: .some(parts?.left))
-            let right = m.with(start: atM, sourceIn: m.sourceIn + (atM - m.start), length: m.end - atM, id: ids.1, link: .some(rightLink), audio: .some(parts?.right))
+            // 계보(2026-10-25, SP-1A, P-S1 (나) 승인): 소리 조각 둘 다 원래 계보 키를 이어받는다 — 스펙트럼이 있든 없든(계보가 생기면 형식 8로 저장).
+            // 영상 조각은 계보가 없다.
+            let key: UUID?? = lane(of: m.id) == .audio ? .some(m.lineageKey) : nil
+            let left = m.with(length: atM - m.start, id: ids.0, audio: .some(parts?.left), origin: key)
+            let right = m.with(start: atM, sourceIn: m.sourceIn + (atM - m.start), length: m.end - atM, id: ids.1, link: .some(rightLink), audio: .some(parts?.right), origin: key)
             if lane(of: m.id) == .video { v.removeAll { $0.id == m.id }; v += [left, right] } else { a.removeAll { $0.id == m.id }; a += [left, right] }
         }
         return try checked(rebuilt(video: v, audio: a))
@@ -721,7 +766,7 @@ public struct Timeline: Sendable, Equatable {
         if dLen != 0, crossing(at: p, excluding: ids) { throw EditError.crossingContent }
         let v = shifted(replacing(clips, changed), from: p, by: dLen, excluding: ids)
         let a = shifted(replacing(audioClips, changed), from: p, by: dLen, excluding: ids)
-        let out = rebuilt(video: v, audio: a, subtitles: shiftedSubtitles(from: p, by: dLen), duration: durationFrames + dLen)
+        let out = rebuilt(video: v, audio: a, subtitles: shiftedSubtitles(from: p, by: dLen), spectra: shiftedSpectra(from: p, by: dLen), duration: durationFrames + dLen)
         // 당기는 트림(dLen < 0)이 겹침을 만들면, 닫히는 구간 [p + dLen, p)에서 끝나는 다른 레인 내용과 뒤에서 당겨진 내용이 부딪힌 것이다.
         // 같은 레인 겹침(.overlap)이 아니라 리플 거부로 알린다(CP-10). 허용·거부 자체는 이전과 같다.
         guard out.isValid else { throw dLen < 0 ? EditError.crossingContent : EditError.overlap }
@@ -767,7 +812,7 @@ public struct Timeline: Sendable, Equatable {
             let placed = m.with(start: p + (m.start - a0))
             if lane(of: m.id) == .video { v.append(placed) } else { a.append(placed) }
         }
-        return try checked(closed.rebuilt(video: v, audio: a, subtitles: closed.shiftedSubtitles(from: p, by: span), duration: closed.durationFrames + span))
+        return try checked(closed.rebuilt(video: v, audio: a, subtitles: closed.shiftedSubtitles(from: p, by: span), spectra: closed.shiftedSpectra(from: p, by: span), duration: closed.durationFrames + span))
     }
 
     /// 옮기기(A-014): 대상 클립을 toStart로(묶음은 같은 양만큼) 옮기고, 레인을 바꾼다. lane은 대상 클립의 새 레인, partnerLane은
@@ -815,7 +860,7 @@ public struct Timeline: Sendable, Equatable {
         if occupied(lo, hi, excluding: ids) { throw EditError.crossingContent }
         let v = shifted(clips.filter { !ids.contains($0.id) }, from: hi, by: lo - hi)
         let a = shifted(audioClips.filter { !ids.contains($0.id) }, from: hi, by: lo - hi)
-        return try checked(rebuilt(video: v, audio: a, subtitles: shiftedSubtitles(from: hi, by: lo - hi), duration: durationFrames - (hi - lo)))
+        return try checked(rebuilt(video: v, audio: a, subtitles: shiftedSubtitles(from: hi, by: lo - hi), spectra: shiftedSpectra(from: hi, by: lo - hi), duration: durationFrames - (hi - lo)))
     }
 
     /// 연결 해제: 위치·원본 구간은 그대로.
@@ -887,10 +932,20 @@ public struct Timeline: Sendable, Equatable {
         // 자막 레인(2026-10-22)은 영상 묶음 위: outward = 맨 위(새 Sn), 아니면 자막 묶음 맨 아래(영상 바로 위)
         // 바깥쪽 새 영상 레인은 영상 묶음 맨 위 = 자막 레인 바로 아래(2026-10-23 전체 검토: 0에 넣어 자막 레인 위로 가서 레인 순서가 깨지고
         // "겹칩니다"로 거부되었다 — 자막 레인이 있으면 영상 레인 추가·레인 쌍 추가·새 레인에 놓기·새 레인이 필요한 붙여넣기가 모두 실패)
-        if outward { pos = kind == .audio ? ls.count : kind == .video ? (ls.lastIndex { $0.kind == .subtitle } ?? -1) + 1 : 0 }
+        // 스펙트럼 레인(2026-10-25)은 자막 묶음 아래·영상 묶음 위: outward = 스펙트럼 묶음 맨 위(자막 바로 아래, 새 SPn), 아니면 묶음 맨 아래(영상 바로 위)
+        let aboveVideo = (ls.lastIndex { $0.kind == .spectrum } ?? ls.lastIndex { $0.kind == .subtitle } ?? -1) + 1
+        if outward {
+            switch kind {
+            case .audio: pos = ls.count
+            case .video: pos = aboveVideo
+            case .spectrum: pos = (ls.lastIndex { $0.kind == .subtitle } ?? -1) + 1
+            case .subtitle: pos = 0
+            }
+        }
         else if let a = after, let i = ls.firstIndex(where: { $0.id == a }), ls[i].kind == kind { pos = i + 1 }
         else if kind == .subtitle { pos = (ls.lastIndex { $0.kind == .subtitle } ?? -1) + 1 }
-        else { pos = (ls.lastIndex { $0.kind == kind } ?? (kind == .video ? (ls.lastIndex { $0.kind == .subtitle } ?? -1) : ls.count - 1)) + 1 }
+        else if kind == .spectrum { pos = aboveVideo }
+        else { pos = ls.lastIndex(where: { $0.kind == kind }).map { $0 + 1 } ?? (kind == .video ? aboveVideo : ls.count) }
         ls.insert(Lane(id: id, kind: kind, name: n), at: pos)
         return try checked(rebuilt(lanes: ls))
     }
@@ -905,12 +960,12 @@ public struct Timeline: Sendable, Equatable {
     /// 레인 삭제: 레인과 그 클립을 지운다. 다른 레인의 클립은 그대로이고, 짝을 잃은 클립은 연결만 풀린다. 그 종류의 마지막 레인은 지우지 않는다.
     public func removingLane(_ id: UUID) throws -> Timeline {
         guard let lane = laneInfo(id) else { throw EditError.unknownLane }
-        guard lane.kind == .subtitle || lanes(lane.kind).count > 1 else { throw EditError.lastLane }   // 자막 레인은 0개여도 된다
+        guard lane.kind == .subtitle || lane.kind == .spectrum || lanes(lane.kind).count > 1 else { throw EditError.lastLane }   // 자막·스펙트럼 레인은 0개여도 된다
         let gone = clips(inLane: id)
         let brokenLinks = Set(gone.compactMap(\.link))
         let f: (Clip) -> Clip = { brokenLinks.contains($0.link ?? UUID()) ? $0.with(link: .some(nil)) : $0 }
         return try checked(rebuilt(video: clips.filter { $0.lane != id }.map(f), audio: audioClips.filter { $0.lane != id }.map(f),
-                                   subtitles: subtitles.filter { $0.lane != id }, lanes: lanes.filter { $0.id != id }))
+                                   subtitles: subtitles.filter { $0.lane != id }, spectra: spectra.filter { $0.lane != id }, lanes: lanes.filter { $0.id != id }))
     }
     /// 오디오 레인 음소거·음량(0–100%, 100 = 원래 크기). 자동 정규화·리미터는 없다(합친 소리가 잘릴 수 있음).
     public func settingLaneAudio(_ id: UUID, muted: Bool? = nil, volumePercent: Int? = nil) throws -> Timeline {
@@ -1053,7 +1108,8 @@ extension Timeline {
                 used.insert(target!)
                 for m in members {
                     let nid = UUID(); ids[m.id] = nid
-                    let c = m.with(id: nid, link: .some(m.link.flatMap { newLink[$0] }), lane: .some(target!))
+                    // 복사한 소리는 새 계보(2026-10-25): 원래 소스의 스펙트럼에 조용히 붙지 않는다
+                    let c = m.with(id: nid, link: .some(m.link.flatMap { newLink[$0] }), lane: .some(target!), origin: .some(nil))
                     if kind == .video { placedVideo.append(c) } else { placedAudio.append(c) }
                 }
             }
