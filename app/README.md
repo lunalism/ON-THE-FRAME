@@ -65,7 +65,7 @@ cd app && scripts/multilane-test.sh  # 여러 레인·소리 파일·형식 2 �
 cd app && scripts/transform-test.sh  # 영상 크기·위치 자체 검사(Debug, 프리뷰 테두리 끌기, 내보내기를 otf-dev verify-overlay가 격자 판정)
 ```
 
-그 뒤 생긴 자체 검사(`edit-fix-test`, `panel-test`, `clipaudio-test`, `openimport-test`, `openflow-test`, `copypaste-test`, `tool-test` 등)는 `app/scripts/*-test.sh`에 있고 각 절(§18–§27)에 설명이 있다.
+그 뒤 생긴 자체 검사(`edit-fix-test`, `panel-test`, `clipaudio-test`, `openimport-test`, `openflow-test`, `copypaste-test`, `tool-test` 등)는 `app/scripts/*-test.sh`에 있고 각 절(§18–§27)에 설명이 있다. 스펙트럼 레인 표시 `spectrum-lane-test`(SP-1A 2A)는 [docs/SPECTRUM-DESIGN.md](../docs/SPECTRUM-DESIGN.md) §15.2, 소유자 화면 확인용 수동 창 `spectrum-lane-manual.sh`는 §15.3.
 
 `scripts/selftest.sh`의 결과는 `app/selftest-work/last-verify-result.json`에 남는다.
 

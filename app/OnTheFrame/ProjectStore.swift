@@ -636,7 +636,22 @@ final class ProjectStore {
         } catch let e as EditError { statusMessage = e.description } catch { statusMessage = error.localizedDescription }
     }
     /// 새 레인의 기본 이름: "영상"·"오디오". 번호(V2·A2)는 위치에서 따로 보이므로 이름에 넣지 않는다(순서를 바꿔도 어긋나지 않게).
-    func newLaneName(_ kind: LaneKind) -> String { kind == .video ? "영상" : (kind == .audio ? "오디오" : "자막") }
+    func newLaneName(_ kind: LaneKind) -> String {
+        switch kind { case .video: "영상"; case .audio: "오디오"; case .subtitle: "자막"; case .spectrum: "스펙트럼" }
+    }
+    /// 레인 종류 이름(정보 패널·클립 조정). 종류마다 따로 적는다(2026-10-25 SP-1A 2A: "그 밖 = 자막"이던 삼항식 정리 — 스펙트럼 레인이 자막 레인으로 보였다).
+    static func laneKindName(_ kind: LaneKind) -> String {
+        switch kind { case .video: "영상 레인"; case .audio: "오디오 레인"; case .subtitle: "자막 레인"; case .spectrum: "스펙트럼 레인" }
+    }
+    /// 레인을 지울 수 있는가: 영상·오디오는 그 종류의 마지막 레인이 아니면, 자막 레인은 늘(0개여도 됨),
+    /// 스펙트럼 레인은 비어 있을 때만(SP-1A 2A: 스펙트럼 삭제 UI는 2C — 레인 삭제로 스펙트럼을 지우지 않는다).
+    func canRemoveLane(_ lane: Lane) -> Bool {
+        switch lane.kind {
+        case .video, .audio: timeline.lanes(lane.kind).count > 1
+        case .subtitle: true
+        case .spectrum: timeline.spectra(inLane: lane.id).isEmpty
+        }
+    }
 
     // MARK: 복사·붙여넣기(2026-10-11)
 
@@ -774,13 +789,16 @@ final class ProjectStore {
     /// 레인 삭제. 클립이 있으면 확인한다(레인·클립 삭제와 짝 연결 해제가 한 단계). 그 종류의 마지막 레인은 지우지 않는다.
     func requestRemoveLane(_ id: UUID) {
         guard let lane = timeline.laneInfo(id), gestureBase == nil else { return }
-        guard lane.kind == .subtitle || timeline.lanes(lane.kind).count > 1 else { statusMessage = EditError.lastLane.description; return }   // 자막 레인은 0개여도 된다
+        guard canRemoveLane(lane) else {   // 자막·스펙트럼 레인은 0개여도 된다
+            statusMessage = lane.kind == .spectrum ? "스펙트럼이 있는 레인은 아직 지울 수 없습니다(이 빌드는 스펙트럼 편집을 지원하지 않음)." : EditError.lastLane.description
+            return
+        }
         let ids = Self.laneContentIDs(timeline, id)
         let n = ids.count
         guard n > 0 else { commitLane({ try $0.removingLane(id) }); return }
         let request = LaneRemovalRequest(session: projectSession, lane: id, kind: lane.kind, clipIDs: ids)
         let linked = timeline.clips(inLane: id).filter { $0.link != nil }.count
-        var msg = lane.kind == .subtitle ? "‘\(lane.name)’ 레인과 그 안의 자막 \(n)개를 지웁니다." : "‘\(lane.name)’ 레인과 그 안의 클립 \(n)개를 지웁니다."
+        var msg = "‘\(lane.name)’ 레인과 그 안의 \(lane.kind == .subtitle ? "자막" : "클립") \(n)개를 지웁니다."   // 스펙트럼 레인은 비어 있을 때만 여기까지 옴(n = 0)
         if linked > 0 { msg += " 다른 레인에 있는 연결된 짝 \(linked)개는 지우지 않고 연결만 해제합니다." }
         msg += "\n\n실행 취소(⌘Z)로 되돌릴 수 있습니다. 원본 파일은 그대로입니다."
         presentAlert(AlertInfo(title: "레인을 삭제할까요?", message: msg, buttons: ["레인 삭제", "취소"], destructiveIndex: 0, cancelIndex: 1,
@@ -789,13 +807,15 @@ final class ProjectStore {
     /// 레인 삭제 확인이 묶인 대상(CP-02): 확인을 띄운 프로젝트 회차, 레인, 그 종류, 확인 문구에 센 클립들
     struct LaneRemovalRequest: Equatable { let session: Int; let lane: UUID; let kind: LaneKind; let clipIDs: Set<UUID> }
     /// 레인의 내용(클립 또는 자막) ID
-    static func laneContentIDs(_ t: Timeline, _ lane: UUID) -> Set<UUID> { Set(t.clips(inLane: lane).map(\.id) + t.subtitles(inLane: lane).map(\.id)) }
+    static func laneContentIDs(_ t: Timeline, _ lane: UUID) -> Set<UUID> {
+        Set(t.clips(inLane: lane).map(\.id) + t.subtitles(inLane: lane).map(\.id) + t.spectra(inLane: lane).map(\.id))
+    }
     /// "레인 삭제"를 누른 때: 확인을 띄운 뒤 프로젝트가 바뀌었거나(같은 파일을 다시 연 경우 포함), 레인이 없어졌거나, 그 안의 클립이 확인 문구와
     /// 달라졌거나, 그 종류의 마지막 레인이 되었으면 아무것도 지우지 않는다(기록·저장 상태 그대로, 상태 문구만). 삭제했으면 true.
     @discardableResult
     func confirmRemoveLane(_ r: LaneRemovalRequest) -> Bool {
         guard r.session == projectSession, gestureBase == nil, let lane = timeline.laneInfo(r.lane), lane.kind == r.kind,
-              Self.laneContentIDs(timeline, r.lane) == r.clipIDs, r.kind == .subtitle || timeline.lanes(r.kind).count > 1 else {
+              Self.laneContentIDs(timeline, r.lane) == r.clipIDs, canRemoveLane(lane) else {
             statusMessage = "확인한 뒤 프로젝트나 레인이 바뀌어 레인을 지우지 않았습니다."
             Self.trace.info("lane removal confirmation ignored (stale) sameSession=\(r.session == self.projectSession, privacy: .public)")
             return false

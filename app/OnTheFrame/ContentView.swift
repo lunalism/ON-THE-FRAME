@@ -721,10 +721,18 @@ struct InspectorView: View {
                     }
                 } else if let l = store.inspectedLane {
                     row("레인", "\(store.timeline.laneLabel(l.id)) · \(l.name)")
-                    row("종류", l.kind == .video ? "영상 레인(위 레인이 아래 레인을 가림)" : (l.kind == .audio ? "오디오 레인(음소거하지 않은 레인을 모두 더함)" : "자막 레인(모든 영상 위)"))
+                    row("종류", { switch l.kind {
+                        case .video: "영상 레인(위 레인이 아래 레인을 가림)"
+                        case .audio: "오디오 레인(음소거하지 않은 레인을 모두 더함)"
+                        case .subtitle: "자막 레인(모든 영상 위)"
+                        case .spectrum: "스펙트럼 레인(자막 아래, 영상 위)"
+                    } }())
                     if l.kind == .audio { row("소리", l.muted ? "음소거" : "음량 \(l.volumePercent)%") }
-                    if l.kind == .subtitle { row("자막", "\(store.timeline.subtitles(inLane: l.id).count)개") }
-                    else { row("클립", "\(store.timeline.clips(inLane: l.id).count)개") }
+                    switch l.kind {
+                    case .subtitle: row("자막", "\(store.timeline.subtitles(inLane: l.id).count)개")
+                    case .spectrum: row("스펙트럼", "\(store.timeline.spectra(inLane: l.id).count)개(이 빌드는 표시만 — 만들기·편집 없음)")
+                    case .video, .audio: row("클립", "\(store.timeline.clips(inLane: l.id).count)개")
+                    }
                     Text("번호(V1·A1…)는 가운데 경계에서 센 위치이고 이름과 따로입니다. 이름·순서·음량은 왼쪽 \"클립 조정\" 탭이나 레인 머리 메뉴에서 바꿉니다.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else {
@@ -809,8 +817,8 @@ struct AdjustmentsView: View {
                     }
                     AdjustSection(title: "레인") { LaneDestinationAdjust(store: store, id: id, clip: c) }
                 } else if let l = store.selectedLane.flatMap({ store.timeline.laneInfo($0) }) {
-                    target(icon: l.kind == .video ? "rectangle.stack" : (l.kind == .audio ? "speaker.wave.2" : "captions.bubble"), title: l.name,
-                           subtitle: "\(store.timeline.laneLabel(l.id)) · \(l.kind == .video ? "영상 레인" : (l.kind == .audio ? "오디오 레인" : "자막 레인"))")
+                    target(icon: { switch l.kind { case .video: "rectangle.stack"; case .audio: "speaker.wave.2"; case .subtitle: "captions.bubble"; case .spectrum: "waveform.path" } }(),
+                           title: l.name, subtitle: "\(store.timeline.laneLabel(l.id)) · \(ProjectStore.laneKindName(l.kind))")
                     AdjustSection(title: "레인 설정") { LaneSettingsAdjust(store: store, lane: l) }
                     if l.kind == .audio { AdjustSection(title: "레인 전체 — \(store.timeline.laneLabel(l.id))의 모든 클립") { AudioLaneAdjust(store: store, lane: l) } }
                 } else {
@@ -1054,10 +1062,15 @@ struct LaneSettingsAdjust: View {
                 Button { store.moveLane(lane.id, by: 1) } label: { Image(systemName: "arrow.down") }.help("레인을 아래로").disabled(!store.canMoveLane(lane.id, by: 1))
                     .accessibilityLabel("레인을 아래로")
                 Spacer(minLength: 4)
-                Button("삭제…", role: .destructive) { store.requestRemoveLane(lane.id) }.disabled(lane.kind != .subtitle && store.timeline.lanes(lane.kind).count < 2)
+                Button("삭제…", role: .destructive) { store.requestRemoveLane(lane.id) }.disabled(!store.canRemoveLane(lane))
             }
             .controlSize(.small)
-            Text(lane.kind == .video ? "위 레인이 아래 레인을 가립니다." : (lane.kind == .audio ? "음소거하지 않은 오디오 레인을 모두 더합니다." : "자막은 모든 영상 위에 그리고, 위 자막 레인이 아래 자막 레인 위에 그립니다."))
+            Text({ switch lane.kind {
+                case .video: "위 레인이 아래 레인을 가립니다."
+                case .audio: "음소거하지 않은 오디오 레인을 모두 더합니다."
+                case .subtitle: "자막은 모든 영상 위에 그리고, 위 자막 레인이 아래 자막 레인 위에 그립니다."
+                case .spectrum: "스펙트럼은 영상 위·자막 아래에 그립니다. 이 빌드는 레인과 항목을 표시만 하고, 스펙트럼이 있는 레인은 지울 수 없습니다."
+            } }())
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .disabled(store.gestureBase != nil)

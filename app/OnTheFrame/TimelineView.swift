@@ -246,7 +246,7 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
             add("위로", #selector(upFromMenu(_:)), l.id, enabled: store.canMoveLane(l.id, by: -1))
             add("아래로", #selector(downFromMenu(_:)), l.id, enabled: store.canMoveLane(l.id, by: 1))
             if l.kind == .audio { add(l.muted ? "음소거 해제" : "음소거", #selector(muteFromMenu(_:)), l.id) }
-            add("레인 삭제…", #selector(deleteFromMenu(_:)), l.id, enabled: l.kind == .subtitle || store.timeline.lanes(l.kind).count > 1)
+            add("레인 삭제…", #selector(deleteFromMenu(_:)), l.id, enabled: store.canRemoveLane(l))
             m.addItem(.separator())
         }
         add("영상 레인 추가", #selector(addVideoFromMenu(_:)), nil)
@@ -303,16 +303,20 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
 final class TimelineNSView: NSView {
     static let inset: CGFloat = 12, rulerHeight: CGFloat = 24, edgeGrab: CGFloat = 6
     /// 레인 줄 배치(A-014): 눈금자 아래 위에서부터 레인 순서대로. 영상 레인 54pt, 오디오 레인 40pt, 사이 8pt.
-    static let firstLaneY: CGFloat = 30, laneGap: CGFloat = 8, videoHeight: CGFloat = 54, audioHeight: CGFloat = 40, subtitleHeight: CGFloat = 34
+    static let firstLaneY: CGFloat = 30, laneGap: CGFloat = 8, videoHeight: CGFloat = 54, audioHeight: CGFloat = 40, subtitleHeight: CGFloat = 34, spectrumHeight: CGFloat = 34
     /// 마지막 레인 아래 빈 곳(여기에 놓으면 파일 이름의 새 레인)
     static let dropZoneHeight: CGFloat = 44
     /// 영상 레인 묶음과 오디오 레인 묶음 사이 가운데 경계(2026-10-11): 레인 사이보다 넓은 틈과 경계선
     static let boundaryGap: CGFloat = 18
     /// 끌어 옮기기 붙음 거리(화면 포인트, 확대 배율과 무관)
     static let snapDistance: CGFloat = 8
-    static func height(_ k: LaneKind) -> CGFloat { k == .video ? videoHeight : (k == .audio ? audioHeight : subtitleHeight) }
-    /// 레인 종류 색: 영상 청록, 오디오 초록, 자막 보라(2026-10-22)
-    static func color(_ k: LaneKind) -> NSColor { k == .video ? .systemTeal : (k == .audio ? .systemGreen : .systemPurple) }
+    static func height(_ k: LaneKind) -> CGFloat {
+        switch k { case .video: videoHeight; case .audio: audioHeight; case .subtitle: subtitleHeight; case .spectrum: spectrumHeight }
+    }
+    /// 레인 종류 색: 영상 청록, 오디오 초록, 자막 보라(2026-10-22), 스펙트럼 분홍(2026-10-25, SP-1A 2A)
+    static func color(_ k: LaneKind) -> NSColor {
+        switch k { case .video: .systemTeal; case .audio: .systemGreen; case .subtitle: .systemPurple; case .spectrum: .systemPink }
+    }
     static func layout(_ lanes: [Lane]) -> [(lane: Lane, rect: NSRect)] {
         var y = firstLaneY
         return lanes.enumerated().map { i, l in
@@ -424,7 +428,7 @@ final class TimelineNSView: NSView {
         drawRuler(st, area: area)
         let t = st.timeline
         let rows = Self.layout(t.lanes)
-        for (l, r) in rows where l.kind != .subtitle {   // 자막 레인의 빈 곳은 빈틈이 아니다(자막 없음)
+        for (l, r) in rows where l.kind == .video || l.kind == .audio {   // 자막·스펙트럼 레인의 빈 곳은 빈틈이 아니다(그 항목 없음)
             for g in t.gaps(inLane: l.id) where g.upperBound >= fr.lowerBound && g.lowerBound <= fr.upperBound {
                 drawGap(NSRect(x: x(g.lowerBound), y: r.minY, width: CGFloat(g.count) * pixelsPerFrame, height: r.height), label: l.kind == .video ? "빈틈" : "무음", area: area)
             }
@@ -438,6 +442,7 @@ final class TimelineNSView: NSView {
         // 보이는 프레임 범위에 걸친 클립·자막만(가장자리에 걸친 항목은 전체 모양 그대로 그려 잘린다). 순서는 그대로.
         for c in t.clips + t.audioClips where c.end >= fr.lowerBound && c.start <= fr.upperBound { drawClip(c, st) }
         for sub in t.subtitles where sub.end >= fr.lowerBound && sub.start <= fr.upperBound { drawSubtitle(sub, st) }
+        for sp in t.spectra where sp.end >= fr.lowerBound && sp.start <= fr.upperBound { drawSpectrum(sp, st) }
         // 음소거한 오디오 레인: 클립 위를 어둡게
         for (l, r) in rows where l.muted && l.kind == .audio {
             NSColor.windowBackgroundColor.withAlphaComponent(0.55).setFill()
@@ -605,6 +610,30 @@ final class TimelineNSView: NSView {
             NSRect(x: r.minX, y: r.minY + 6, width: 3, height: r.height - 12).fill()
             NSRect(x: r.maxX - 3, y: r.minY + 6, width: 3, height: r.height - 12).fill()
         }
+    }
+
+    func spectrumRect(_ s: SpectrumItem) -> NSRect {
+        let l = laneRect(s.lane) ?? .zero
+        return NSRect(x: x(s.start), y: l.minY, width: max(1, CGFloat(s.length) * pixelsPerFrame), height: l.height)
+    }
+    /// 스펙트럼 항목(2026-10-25, SP-1A 2A): 읽기 전용 표시 — 분홍 점선 상자와 소스 상태 글자. 누름 판정(clipHit)·커서·끌기에 넣지 않아
+    /// 고르거나 옮길 수 없다(편집 UI는 2B·2C). 지금 앱은 스펙트럼이 든 프로젝트를 열지 않으므로 Debug 자체 검사에서만 보인다.
+    private func drawSpectrum(_ s: SpectrumItem, _ st: TimelineDrawState) {
+        let r = spectrumRect(s)
+        let path = NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
+        NSColor.systemPink.withAlphaComponent(0.22).setFill(); path.fill()
+        path.setLineDash([4, 3], count: 2, phase: 0); path.lineWidth = 1
+        NSColor.systemPink.withAlphaComponent(0.8).setStroke(); path.stroke()
+        guard r.width > 24 else { return }
+        let source: String
+        switch st.timeline.spectrumSourceState(s) {
+        case .unset: source = "소스 고르지 않음"
+        case .missing: source = "소스 없음"
+        case .ok: source = st.timeline.spectrumMediaID(s).flatMap { st.names[$0] } ?? "소스"
+        }
+        NSString(string: "≋  스펙트럼 · " + source).draw(with: NSRect(x: r.minX + 6, y: r.minY + 4, width: max(0, r.width - 12), height: 16),
+                                                     options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                                                     attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.secondaryLabelColor])
     }
 
     // MARK: 소리 클립 음량·페이드(2026-10-11)
