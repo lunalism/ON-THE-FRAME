@@ -428,20 +428,20 @@ enum SpectrumLaneSelfTest {
         await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: pD.x + 3, y: pD.y - 2)), w)
         await LaneSelfTest.mouse(.leftMouseUp, win(NSPoint(x: pD.x + 3, y: pD.y - 2)), w)
         let dragNoEdit = s.selection == i120.id && s.timeline == r4 && s.gestureBase == nil && s.history.undoDepth == 0
-        let edgeP = NSPoint(x: tv.x(120) + 2, y: ySp1)   // 항목 가장자리(클립이면 트림 손잡이 자리): 2C-1은 트림 없음 — 본문처럼 옮기고 길이 그대로
+        let edgeP = NSPoint(x: tv.x(120) + 2, y: ySp1)   // 항목 시작 가장자리: 2C-1까지는 본문처럼 옮겼고, 2C-2부터 트림 — 시작만 오른쪽으로, 끝 그대로(13절)
         await LaneSelfTest.mouse(.leftMouseDown, win(edgeP), w)
         await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: edgeP.x + 40, y: edgeP.y)), w)
         await LaneSelfTest.mouse(.leftMouseUp, win(NSPoint(x: edgeP.x + 40, y: edgeP.y)), w)
         let movedEdge = s.timeline.spectrum(i120.id)
-        let edgeNoTrim = movedEdge?.length == i120.length && (movedEdge?.start ?? 0) > i120.start && s.gestureBase == nil && s.history.undoDepth == 1
+        let edgeTrims = movedEdge?.end == i120.end && (movedEdge?.start ?? 0) > i120.start && movedEdge?.sourceKey == i120.sourceKey && s.gestureBase == nil && s.history.undoDepth == 1
         s.undo()
         let edgeUndone = s.timeline == r4 && s.history.undoDepth == 0
         s.setTool(.cut); await click(pI); s.setTool(.selection)
         let cutNoEdit = s.timeline == r4 && s.history.undoDepth == 0
         await click(viewPoint(iCp.lane, frame: 200))   // SP2의 빈 곳 → 선택 해제
         let cleared = s.selection == nil
-        check("select.replaceSubThresholdEdgeMovesNoTrimCut", cmdClick && dragNoEdit && edgeNoTrim && edgeUndone && cutNoEdit && cleared,
-              "cmd \(cmdClick) drag \(dragNoEdit) edge \(edgeNoTrim)/\(edgeUndone) \(movedEdge.map { "\($0.start)+\($0.length)" } ?? "-") cut \(cutNoEdit) cleared \(cleared)")
+        check("select.replaceSubThresholdEdgeTrimsNoCut", cmdClick && dragNoEdit && edgeTrims && edgeUndone && cutNoEdit && cleared,
+              "cmd \(cmdClick) drag \(dragNoEdit) edge \(edgeTrims)/\(edgeUndone) \(movedEdge.map { "\($0.start)+\($0.length)" } ?? "-") cut \(cutNoEdit) cleared \(cleared)")
         // 10i. 명령 보호(이벤트 경로): 스펙트럼을 고른 채 ⌘K·⌘C·⇧Delete는 아무것도 바꾸지 않고 안내, ⌘V는 보통 붙여넣기, ←·→는 재생 헤드만, V·C 도구 그대로
         _ = await LaneSelfTest.regainFocus(w); w.makeFirstResponder(tv)
         s.select(base10.clips.first { $0.start == 0 && $0.lane == Lane.videoID }?.id); s.copySelection()
@@ -908,6 +908,247 @@ enum SpectrumLaneSelfTest {
             check("move.guardsIntact", rm.map { s.spectrumWarnings($0) } == [] && w2 == [.unset]
                   && s.timeline.spectrumExportBlockers().map(\.spectrumID) == [m2.id], "m1 \(rm.map { s.spectrumWarnings($0) } ?? []) m2 \(w2)")
         }
+        do {   // 13절 이름 범위
+            // 13. 2C-2(2026-10-26): 스펙트럼 가장자리 트림 — 기존 트림 끌기(누름 = beginGesture → updateTrim → commitGesture/cancelGesture), 엔진 trimmingSpectrum.
+            //     fixture(trimTimeline): TA 쌍을 60에서 잘라 연결을 풀고 소리 조각을 따로 옮김 — 계보 하나의 조각이 A1 [30,90)·A2 [120,180)(빈틈 90–120),
+            //     영상 0–120 그대로, 자막 150–170. 스펙트럼 레인 둘: L1에 t1 [40,80)(그 계보)·t4 [80,81)(1프레임, 그 계보)·t2 [100,130)(고르지 않음),
+            //     L2에 t3 [0,20)(그 계보 — 조각이 없는 구간뿐). 실제 보기에 합성 마우스·키 이벤트.
+            EditorLayout.shared.leftTab = .adjust
+            let p13 = out.appendingPathComponent("trim.ontheframe")
+            guard let b13 = await makeProject(s, file: p13, media: ta, build: Self.trimTimeline) else {
+                return finish(folder, checks + [Check(name: "trim.setup", pass: false, detail: s.statusMessage ?? "")])
+            }
+            _ = await LaneSelfTest.regainFocus(w); w.makeFirstResponder(tv)
+            _ = await LaneSelfTest.waitUntil(3) { w.isKeyWindow && NSApp.isActive }
+            await LaneSelfTest.settle()
+            let sp13 = b13.spectra.sorted { ($0.lane.uuidString, $0.start) < ($1.lane.uuidString, $1.start) }
+            guard let t1 = b13.spectra.first(where: { $0.start == 40 }), let t4 = b13.spectra.first(where: { $0.start == 80 }),
+                  let t2 = b13.spectra.first(where: { $0.start == 100 }), let t3 = b13.spectra.first(where: { $0.lane != t1.lane }),
+                  t4.lane == t1.lane, t2.lane == t1.lane, let key = t1.sourceKey, sp13.count == 4 else {
+                return finish(folder, checks + [Check(name: "trim.fixture", pass: false, detail: Self.states(b13))])
+            }
+            let L1 = t1.lane, L2 = t3.lane, ppf = tv.pixelsPerFrame
+            func othersSame(_ t: Timeline, _ b: Timeline) -> Bool { t.clips == b.clips && t.audioClips == b.audioClips && t.subtitles == b.subtitles && t.lanes == b.lanes && t.media == b.media }
+            func item(_ id: UUID) -> SpectrumItem? { s.timeline.spectrum(id) }
+            /// 같은 ID·레인·소스·모양이고 구간만 [a, b)인가
+            func only(_ id: UUID, _ orig: SpectrumItem, _ a: Int, _ b: Int) -> Bool { item(id) == orig.with(start: a, length: b - a) }
+            func ly(_ l: UUID) -> CGFloat { tv.laneRect(l)?.midY ?? 0 }
+            /// 레인 l의 보기 x0을 눌러 x1까지(단계 나눠) 끈다. up이면 놓는다.
+            func trimDrag(_ l: UUID, _ x0: CGFloat, to x1: CGFloat, steps: Int = 3, up: Bool = true) async {
+                await LaneSelfTest.mouse(.leftMouseDown, win(NSPoint(x: x0, y: ly(l))), w)
+                for i in 1...steps { await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: x0 + (x1 - x0) * CGFloat(i) / CGFloat(steps), y: ly(l))), w) }
+                if up { await LaneSelfTest.mouse(.leftMouseUp, win(NSPoint(x: x1, y: ly(l))), w) }
+                await LaneSelfTest.settle()
+            }
+            func upAt(_ l: UUID, _ px: CGFloat) async { await LaneSelfTest.mouse(.leftMouseUp, win(NSPoint(x: px, y: ly(l))), w); await LaneSelfTest.settle() }
+            func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
+            /// 접근성 트리의 글자(11절과 같은 방식) — 고를 수 있는 SwiftUI 글이 여기에 보인다
+            func axTexts(_ e: Any, depth: Int = 0) -> [String] {
+                guard depth < 60, let o = e as? NSObject else { return [] }
+                var out: [String] = [], kids: [Any] = []
+                if let p = o as? NSAccessibilityProtocol {
+                    if let l = p.accessibilityLabel(), !l.isEmpty { out.append(l) }
+                    if let v = p.accessibilityValue() as? String, !v.isEmpty { out.append(v) }
+                    kids = p.accessibilityChildren() ?? []
+                }
+                for a in [NSAccessibility.Attribute.title, .value, .description] {
+                    if let v = o.accessibilityAttributeValue(a) as? String, !v.isEmpty { out.append(v) }
+                }
+                if kids.isEmpty, let c = o.accessibilityAttributeValue(.children) as? [Any] { kids = c }
+                for c in kids { out += axTexts(c, depth: depth + 1) }
+                return out
+            }
+            let coveragePrefix = "선택한 오디오 소스가 없는 구간("
+            func panelCoverage() -> [String] { Array(Set(axTexts(w.contentView!).filter { $0.hasPrefix(coveragePrefix) })) }
+
+            // 13a. 가장자리 판정: 시작·끝·본문, 이어 붙은 경계(오른쪽 항목의 시작), 1프레임 항목의 두 가장자리와 바깥 1 pt, 빈 곳, clipHit에는 없음
+            func tgt(_ px: CGFloat, _ l: UUID) -> String {
+                guard let (id, e) = tv.spectrumTarget(NSPoint(x: px, y: ly(l))) else { return "-" }
+                let n = id == t1.id ? "t1" : id == t4.id ? "t4" : id == t2.id ? "t2" : id == t3.id ? "t3" : "?"
+                return n + (e == .start ? "<" : e == .end ? ">" : "")
+            }
+            let hitSeq = [tgt(tv.x(40) + 1, L1), tgt(tv.x(60), L1), tgt(tv.x(80) - 1, L1), tgt(tv.x(80), L1), tgt(tv.x(80) + 0.3, L1), tgt(tv.x(81) - 0.3, L1),
+                          tgt(tv.x(81) + 0.5, L1), tgt(tv.x(81) + 3, L1), tgt(tv.x(40) - 0.5, L1), tgt(tv.x(130) + 0.5, L1), tgt(tv.x(10), L2)]
+            let hitExpect = ["t1<", "t1", "t1>", "t4<", "t4<", "t4>", "t4>", "-", "t1<", "t2>", "t3"]
+            check("trim.edgeTargets", hitSeq == hitExpect && tv.clipHit(NSPoint(x: tv.x(40) + 1, y: ly(L1))) == nil && ppf >= 0.9,
+                  "\(hitSeq) ppf \(ppf)")
+            // 자르기 도구: 가장자리·본문을 눌러도 스펙트럼을 자르거나 트림하지 않음(clipHit 밖)
+            let d0 = s.history.undoDepth
+            s.setTool(.cut)
+            await trimDrag(L1, tv.x(40) + 1, to: tv.x(30) + 1); await click(NSPoint(x: tv.x(60), y: ly(L1)))
+            s.setTool(.selection)
+            check("trim.cutToolNoSplitNoTrim", s.timeline == b13 && s.history.undoDepth == d0 && s.gestureBase == nil)
+            // 13b. 왼쪽 트림(시작 40 → 30): 한 단계, 끝·ID·레인·소스·모양 그대로, 소리·영상·자막·다른 스펙트럼 그대로, 고른 채, 덮인 구간이라 무음 안내 없음
+            s.statusMessage = nil
+            await trimDrag(L1, tv.x(40) + 1, to: tv.x(30) + 1, steps: 4)
+            let tA = s.timeline
+            check("trim.left", only(t1.id, t1, 30, 80) && othersSame(tA, b13) && tA.spectrum(t2.id) == t2 && tA.spectrum(t3.id) == t3 && tA.spectrum(t4.id) == t4
+                  && s.history.undoDepth == d0 + 1 && s.selection == t1.id && s.gestureBase == nil && s.isDirty && s.statusMessage == nil,
+                  "t1 \(item(t1.id).map { "\($0.start)..<\($0.end)" } ?? "-") depth \(s.history.undoDepth - d0) status '\(s.statusMessage ?? "")'")
+            // 13c. 실행 취소·다시 실행: 구간이 정확히 돌아옴
+            s.undo(); let undone = s.timeline == b13 && s.selection == t1.id
+            s.redo(); let redone = s.timeline == tA && s.selection == t1.id
+            check("trim.undoRedo", undone && redone, "undo \(undone) redo \(redone)")
+            // 13d. 오른쪽 트림(끝 80 → 60, 줄이기)
+            await trimDrag(L1, tv.x(80) - 1, to: tv.x(60) - 1)
+            check("trim.right", only(t1.id, t1, 30, 60) && othersSame(s.timeline, b13) && s.timeline.spectrum(t4.id) == t4 && s.history.undoDepth == d0 + 2,
+                  "t1 \(item(t1.id).map { "\($0.start)..<\($0.end)" } ?? "-")")
+            // 13e. 소스 밖으로 늘이기(시작 30 → 10): 받아들임(구간을 소스에 맞춰 자르지 않음), 소스 그대로·정상·경고 없음, 무음 안내(상태 줄·패널), 소리 클립 그대로
+            await trimDrag(L1, tv.x(30) + 1, to: tv.x(10) + 1)
+            let tE = s.timeline
+            _ = await LaneSelfTest.waitUntil(3) { !panelCoverage().isEmpty }
+            let cov = s.timeline.spectrum(t1.id).map { s.spectrumUncoveredRanges($0) } ?? []
+            check("trim.extendBeforeSourceSilent", only(t1.id, t1, 10, 60) && cov == [10..<30] && item(t1.id).map { s.timeline.spectrumSourceState($0) } == .ok
+                  && item(t1.id).map { s.spectrumWarnings($0) } == [] && s.statusMessage == ProjectStore.spectrumSilenceNotice && panelCoverage().count == 1
+                  && s.timeline.audioClips == b13.audioClips && s.history.undoDepth == d0 + 3,
+                  "cov \(cov) status '\(s.statusMessage ?? "")' panel \(panelCoverage())")
+            // 13f. 최소 1프레임: 시작을 끝 너머로 → [59,60), 끝을 시작 앞으로 → [10,11). 각각 실행 취소
+            await trimDrag(L1, tv.x(10) + 1, to: tv.x(200))
+            let minStart = only(t1.id, t1, 59, 60); s.undo()
+            await trimDrag(L1, tv.x(60) - 1, to: tv.x(0) - 30)
+            let minEnd = only(t1.id, t1, 10, 11); s.undo()
+            check("trim.minimumOneFrame", minStart && minEnd && s.timeline == tE && s.history.undoDepth == d0 + 3, "start \(minStart) end \(minEnd)")
+            // 13g. 0 경계: 시작을 0 앞으로 끌면 0에서 멈춤(음수 시작 없음)
+            await trimDrag(L1, tv.x(10) + 1, to: tv.x(0) - 40)
+            let zero = only(t1.id, t1, 0, 60); s.undo()
+            check("trim.clampsAtZero", zero && s.timeline == tE, "t1 \(item(t1.id).map { "\($0.start)..<\($0.end)" } ?? "-")")
+            // 13h. 같은 레인 겹침(끝 60 → 85, t4 [80,81)과 겹침): 끄는 중 거부 제안(빨간 상자, 타임라인 그대로), 놓으면 바뀌지 않음·기록 없음·스펙트럼 트림 겹침 문구,
+            //      소스 조각 겹침 경고와 다름(t1 경고 없음), 옮기기 문구와 다름. 옮기지 않음.
+            let redAt = NSPoint(x: tv.x(83), y: ly(L1)), pxNo = pixel(redAt), dE = s.history.undoDepth
+            await trimDrag(L1, tv.x(60) - 1, to: tv.x(85) - 1, up: false)
+            let rej = s.spectrumTrimRejected
+            let duringOK = rej?.id == t1.id && rej?.range == 10..<85 && s.timeline == tE && s.gestureBase != nil
+            tv.display()
+            let pxRed = pixel(redAt)
+            let redder = { (c: NSColor?) in c.map { $0.redComponent - $0.greenComponent } ?? 0 }
+            await upAt(L1, tv.x(85) - 1)
+            check("trim.overlapRejected", duringOK && redder(pxRed) > redder(pxNo) + 0.08 && s.timeline == tE && s.history.undoDepth == dE && s.gestureBase == nil
+                  && s.spectrumTrimRejected == nil && s.statusMessage == ProjectStore.spectrumTrimOverlap && s.statusMessage != ProjectStore.spectrumMoveOverlap
+                  && s.timeline.spectrum(t4.id) == t4 && item(t1.id).map { s.spectrumWarnings($0) } == [],
+                  "during \(duringOK) rej \(rej.map { "\($0.range)" } ?? "-") px \(rgb(pxNo)) → \(rgb(pxRed)) status '\(s.statusMessage ?? "")'")
+            // 13i. 다른 레인(L2) t3의 끝 20 → 200: 조각이 없는 앞(0–30)·조각 사이 빈틈(90–120, A1·A2)·뒤(180–200)가 무음 구간. 소스는 정상(없음 아님)
+            await trimDrag(L2, tv.x(20) - 1, to: tv.x(200) - 1)
+            let tI = s.timeline
+            let cov3 = item(t3.id).map { s.spectrumUncoveredRanges($0) } ?? []
+            check("trim.extendAcrossGapsAndLanes", only(t3.id, t3, 0, 200) && cov3 == [0..<30, 90..<120, 180..<200] && item(t3.id).map { tI.spectrumSourceState($0) } == .ok
+                  && item(t3.id).map { s.spectrumWarnings($0) } == [] && s.statusMessage == ProjectStore.spectrumSilenceNotice && tI.durationFrames == 200
+                  && othersSame(tI, b13) && tI.spectrum(t1.id) == tE.spectrum(t1.id) && s.history.undoDepth == dE + 1,
+                  "cov \(cov3) dur \(tI.durationFrames)")
+            // 13j. 바뀌지 않은 트림: 누르고 놓기, 끌었다 제자리로 → 기록 없음, 저장 상태 그대로
+            let dI = s.history.undoDepth, dirtyI = s.isDirty
+            await trimDrag(L1, tv.x(10) + 1, to: tv.x(10) + 1, steps: 1)
+            await LaneSelfTest.mouse(.leftMouseDown, win(NSPoint(x: tv.x(60) - 1, y: ly(L1))), w)
+            await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: tv.x(70) - 1, y: ly(L1))), w)
+            await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: tv.x(60) - 1, y: ly(L1))), w); await upAt(L1, tv.x(60) - 1)
+            check("trim.noOpNoHistory", s.timeline == tI && s.history.undoDepth == dI && s.isDirty == dirtyI && s.gestureBase == nil)
+            // 13k. 취소(모두 tI에서, 기록 없음): Esc·초점 잃음·알림 시트·끄는 중 새 누름, 그 뒤 늦은 끌기·놓기는 아무것도 하지 않음
+            func trimming() async -> Bool { await trimDrag(L1, tv.x(10) + 1, to: tv.x(5) + 1, up: false); return only(t1.id, t1, 5, 60) && s.gestureBase != nil }
+            let e1 = await trimming()
+            await LaneSelfTest.key(53, "\u{1b}", [], w); await LaneSelfTest.settle()
+            let e2 = s.timeline == tI && s.gestureBase == nil
+            await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: tv.x(2), y: ly(L1))), w); await upAt(L1, tv.x(2))
+            check("trim.cancelEscape", e1 && e2 && s.timeline == tI && s.history.undoDepth == dI, "trimming \(e1) esc \(e2)")
+            let f1 = await trimming()
+            NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: w); await LaneSelfTest.settle()
+            let f2 = s.timeline == tI && s.gestureBase == nil
+            await upAt(L1, tv.x(5) + 1)
+            _ = await LaneSelfTest.regainFocus(w); w.makeFirstResponder(tv)
+            check("trim.cancelFocusLoss", f1 && f2 && s.timeline == tI && s.history.undoDepth == dI, "trimming \(f1) resign \(f2)")
+            let m1 = await trimming()
+            s.presentAlert(ProjectStore.AlertInfo(title: "검사 알림", message: "스펙트럼 트림 중 알림"))
+            let sheet = await LaneSelfTest.waitUntil(3) { s.alerts.isShowing && w.attachedSheet != nil }
+            await LaneSelfTest.settle()
+            let m2 = s.timeline == tI && s.gestureBase == nil
+            await upAt(L1, tv.x(5) + 1)
+            await dismiss()
+            _ = await LaneSelfTest.regainFocus(w); w.makeFirstResponder(tv)
+            check("trim.cancelModalAlert", m1 && sheet && m2 && s.timeline == tI && s.history.undoDepth == dI, "trimming \(m1) sheet \(sheet) cancelled \(m2)")
+            let n1 = await trimming()
+            await LaneSelfTest.mouse(.leftMouseDown, win(viewPoint(L2, frame: 300)), w)   // 빈 곳 새 누름
+            let n2 = s.timeline == tI && s.gestureBase == nil
+            await LaneSelfTest.mouse(.leftMouseUp, win(viewPoint(L2, frame: 300)), w); await LaneSelfTest.settle()
+            check("trim.cancelNewPress", n1 && n2 && s.timeline == tI && s.history.undoDepth == dI, "trimming \(n1) newPress \(n2)")
+            // 끄는 중 자르기 도구로 바꾸기 거부(트림 그대로 확정 → 실행 취소), 두 번 놓기·늦은 끌기는 한 단계만
+            let o1 = await trimming()
+            let refused = !s.setTool(.cut) && s.tool == .selection
+            await upAt(L1, tv.x(5) + 1)
+            let once = s.history.undoDepth
+            await upAt(L1, tv.x(5) + 1); await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: tv.x(1), y: ly(L1))), w); await upAt(L1, tv.x(1))
+            check("trim.toolSwitchRefusedAndDuplicateUp", o1 && refused && once == dI + 1 && s.history.undoDepth == once && only(t1.id, t1, 5, 60),
+                  "trimming \(o1) refused \(refused) depth \(once - dI)/\(s.history.undoDepth - dI)")
+            s.undo()
+            // 13l. 끄는 중 프로젝트 교체: 끌기 취소, 새 프로젝트 그대로·옛 선택 없음, 늦은 끌기·놓기 아무것도 하지 않음
+            let pr = await trimming()
+            s.resetProject(); await LaneSelfTest.settle()
+            let fresh = s.timeline
+            await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: tv.x(1), y: ly(L1))), w); await upAt(L1, tv.x(1))
+            check("trim.cancelProjectReplace", pr && s.gestureBase == nil && s.timeline == fresh && fresh.spectra.isEmpty && s.history.undoDepth == 0 && s.selection == nil)
+            // 13m. 저장·다시 열기(일회용 파일): 트림한 구간(위 tI — 처음 파일 trim.ontheframe 위에 다시 만들지 않음) 다른 이름으로 저장 → 그 파일을 다시 열기 →
+            //      같은 ID·레인·소스·모양·구간, 소리 클립 그대로, 형식 8. 그 파일에서 다시 트림 → ⌘S(같은 경로에 보통 저장) → 같은 파일을 다시 열기.
+            let o13 = await s.openProject(at: p13); await dismiss()
+            _ = await LaneSelfTest.regainFocus(w); w.makeFirstResponder(tv)
+            _ = await LaneSelfTest.waitUntil(3) { w.isKeyWindow && NSApp.isActive && tv.spectrumHit(NSPoint(x: tv.x(60), y: ly(L1))) == t1.id }
+            await LaneSelfTest.settle()
+            let reopenedBase = s.timeline == b13
+            await trimDrag(L1, tv.x(40) + 1, to: tv.x(10) + 1)
+            await trimDrag(L2, tv.x(20) - 1, to: tv.x(200) - 1)
+            let tS = s.timeline
+            let p13b = out.appendingPathComponent("trim-saved-as.ontheframe")
+            let w13 = s.writeProject(to: p13b); s.resetProject()
+            let r13 = await s.openProject(at: p13b); await dismiss()
+            let v13 = (try? Data(contentsOf: p13b)).flatMap { try? ProjectFile.decode($0).document.version }
+            let saveAsOK = o13 && reopenedBase && w13 && r13 && v13 == 8 && s.timeline == tS && only(t1.id, t1, 10, 80) && only(t3.id, t3, 0, 200)
+                && s.timeline.audioClips == b13.audioClips && s.timeline.lanes == b13.lanes && s.projectURL == p13b
+            _ = await LaneSelfTest.regainFocus(w); w.makeFirstResponder(tv)
+            _ = await LaneSelfTest.waitUntil(3) { w.isKeyWindow && NSApp.isActive && tv.spectrumHit(NSPoint(x: tv.x(60), y: ly(L1))) == t1.id }
+            await LaneSelfTest.settle()
+            await trimDrag(L1, tv.x(80) - 1, to: tv.x(70) - 1)   // 끝 80 → 70
+            let tN = s.timeline
+            var saved = false
+            s.saveProject { saved = $0 }
+            let cleanAfterSave = !s.isDirty
+            s.resetProject()
+            let rN = await s.openProject(at: p13b); await dismiss()
+            let vN = (try? Data(contentsOf: p13b)).flatMap { try? ProjectFile.decode($0).document.version }
+            let saveOK = saved && cleanAfterSave && rN && vN == 8 && s.timeline == tN && only(t1.id, t1, 10, 70) && only(t3.id, t3, 0, 200)
+                && s.timeline.audioClips == b13.audioClips && item(t1.id)?.sourceKey == key
+            check("trim.persisted", saveAsOK && saveOK, "saveAs \(saveAsOK) (open \(o13) base \(reopenedBase) version \(v13 ?? -1)) save \(saveOK) (saved \(saved) clean \(cleanAfterSave) version \(vN ?? -1))")
+            // 13n. 경고·내보내기 막음 그대로: t1·t3 경고 없음(소스 정상, 무음 구간은 경고가 아님), t2 고르지 않음, 엔진 막음 판정 t2 하나, 내보내기는 대상 파일 전 거부
+            let dest13 = out.appendingPathComponent("trim.mp4"), keep13 = Data("keep".utf8)
+            try? keep13.write(to: dest13)
+            s.startExport(.fromSavePanel(dest13))
+            _ = await LaneSelfTest.waitUntil(60) { s.exportPhase == .idle && s.alerts.isShowing }
+            let refused13 = s.alert?.title == "내보내기 실패" && (s.alert?.message ?? "").contains("스펙트럼") && (try? Data(contentsOf: dest13)) == keep13
+            await dismiss()
+            check("trim.guardsIntact", item(t1.id).map { s.spectrumWarnings($0) } == [] && item(t3.id).map { s.spectrumWarnings($0) } == []
+                  && item(t2.id).map { s.spectrumWarnings($0) } == [.unset] && s.timeline.spectrumExportBlockers().map(\.spectrumID) == [t2.id] && refused13,
+                  "blockers \(s.timeline.spectrumExportBlockers().count) refused \(refused13)")
+            // 13o. 무음 구간 계산(순수 — 엔진 편집으로 만든 변형, 앱 계산 spectrumUncoveredRanges): 조각 합집합(묶음 범위가 아님), 레인 무관, 서로 다른 상태 구별
+            func cv(_ a: Int, _ b: Int, _ t: Timeline = b13, key k: UUID? = key) -> [Range<Int>] {
+                ProjectStore.spectrumUncoveredRanges(SpectrumItem(lane: L1, start: a, length: b - a, sourceKey: k), in: t)
+            }
+            let pieces = b13.audioClips.filter { $0.lineageKey == key }.sorted { $0.start < $1.start }
+            let overlapT = pieces.count == 2 ? try? b13.relocating(clip: pieces[1].id, toStart: 60) : nil       // A2 조각 60–120: A1 30–90과 60–90에서 겹침
+            let deletedT = pieces.count == 2 ? try? b13.lifting(clip: pieces[0].id).lifting(clip: pieces[1].id) : nil
+            let probe = SpectrumItem(lane: L1, start: 0, length: 200, sourceKey: key)
+            let mediaID = pieces.first?.mediaID ?? UUID()
+            let missingW = ProjectStore.spectrumWarnings(probe, in: b13, missing: [mediaID])
+            let cases: [(String, Bool)] = [
+                ("full", cv(40, 80) == [] && cv(120, 180) == []),
+                ("before", cv(10, 50) == [10..<30]),
+                ("after", cv(150, 200) == [180..<200]),
+                ("gapBetweenLanes", cv(60, 150) == [90..<120]),
+                ("all", cv(0, 200) == [0..<30, 90..<120, 180..<200]),
+                ("insideGapOnly", cv(95, 115) == [95..<115]),
+                ("edgesTouch", cv(90, 120) == [90..<120] && cv(89, 121) == [90..<120]),
+                ("overlapCountsCovered", overlapT.map { cv(20, 130, $0) == [20..<30, 120..<130] && !$0.spectrumOverlaps(key: key).isEmpty } == true),
+                ("unset", cv(0, 200, key: nil) == []),
+                ("deletedSource", deletedT.map { cv(0, 200, $0) == [] && $0.spectrumSourceState(probe) == .missing && ProjectStore.spectrumWarnings(probe, in: $0, missing: []) == [.missingSource] } == true),
+                ("missingMediaStillComputed", cv(0, 200) == [0..<30, 90..<120, 180..<200] && missingW.contains { if case .missingMedia = $0 { return true }; return false }
+                    && !missingW.contains(.missingSource)),
+            ]
+            check("coverage.cases", cases.allSatisfy(\.1), cases.filter { !$0.1 }.map(\.0).joined(separator: ","))
+        }
         EditorLayout.shared.leftTab = .media
         finish(folder, checks)
     }
@@ -922,6 +1163,26 @@ enum SpectrumLaneSelfTest {
         x = try x.addingLane(.spectrum, name: "스펙트럼", id: sp1, outward: true).addingLane(.spectrum, name: "스펙트럼", id: sp2, outward: true)
         var analog = SpectrumItemStyle.provisionalDefault; analog.mode = .analog; analog.sides = .above
         x = try x.addingSpectrum(lane: sp1, at: 10, length: 30, sourceKey: key, style: analog)
+        x = try x.addingSpectrum(lane: sp1, at: 100, length: 30, sourceKey: nil)
+        return try x.addingSpectrum(lane: sp2, at: 0, length: 20, sourceKey: key)
+    }
+
+    /// 2C-2 트림 fixture: TA 쌍을 60에서 잘라 두 조각의 연결을 풀고 소리 조각을 따로 옮김 — 같은 계보가 A1 [30,90)·A2(새 오디오 레인) [120,180),
+    /// 영상 [0,60)·[60,120) 그대로, 자막 150–170. 스펙트럼 레인 둘: 첫 레인 [40,80)(그 계보)·[80,81)(1프레임, 그 계보)·[100,130)(고르지 않음), 둘째 레인 [0,20)(그 계보)
+    static func trimTimeline(_ base: Timeline, _ m: UUID) throws -> Timeline {
+        let c = UUID(), a2 = UUID(), st = UUID(), sp1 = UUID(), sp2 = UUID()
+        var x = try base.appending(media: m, videoLane: Lane.videoID, audioLane: Lane.audioID, clipID: c)
+        x = try x.splitting(clip: c, atFrame: 60)
+        let pieces = x.audioClips.sorted { $0.start < $1.start }
+        guard pieces.count == 2, Set(pieces.map(\.lineageKey)).count == 1 else { throw EditError.badIndex }
+        let key = pieces[0].lineageKey
+        x = try x.unlinking(clip: pieces[0].id).unlinking(clip: pieces[1].id)
+        x = try x.addingLane(.audio, name: "오디오", id: a2, outward: true)
+        x = try x.relocating(clip: pieces[1].id, toStart: 120, lane: a2).relocating(clip: pieces[0].id, toStart: 30)
+        x = try x.addingLane(.subtitle, name: "자막", id: st, outward: true).addingSubtitle(lane: st, at: 150, length: 20, text: "자막")
+        x = try x.addingLane(.spectrum, name: "스펙트럼", id: sp1, outward: true).addingLane(.spectrum, name: "스펙트럼", id: sp2, outward: true)
+        x = try x.addingSpectrum(lane: sp1, at: 40, length: 40, sourceKey: key)
+        x = try x.addingSpectrum(lane: sp1, at: 80, length: 1, sourceKey: key)
         x = try x.addingSpectrum(lane: sp1, at: 100, length: 30, sourceKey: nil)
         return try x.addingSpectrum(lane: sp2, at: 0, length: 20, sourceKey: key)
     }

@@ -730,7 +730,7 @@ struct InspectorView: View {
                     if l.kind == .audio { row("소리", l.muted ? "음소거" : "음량 \(l.volumePercent)%") }
                     switch l.kind {
                     case .subtitle: row("자막", "\(store.timeline.subtitles(inLane: l.id).count)개")
-                    case .spectrum: row("스펙트럼", "\(store.timeline.spectra(inLane: l.id).count)개(누르면 고르고, 끌어 옮기고, Delete로 지움 — 길이 바꾸기는 아직 없음)")
+                    case .spectrum: row("스펙트럼", "\(store.timeline.spectra(inLane: l.id).count)개(누르면 고르고, 끌어 옮기고, 가장자리를 끌어 길이를 바꾸고, Delete로 지움)")
                     case .video, .audio: row("클립", "\(store.timeline.clips(inLane: l.id).count)개")
                     }
                     Text("번호(V1·A1…)는 가운데 경계에서 센 위치이고 이름과 따로입니다. 이름·순서·음량은 왼쪽 \"클립 조정\" 탭이나 레인 머리 메뉴에서 바꿉니다.")
@@ -805,11 +805,11 @@ struct AdjustmentsView: View {
                            subtitle: "자막 · \(laneText(s.lane))")
                     SubtitleAdjustView(store: store, item: s)
                 } else if let sp = store.selectedSpectrum {
-                    // 스펙트럼(SP-1A 2B-3): 오디오 소스 고르기와 소스 경고만. 옮기기·트림·모양은 2C.
+                    // 스펙트럼(SP-1A 2B-3): 오디오 소스 고르기와 소스 경고, 소스가 덮지 않는 구간 안내(2C-2). 옮기기·트림은 타임라인(2C-1·2C-2), 모양은 2C-3.
                     target(icon: "waveform.path", title: "스펙트럼",
                            subtitle: "스펙트럼 · \(laneText(sp.lane)) · \(store.settings.timecode(sp.start))–\(store.settings.timecode(sp.end))")
                     AdjustSection(title: "오디오 소스") { SpectrumSourceAdjust(store: store, item: sp) }
-                    Text("타임라인에서 끌어 옮깁니다(스펙트럼 레인 사이 포함). 길이·모양은 아직 바꿀 수 없습니다. Delete로 지웁니다.")
+                    Text("타임라인에서 끌어 옮기고(스펙트럼 레인 사이 포함), 가장자리를 끌어 길이를 바꿉니다(소리 클립은 그대로). 모양은 아직 바꿀 수 없습니다. Delete로 지웁니다.")
                         .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else if let id = store.selection, let c = store.timeline.clip(id), let kind = store.timeline.lane(of: id) {
                     target(icon: kind == .video ? "film" : "waveform", title: store.mediaByID[c.mediaID]?.name ?? "클립",
@@ -860,6 +860,7 @@ struct AdjustmentsView: View {
 /// 스펙트럼 오디오 소스(SP-1A 2B-3): 목록의 값은 계보 키(글·차례가 아님). "(고르지 않음)" = nil. 지금 소스가 목록에 없으면(지워진 계보)
 /// "(없음 — 지워진 소스)"를 선택된 채 보인다(다시 골라도 그대로) — 다른 소스로 바꾸지 않는다. 목록을 그리는 것만으로는 타임라인을 바꾸지 않는다.
 /// 고르면 그린 때의 회차·보인 값과 함께 넘긴다(setSpectrumSource가 늦은 값을 거름). 경고는 늘 보인다.
+/// 소스가 정상인데 스펙트럼 구간에 그 소스 조각이 없는 프레임이 있으면 경고와 따로(정보 색) 그 구간을 알린다(2C-2, 2C 결정 1 — 무음, 막지 않음).
 struct SpectrumSourceAdjust: View {
     @Bindable var store: ProjectStore
     let item: SpectrumItem
@@ -881,6 +882,12 @@ struct SpectrumSourceAdjust: View {
                 Label(store.spectrumWarningText(w), systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(w == .unset ? Color.orange : Color.red).fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)   // 고를 수 있는 글(복사 가능) — 접근성 트리에도 글로 보인다
+            }
+            let uncovered = store.spectrumUncoveredRanges(item)
+            if !uncovered.isEmpty {
+                Label(store.spectrumCoverageText(uncovered), systemImage: "info.circle")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
         }
         .disabled(store.gestureBase != nil)
@@ -1106,7 +1113,7 @@ struct LaneSettingsAdjust: View {
                 case .video: "위 레인이 아래 레인을 가립니다."
                 case .audio: "음소거하지 않은 오디오 레인을 모두 더합니다."
                 case .subtitle: "자막은 모든 영상 위에 그리고, 위 자막 레인이 아래 자막 레인 위에 그립니다."
-                case .spectrum: "스펙트럼은 영상 위·자막 아래에 그립니다. 스펙트럼을 누르면 고르고, 끌어 옮기고, Delete로 지웁니다. 스펙트럼이 있는 레인은 지울 수 없습니다(먼저 스펙트럼을 지우세요)."
+                case .spectrum: "스펙트럼은 영상 위·자막 아래에 그립니다. 스펙트럼을 누르면 고르고, 끌어 옮기고, 가장자리를 끌어 길이를 바꾸고, Delete로 지웁니다. 스펙트럼이 있는 레인은 지울 수 없습니다(먼저 스펙트럼을 지우세요)."
             } }())
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }

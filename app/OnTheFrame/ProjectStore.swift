@@ -63,13 +63,17 @@ final class ProjectStore {
         if let c = linkCandidate { s.insert(c) }
         return s
     }
-    /// 고른 스펙트럼(SP-1A 2B-2): 누르면 고르고 끌어 옮긴다(2C-1). 트림(2C-2)·복사·자르기는 아직 없다.
+    /// 고른 스펙트럼(SP-1A 2B-2): 누르면 고르고 끌어 옮기며(2C-1) 가장자리를 끌어 트림한다(2C-2). 복사·자르기는 아직 없다.
     var selectedSpectrum: SpectrumItem? { selection.flatMap { timeline.spectrum($0) } }
     /// 이 타임라인에서 고를 수 있는 항목인가(클립·자막·스펙트럼) — 실행 취소·레인 편집 뒤 선택을 남길지
     func isSelectable(_ id: UUID) -> Bool { timeline.clip(id) != nil || timeline.subtitle(id) != nil || timeline.spectrum(id) != nil }
     static let spectrumEditUnsupported = "스펙트럼은 아직 자르거나 복사할 수 없습니다. 지우려면 Delete를 누르세요."
     /// 스펙트럼 옮기기를 놓은 자리가 같은 스펙트럼 레인의 다른 스펙트럼과 겹칠 때(2C-1). 소스 조각 겹침(계보 경고)·클립 겹침과 다른 제약이다.
     static let spectrumMoveOverlap = "같은 스펙트럼 레인의 다른 스펙트럼과 겹쳐 옮기지 않았습니다. 빈 곳이나 다른 스펙트럼 레인에 놓으세요."
+    /// 스펙트럼 트림을 놓은 구간이 같은 스펙트럼 레인의 다른 스펙트럼과 겹칠 때(2C-2). 소스 조각 겹침 경고와 다른 제약이다.
+    static let spectrumTrimOverlap = "같은 스펙트럼 레인의 다른 스펙트럼과 겹쳐 길이를 바꾸지 않았습니다. 그 스펙트럼 앞까지만 늘일 수 있습니다."
+    /// 트림한 스펙트럼 구간에 소스 소리 조각이 없는 프레임이 있을 때(2C-2, 2C 결정 1 — 막지 않는 안내, 소스·구간은 그대로)
+    static let spectrumSilenceNotice = "선택한 오디오 소스가 없는 구간에서는 스펙트럼이 반응하지 않습니다(무음으로 다룸). 소스 지정은 그대로입니다."
     private(set) var playhead = 0 {            // 0…durationFrames(끝 위치 포함)
         // 프리뷰 자막 그림의 시간 창(§49): 재생 헤드 근처 자막만 그림을 붙잡는다. 보임·숨김은 동기 층 애니메이션 그대로다.
         didSet { if playhead != oldValue { previewHost?.subtitlePlayheadMoved(to: playhead) } }
@@ -729,6 +733,30 @@ final class ProjectStore {
         }
     }
     func spectrumWarnings(_ s: SpectrumItem) -> [SpectrumWarning] { Self.spectrumWarnings(s, in: timeline, missing: Set(missingMedia.keys)) }
+    /// 소스가 덮지 않는 보이는 구간(2C-2, 2C 결정 1): 소스가 정상(그 계보의 소리 조각이 타임라인에 있음)일 때, 스펙트럼 [start, end) 안에서 그 계보의
+    /// 어느 조각 [start, end)에도 들지 않는 프레임 구간(시작 순, 이어진 것은 합침). 레인과 무관하게 모든 조각의 합집합이다(첫 조각 시작 ~ 마지막 조각 끝의
+    /// 묶음 범위가 아님 — 조각 사이 빈틈도 셈). 같은 시각에 겹친 조각은 덮은 것으로 센다(겹침은 따로 경고). 그 프레임은 무음으로 분석된다.
+    /// 고르지 않음·소스 없음은 빈 배열(그 경고가 따로 있음). 원본 파일 없음은 조각이 있으므로 계산한다. 레인·클립 음소거·음량, 분석 창의 앞뒤 번짐·오프셋은 보지 않는다.
+    static func spectrumUncoveredRanges(_ s: SpectrumItem, in t: Timeline) -> [Range<Int>] {
+        guard t.spectrumSourceState(s) == .ok, let k = s.sourceKey, let src = t.spectrumSource(key: k) else { return [] }
+        var out: [Range<Int>] = [], cur = s.start
+        for p in src.pieces where p.end > cur {   // 조각은 시작 순
+            if p.start >= s.end { break }
+            if p.start > cur { out.append(cur..<p.start) }
+            cur = max(cur, p.end)
+            if cur >= s.end { break }
+        }
+        if cur < s.end { out.append(cur..<s.end) }
+        return out
+    }
+    func spectrumUncoveredRanges(_ s: SpectrumItem) -> [Range<Int>] { Self.spectrumUncoveredRanges(s, in: timeline) }
+    /// 소스가 덮지 않는 구간 안내 글(클립 조정 패널에 늘 보임 — 경고가 아니라 설명. 이 구간 자체는 내보내기 막음 판정에 들지 않는다)
+    func spectrumCoverageText(_ ranges: [Range<Int>]) -> String {
+        let tc = settings.timecode
+        let first = ranges.first.map { "\(tc($0.lowerBound))–\(tc($0.upperBound))" } ?? ""
+        let frames = ranges.reduce(0) { $0 + $1.count }
+        return "선택한 오디오 소스가 없는 구간(\(first)\(ranges.count > 1 ? " 외 \(ranges.count - 1)곳" : ""), 모두 \(frames)프레임)에서는 스펙트럼이 반응하지 않습니다 — 무음으로 다룹니다. 소스 지정은 그대로입니다."
+    }
     /// 경고 글(클립 조정 패널에 늘 보임 — 잠깐 뜨는 상태 줄만으로 알리지 않음)
     func spectrumWarningText(_ w: SpectrumWarning) -> String {
         switch w {
@@ -1206,6 +1234,18 @@ final class ProjectStore {
             } catch {}
             return
         }
+        if let sp = base.spectrum(id) {   // 스펙트럼 트림(SP-1A 2C-2, 리플 없음): 자막과 같은 제한(1프레임·0). 소스·모양·레인·ID 그대로, 소리 클립은 건드리지 않음
+            spectrumTrimID = id
+            let ns = edge == .start ? max(0, min(sp.start + delta, sp.end - 1)) : sp.start, ne = edge == .end ? max(sp.start + 1, sp.end + delta) : sp.end
+            if let t = try? base.trimmingSpectrum(id, start: ns, end: ne) {
+                if t != timeline { history.updateGesture(t, focus: id) }   // 같은 결과면 다시 넣지 않음(§45.3)
+                if spectrumTrimRejected != nil { spectrumTrimRejected = nil }
+            } else {   // 같은 레인 겹침: 시작 상태로 두고 제안 구간을 빨갛게(놓으면 바꾸지 않음)
+                if timeline != base { history.updateGesture(base, focus: id) }
+                if spectrumTrimRejected?.id != id || spectrumTrimRejected?.range != ns..<ne { spectrumTrimRejected = (id, ns..<ne) }
+            }
+            return
+        }
         do { history.updateGesture(try edge == .start ? base.trimmingStart(clip: id, by: delta) : base.trimmingEnd(clip: id, by: delta), focus: id); moveRejection = nil }
         catch let e as EditError { history.updateGesture(base, focus: id); moveRejection = delta == 0 ? nil : e } catch {}
     }
@@ -1258,6 +1298,10 @@ final class ProjectStore {
     }
     /// 끌어 옮기기 중 제안 위치(표시용): (클립, 시작, 놓을 수 있음, 레인)
     private(set) var freeMoveProposal: (id: UUID, start: Int, ok: Bool, lane: UUID?)?
+    /// 스펙트럼 트림 중 거부된 제안(2C-2, 표시용 — 같은 레인 겹침): (스펙트럼, 제안 구간). 받아들일 수 있는 제안이면 nil.
+    private(set) var spectrumTrimRejected: (id: UUID, range: Range<Int>)?
+    /// 지금 끌기가 스펙트럼 트림이면 그 ID(놓을 때 안내를 고름)
+    @ObservationIgnored private var spectrumTrimID: UUID?
     /// 끌어 옮기기 중 붙은 위치(프레임, 표시용 안내선). 붙지 않았으면 nil.
     private(set) var snapGuide: Int?
     /// 끼워 넣기 이동(리플). 2026-10-11부터 일반 끌기에서는 쓰지 않는다(이전 자체 검사의 저장소 경로로만 남김).
@@ -1279,6 +1323,12 @@ final class ProjectStore {
         gestureTimeline = nil; liveTransform = nil
         if let p = freeMoveProposal, !p.ok { statusMessage = base.spectrum(p.id) != nil ? Self.spectrumMoveOverlap : EditError.overlap.description }
         if let r = moveRejection { statusMessage = r.description; moveRejection = nil }
+        // 스펙트럼 트림(2C-2): 거부면 스펙트럼 겹침 문구(바뀌지 않음), 바뀐 구간에 소스 소리가 없는 프레임이 있으면 막지 않는 무음 안내
+        if spectrumTrimRejected != nil { statusMessage = Self.spectrumTrimOverlap }
+        else if let id = spectrumTrimID, let a = base.spectrum(id), let b = timeline.spectrum(id), a != b, !Self.spectrumUncoveredRanges(b, in: timeline).isEmpty {
+            statusMessage = Self.spectrumSilenceNotice
+        }
+        spectrumTrimID = nil; spectrumTrimRejected = nil
         history.commitGesture(); gestureBase = nil; moveInsertionIndex = nil; freeMoveProposal = nil; snapGuide = nil
         #if DEBUG
         traceGestureDebug("committed changed=\(timeline != base)")   // 확정 결과(기록 한 단계 = changed true, depth는 줄 끝)
@@ -1357,6 +1407,7 @@ final class ProjectStore {
         guard gestureBase != nil else { return }
         gestureTimeline = nil; liveTransform = nil
         history.cancelGesture(); gestureBase = nil; moveInsertionIndex = nil; freeMoveProposal = nil; snapGuide = nil
+        spectrumTrimID = nil; spectrumTrimRejected = nil
         let wasTransform = transformGesture; transformGesture = false
         #if DEBUG
         traceGestureDebug("cancelled")   // 끌기 전 상태로 되돌린 뒤(depth는 줄 끝)

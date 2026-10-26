@@ -50,6 +50,8 @@ struct TimelineDrawState: Equatable {
     var proposalStart: Int?, proposalOK: Bool, proposalID: UUID?, proposalLane: UUID?
     /// 끌어 옮기기에서 붙은 위치(안내선)
     var snap: Int?
+    /// 거부된 스펙트럼 트림 제안(2C-2, 같은 레인 겹침 — 빨간 상자): 항목과 제안 구간
+    var trimRejectID: UUID?, trimRejectRange: Range<Int>?
     /// 찾을 수 없는 원본(미디어 id)
     var missing: Set<UUID>
     /// 편집 도구(선택·자르기, D-030)
@@ -65,6 +67,7 @@ struct TimelineDrawState: Equatable {
         selectedLane = store.selectedLane
         playhead = store.playhead
         snap = store.snapGuide
+        trimRejectID = store.spectrumTrimRejected?.id; trimRejectRange = store.spectrumTrimRejected?.range
         proposalStart = store.freeMoveProposal?.start; proposalOK = store.freeMoveProposal?.ok ?? true; proposalID = store.freeMoveProposal?.id; proposalLane = store.freeMoveProposal?.lane
         missing = Set(store.missingMedia.keys)
         tool = store.tool
@@ -471,6 +474,11 @@ final class TimelineNSView: NSView {
                 NSColor.systemRed.setStroke(); let p = NSBezierPath(rect: r.insetBy(dx: 1, dy: 1)); p.lineWidth = 2; p.stroke()
             }
         }
+        if let id = st.trimRejectID, let r0 = st.trimRejectRange, let base = store.gestureBase, let sp = base.spectrum(id) {   // 스펙트럼 트림 거부(2C-2, 옮기기 거부와 같은 빨간 상자)
+            let r = spectrumRect(sp.with(start: r0.lowerBound, length: r0.count))
+            NSColor.systemRed.withAlphaComponent(0.25).setFill(); r.fill()
+            NSColor.systemRed.setStroke(); let p = NSBezierPath(rect: r.insetBy(dx: 1, dy: 1)); p.lineWidth = 2; p.stroke()
+        }
         if let id = st.proposalID, let s = st.proposalStart, let base = store.gestureBase, let c = base.clip(id) {
             for m in base.group(of: id) {
                 if st.proposalOK {
@@ -630,18 +638,26 @@ final class TimelineNSView: NSView {
         let l = laneRect(lane ?? s.lane) ?? .zero
         return NSRect(x: x(start ?? s.start), y: l.minY, width: max(1, CGFloat(s.length) * pixelsPerFrame), height: l.height)
     }
-    /// 스펙트럼 누름 판정(SP-1A 2B-2 고르기, 2C-1 옮기기): clipHit(트림·자르기 도구·문맥 메뉴가 쓰는 판정)과 따로 둬 클립 메뉴·자르기·트림에 닿지 않는다.
-    /// 가장자리를 따로 보지 않는다(본문과 같음 — 트림은 2C-2).
-    /// 그린 상자와 같은 범위 [x(start), x(end)) — 이어 붙은 두 항목의 경계는 오른쪽 항목.
-    func spectrumHit(_ p: NSPoint) -> UUID? {
+    /// 스펙트럼 누름 판정(SP-1A 2B-2 고르기, 2C-1 옮기기, 2C-2 트림): clipHit(자르기 도구·문맥 메뉴·클립 명령이 쓰는 판정)과 따로 둬 클립 메뉴·자르기에 닿지 않는다.
+    /// 항목: 그린 상자 [x(start), x(end))가 먼저(이어 붙은 두 항목의 경계는 오른쪽 항목), 없으면 바깥 1 pt 안의 가장 가까운 항목(clipHit과 같은 여유 —
+    /// 아주 짧은 항목도 잡힘, 같은 거리면 오른쪽). 가장자리: clipHit과 같은 규칙(안쪽 edgeGrab, 짧으면 폭의 1/3) — 시작 쪽 먼저.
+    func spectrumTarget(_ p: NSPoint) -> (UUID, ProjectStore.TrimEdge?)? {
         guard let st = state else { return nil }
         for (lane, l) in Self.layout(st.timeline.lanes) where lane.kind == .spectrum && p.y >= l.minY && p.y <= l.maxY {
-            return st.timeline.spectra(inLane: lane.id).first { p.x >= x($0.start) && p.x < x($0.end) }?.id
+            let items = st.timeline.spectra(inLane: lane.id)
+            func dist(_ s: SpectrumItem) -> CGFloat { p.x < x(s.start) ? x(s.start) - p.x : max(0, p.x - x(s.end)) }
+            guard let s = items.first(where: { p.x >= x($0.start) && p.x < x($0.end) })
+                    ?? items.filter({ dist($0) <= 1 }).min(by: { (dist($0), -$0.start) < (dist($1), -$1.start) }) else { return nil }
+            let x0 = x(s.start), x1 = x(s.end), grab = min(Self.edgeGrab, (x1 - x0) / 3)
+            if p.x <= x0 + grab { return (s.id, .start) }
+            if p.x >= x1 - grab { return (s.id, .end) }
+            return (s.id, nil)
         }
         return nil
     }
-    /// 스펙트럼 항목(2026-10-25, SP-1A 2A): 분홍 점선 상자와 소스 상태 글자. 누름 판정(clipHit)·커서에 넣지 않아
-    /// 트림·자르기는 없다(2C-2·SP-1A 밖). 2C-1부터 선택 도구로 끌어 옮긴다(spectrumHit → 누름 대기). 2B-2부터 누르면 고르고(spectrumHit) 고른 항목은 강조색 실선으로 그린다. 스펙트럼이 든 프로젝트를 열면 보인다(2B-1). 소스는 정상인데 그 원본 파일을 찾지 못했으면 "원본 파일 없음"을 덧붙인다
+    func spectrumHit(_ p: NSPoint) -> UUID? { spectrumTarget(p)?.0 }
+    /// 스펙트럼 항목(2026-10-25, SP-1A 2A): 분홍 점선 상자와 소스 상태 글자. 누름 판정(clipHit)에 넣지 않아
+    /// 자르기는 없다(SP-1A 밖). 2C-1부터 선택 도구로 끌어 옮기고(spectrumTarget → 누름 대기), 2C-2부터 가장자리를 끌어 트림한다(고르면 트림 손잡이·커서). 2B-2부터 누르면 고르고(spectrumHit) 고른 항목은 강조색 실선으로 그린다. 스펙트럼이 든 프로젝트를 열면 보인다(2B-1). 소스는 정상인데 그 원본 파일을 찾지 못했으면 "원본 파일 없음"을 덧붙인다
     /// (엔진의 "소스 없음" = 그 계보의 소리 조각이 없음과 다른 상태).
     private func drawSpectrum(_ s: SpectrumItem, _ st: TimelineDrawState) {
         let r = spectrumRect(s)
@@ -651,6 +667,11 @@ final class TimelineNSView: NSView {
         if !selected { path.setLineDash([4, 3], count: 2, phase: 0) }
         path.lineWidth = selected ? 2 : 1
         (selected ? NSColor.controlAccentColor : NSColor.systemPink.withAlphaComponent(0.8)).setStroke(); path.stroke()
+        if selected, st.tool == .selection {   // 트림 손잡이(2C-2, 자막과 같음)
+            NSColor.controlAccentColor.setFill()
+            NSRect(x: r.minX, y: r.minY + 6, width: 3, height: r.height - 12).fill()
+            NSRect(x: r.maxX - 3, y: r.minY + 6, width: 3, height: r.height - 12).fill()
+        }
         // 소스 경고 표시(2B-3): 고르지 않음 주황, 소스 없음·원본 파일 없음·겹침 빨강. 그리기만(누름 판정·끌기와 무관).
         let warnings = ProjectStore.spectrumWarnings(s, in: st.timeline, missing: st.missing)
         if let w = warnings.first, r.width > 14, let img = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "스펙트럼 소스 경고") {
@@ -842,11 +863,13 @@ final class TimelineNSView: NSView {
                 store.select(id)
                 drag = .pending(id, p)
             }
-        } else if let sid = spectrumHit(p) {
-            // 스펙트럼(SP-1A 2B-2 고르기, 2C-1 옮기기): 누르면 고르고, 4 pt를 넘겨 끌면 클립·자막과 같은 누름 대기 → 옮기기(선택 도구만 — 자르기·텍스트 도구는
-            // 위에서 이미 끝남). ⌘-클릭은 보통 고르기이고 끌기를 시작하지 않는다(클립 ⌘-클릭과 같음). 가장자리도 본문과 같다 — 트림은 2C-2.
-            store.pauseForEdit(); store.select(sid)
-            drag = e.modifierFlags.contains(.command) ? .none : .pending(sid, p)
+        } else if let (sid, edge) = spectrumTarget(p) {
+            // 스펙트럼(SP-1A 2B-2 고르기, 2C-1 옮기기, 2C-2 트림 — 선택 도구만, 자르기·텍스트 도구는 위에서 이미 끝남). 가장자리는 클립·자막과 같이
+            // 누르는 순간 트림 끌기(beginGesture → updateTrim → commitGesture/cancelGesture). 본문은 누르면 고르고, 4 pt를 넘겨 끌면 누름 대기 → 옮기기.
+            // ⌘-클릭은 보통 고르기이고 끌기를 시작하지 않는다(클립 ⌘-클릭과 같음).
+            if e.modifierFlags.contains(.command) { store.pauseForEdit(); store.select(sid); drag = .none }
+            else if let edge { store.beginGesture(select: sid); drag = .trim(sid, edge, p.x) }
+            else { store.pauseForEdit(); store.select(sid); drag = .pending(sid, p) }
         } else {
             store.select(nil); store.selectLane(nil); drag = .none
         }
@@ -1009,7 +1032,8 @@ final class TimelineNSView: NSView {
             guard let c = st.timeline.clip(id) else { continue }
             for e in [ProjectStore.FadeEdge.fadeIn, .fadeOut] { addCursorRect(fadeHandleRect(c, e, rect(c)).insetBy(dx: -6, dy: -5), cursor: .crosshair) }
         }
-        for r in st.timeline.group(of: sel).map({ rect($0) }) + (st.timeline.subtitle(sel).map { [subtitleRect($0)] } ?? []) {
+        for r in st.timeline.group(of: sel).map({ rect($0) }) + (st.timeline.subtitle(sel).map { [subtitleRect($0)] } ?? [])
+                    + (st.timeline.spectrum(sel).map { [spectrumRect($0)] } ?? []) {   // 스펙트럼 트림 커서(2C-2)
             addCursorRect(NSRect(x: r.minX - 2, y: r.minY, width: Self.edgeGrab + 2, height: r.height), cursor: .resizeLeftRight)
             addCursorRect(NSRect(x: r.maxX - Self.edgeGrab, y: r.minY, width: Self.edgeGrab + 2, height: r.height), cursor: .resizeLeftRight)
         }

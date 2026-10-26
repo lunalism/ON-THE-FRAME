@@ -152,7 +152,7 @@ enum GestureSwitchExperiment {
             guard let r = tv.laneRect(lane) else { return .zero }
             return tv.convert(NSPoint(x: tv.x(frame) + 0.3, y: r.midY), to: nil)
         }
-        func spData() -> String { s.timeline.spectrum(spID).map { "start \($0.start) lane \($0.lane == spLane)" } ?? "nil" }
+        func spData() -> String { s.timeline.spectrum(spID).map { "start \($0.start) len \($0.length) lane \($0.lane == spLane)" } ?? "nil" }
         func spStart(_ up: Bool) async -> NSPoint? {
             guard s.timeline.spectrum(spID) != nil else { return nil }
             let b = lpt(spLane, 55), to = NSPoint(x: b.x + 40, y: b.y)
@@ -164,6 +164,13 @@ enum GestureSwitchExperiment {
         if want("timeline.spectrumMove") { await trial("timeline.spectrumMove", target: "spectrum", start: { await spStart(false) }, data: spData) }
         if want("timeline.spectrumRapidSwitch") { await trial("timeline.spectrumRapidSwitch", target: "spectrum", rapid: true, start: { await spStart(false) }, data: spData) }
         if want("timeline.spectrumUpBeforeSwitch") { await trial("timeline.spectrumUpBeforeSwitch", target: "spectrum", expectCommitted: true, start: { await spStart(true) }, data: spData) }
+        // 2C-2(2026-10-26): 스펙트럼 시작 가장자리 트림 중 실제 앱 비활성 — 클립 트림과 같은 취소(트림 끌기 lpt의 +0.3 pt는 시작 가장자리 안)
+        if want("timeline.spectrumTrim") { await trial("timeline.spectrumTrim", target: "spectrum", start: {
+            guard let sp = s.timeline.spectrum(spID) else { return nil }
+            let e = lpt(spLane, sp.start), to = NSPoint(x: e.x + 30, y: e.y)
+            await LaneSelfTest.mouse(.leftMouseDown, e, w); await LaneSelfTest.mouse(.leftMouseDragged, to, w)
+            return to
+        }, data: spData) }
         if want("timeline.spectrumPendingMove") { await trial("timeline.spectrumPendingMove", start: {
             guard s.timeline.spectrum(spID) != nil else { return nil }
             let b = lpt(spLane, 55)
