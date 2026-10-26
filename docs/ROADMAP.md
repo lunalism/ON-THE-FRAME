@@ -78,6 +78,7 @@
 - ⏳ 확인 시트 직후 대기 중이던 다른 알림이 2 s 안에 닫히지 않으면 저장·열기 이어짐이 안전하게 중단된다(데이터 그대로, 다시 시도 필요, 낮음).
 - ⏳ 실제 MP3 파일 검증.
 - ⏳ `openflow-test` 13/15: `untitled.simulatedSaveThenOpenPanel`·`repeat.requestsStillWork` 실패(처음 기록 [app/README.md](../app/README.md) §35.2, 2026-10-26 변경 없는 `e16bd5e`(게시본 `81da6bd`와 같은 트리) 빌드에서도 같음 — [SPECTRUM-DESIGN.md](SPECTRUM-DESIGN.md) §15.6). 원인 미조사. `openimport-test`는 진단 fixture `long-180s.mp4`가 없어 최근 실행하지 않았다.
+- ⏳ Debug 자체 검사 충돌 이력(2026-10-26 조사, [SPECTRUM-DESIGN.md](SPECTRUM-DESIGN.md) §15.11): 진단 보고서 5개 — 제품 AppKit 충돌 1(2026-10-23, 고침), 자체 검사 배열 첨자 함정 4(`TimelineDrawSelfTest` 2026-10-23 둘, `SpectrumLaneSelfTest` 2026-10-26 둘). T-H1(커밋 안 함)이 그 두 검사의 확인 없는 접근을 실패 항목으로 바꿨다(잘못된 fixture 3가지로 충돌 없이 실패 확인). 다른 검사 파일은 검토하지 않았고, Debug 검사 전반이 충돌하지 않는다고 보지 않는다. 2026-10-26 00:17 SIGTERM 1번은 원인 모름.
 - ⏳ 엔진 내보내기 시험이 매우 느림(2026-10-25 관찰): `MultiLaneExportTests.testAudioLanesMixMuteVolumeExportAndPreview` 4.4 s(2026-10-24 실행) → 1016 s(전체 실행)·972 s(단독 다시 실행), `SubtitleExportTests.testMultilayerThroughR` 6.1 → 907 s(전체) → 5.8 s(단독). 둘 다 통과. 그때 주 화면이 잠들어 있었다(가설 원인, 확인 안 함). 그 시험·내보내기 코드는 스펙트럼 코드를 쓰지 않는다([SPECTRUM-DESIGN.md](SPECTRUM-DESIGN.md) §11.1).
   - 조사(2026-10-25 01:21 KST, 한 번만):
     - 같은 현재 코드로 단독 실행(150 s 상한·60 s에 표본 계획) → 4.40 s 통과. 이전 정상 4.35 s와 같고, 표본은 뜨지 않았다.

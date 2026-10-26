@@ -21,22 +21,30 @@ enum TimelineDrawSelfTest {
         guard let mid = s.assets.first?.id else { check("setup.import", false); return finish(folder, checks) }
         // 타임라인: 연결된 쌍 40개(몇 개는 들어내 빈틈), 위 영상 레인에 몇 개, 자막 30개(빈 자막 하나), 소리 음량·페이드, 위 오디오 레인 음소거
         var selectID: UUID?
+        // 준비 조건(T-H1, 2026-10-26): 아래 첨자·강제 풀기 대신 확인 — 맞지 않으면 편집을 거부(던짐)하고 setup.timeline이 이유와 함께 실패로 남는다
+        // (예전에는 조건이 어긋나면 이 닫힘 안 배열 첨자에서 앱이 멈췄다 — 2026-10-23 충돌 보고서 2건, docs/SPECTRUM-DESIGN.md §15.11).
+        var setupProblem: String?
+        func need(_ ok: Bool, _ why: String) throws { if !ok { setupProblem = why; throw EditError.badIndex } }
         s.commit({ t0 in
             var t = t0
-            let v = t.lanes(.video).first!.id, a = t.lanes(.audio).first!.id
+            guard let v = t.lanes(.video).first?.id, let a = t.lanes(.audio).first?.id else { setupProblem = "no base video/audio lane"; throw EditError.badIndex }
             for _ in 0..<40 { t = try t.appending(media: mid, videoLane: v, audioLane: a) }
             let vc = t.clips(inLane: v)
+            try need(vc.count >= 40, "V1 clips \(vc.count) < 40")
             for k in stride(from: 3, to: 40, by: 7) { t = try t.lifting(clip: vc[k].id) }   // 들어내면 목록이 줄므로 ID를 먼저 모은다
             let v2 = UUID(), a2 = UUID()
             t = try t.addingLane(.video, name: "V2", id: v2, outward: true).addingLane(.audio, name: "A2", id: a2, outward: true)
             for _ in 0..<3 { t = try t.appending(media: mid, videoLane: v2, audioLane: a2) }   // 위 영상 레인(겹친 영상) + 그 소리
             t = try t.addingSubtitleCreatingLane(at: 0, text: "첫 자막", style: .default, id: UUID(), newLaneName: "자막")
-            let sl = t.lanes(.subtitle).first!.id
+            guard let sl = t.lanes(.subtitle).first?.id else { setupProblem = "no subtitle lane"; throw EditError.badIndex }
             for k in 1..<30 { t = try t.addingSubtitle(lane: sl, at: k * 150, length: 90, text: k == 5 ? "" : "자막 \(k)\n둘째 줄", style: .default, id: UUID()) }
             let ac = t.clips(inLane: a)
+            try need(ac.count >= 2, "A1 clips \(ac.count) < 2")
             t = try t.settingClipAudio(clip: ac[1].id, volumePercent: 60, fadeInFrames: 20, fadeOutFrames: 30)
             t = try t.settingLaneAudio(a2, muted: true)
-            selectID = t.clips(inLane: v)[12].id
+            let vNow = t.clips(inLane: v)
+            try need(vNow.count > 12, "V1 clips after lifting \(vNow.count) <= 12")
+            selectID = vNow[12].id
             return t
         }, focus: nil)
         if let id = selectID { s.select(id) }
@@ -44,8 +52,11 @@ enum TimelineDrawSelfTest {
         await LaneSelfTest.settle()
         guard let tv = LaneSelfTest.find(TimelineNSView.self, w.contentView) else { check("setup.view", false); return finish(folder, checks) }
         guard s.timeline.isValid, s.timeline.clips.count > 30, s.timeline.subtitles.count == 30 else {
-            check("setup.timeline", false, "clips \(s.timeline.clips.count) subs \(s.timeline.subtitles.count) status \(s.statusMessage ?? "")"); return finish(folder, checks)
+            check("setup.timeline", false, "clips \(s.timeline.clips.count) subs \(s.timeline.subtitles.count) problem \(setupProblem ?? "-") status \(s.statusMessage ?? "")")
+            return finish(folder, checks)
         }
+        guard let baseVideo = s.timeline.baseLane(.video)?.id else { check("setup.baseVideoLane", false); return finish(folder, checks) }
+        // 아래의 clips[…] 첨자는 위 확인(클립 30개 넘음)으로 보호된다 — 이 검사는 그 뒤 타임라인을 편집하지 않는다(zoom.invariants가 확인)
 
         func render() -> Data? {
             let vr = tv.visibleRect
@@ -72,7 +83,7 @@ enum TimelineDrawSelfTest {
                 await LaneSelfTest.settle()
                 let vw = tv.visibleRect.width
                 let clips = s.timeline.clips.sorted { $0.start < $1.start }, subs = s.timeline.subtitles
-                let gaps = s.timeline.gaps(inLane: s.timeline.baseLane(.video)!.id)
+                let gaps = s.timeline.gaps(inLane: baseVideo)
                 var spots: [(String, CGFloat)] = [("start", 0), ("middle", tv.bounds.width / 2 - vw / 2), ("end", tv.bounds.width)]
                 if clips.count > 14 {
                     spots.append(("clipLeftEdge", tv.x(clips[14].start) + 10))             // 클립이 왼쪽 가장자리에 걸침

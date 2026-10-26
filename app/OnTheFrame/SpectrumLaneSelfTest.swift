@@ -80,7 +80,10 @@ enum SpectrumLaneSelfTest {
 
         // 3. 빈 스펙트럼 레인: 누를 항목 없음, 빈틈·무음 빗금 없음(빈 자막 레인과 같은 배경), 영상 빈틈과 다름
         let empty = viewPoint(sl, frame: 60)
-        let sub = t1.lanes.first { $0.kind == .subtitle }!.id
+        // 준비 조건(T-H1): 위 두 레인 편집이 실패했으면 강제 풀기로 멈추지 않고 실패로 남기고 끝낸다(뒤 검사는 이 레인들에 기댄다)
+        guard t1.laneInfo(sl)?.kind == .spectrum, let sub = t1.lanes.first(where: { $0.kind == .subtitle })?.id else {
+            return finish(folder, checks + [Check(name: "lane.setup", pass: false, detail: "kinds \(t1.lanes.map(\.kind.rawValue)) status \(s.statusMessage ?? "")")])
+        }
         check("empty.noHit", tv.clipHit(empty) == nil)
         let pSpec = pixel(empty), pSub = pixel(viewPoint(sub, frame: 60))
         check("empty.noGapHatch", near(pSpec, pSub), "spectrum \(rgb(pSpec)) subtitle \(rgb(pSub))")
@@ -137,9 +140,13 @@ enum SpectrumLaneSelfTest {
         s.commit({ try $0.addingSpectrum(lane: sl, at: 10, length: 50, sourceKey: $0.clip(a0)?.lineageKey, id: spID) }, focus: nil)
         await LaneSelfTest.settle()
         let t2 = s.timeline
+        // 준비 조건(T-H1): 스펙트럼을 넣지 못했으면(편집 실패는 상태 줄만 남김) 아래 t2의 첫 항목 첨자에서 멈추지 않고 실패로 끝낸다
+        guard let sp0 = t2.spectra.first, t2.spectra.count == 1 else {
+            return finish(folder, checks + [Check(name: "item.setup", pass: false, detail: "spectra \(t2.spectra.count) status \(s.statusMessage ?? "")")])
+        }
         let onItem = viewPoint(sl, frame: 35), offItem = viewPoint(sl, frame: 90)
         let pOn = pixel(onItem), pOff = pixel(offItem)
-        check("item.drawnReadOnly", t2.spectra.count == 1 && t2.spectrumSourceState(t2.spectra[0]) == .ok && !near(pOn, pOff) && tv.clipHit(onItem) == nil,
+        check("item.drawnReadOnly", t2.spectrumSourceState(sp0) == .ok && !near(pOn, pOff) && tv.clipHit(onItem) == nil,
               "on \(rgb(pOn)) off \(rgb(pOff))")
         // 검토용 그림(레인 머리 + 타임라인, cacheDisplay — 화면 표시가 아님). KEEP=1이면 실행 폴더에 남는다.
         if let rep = container.bitmapImageRepForCachingDisplay(in: container.bounds) {
@@ -156,7 +163,7 @@ enum SpectrumLaneSelfTest {
               "selection \(String(describing: s.selection)) depth \(s.history.undoDepth - dI)")
         // 스펙트럼이 있는 레인은 지우지 않음(2A: 스펙트럼 삭제 UI 없음)
         s.requestRemoveLane(sl); await LaneSelfTest.settle()
-        check("item.laneNotRemovable", !s.canRemoveLane(t2.laneInfo(sl)!) && s.timeline == t2 && !s.alerts.isShowing && (s.statusMessage ?? "").contains("스펙트럼"),
+        check("item.laneNotRemovable", t2.laneInfo(sl).map { !s.canRemoveLane($0) } == true && s.timeline == t2 && !s.alerts.isShowing && (s.statusMessage ?? "").contains("스펙트럼"),
               s.statusMessage ?? "")
 
         // 7. 안전 장치: 스펙트럼이 든 계획은 내보내지 않음(대상 없음), 스펙트럼이 든 프로젝트는 열지 않음(파일 그대로)
@@ -178,7 +185,7 @@ enum SpectrumLaneSelfTest {
         let opened = await s.openProject(at: proj)
         let openAlert = s.alert?.message
         await dismiss()
-        check("open.savedSpectrumProject", saved && ver == 8 && opened && openAlert == nil && s.timeline == before && s.timeline.spectrum(spID)?.sourceKey == t2.spectra[0].sourceKey
+        check("open.savedSpectrumProject", saved && ver == 8 && opened && openAlert == nil && s.timeline == before && s.timeline.spectrum(spID)?.sourceKey == sp0.sourceKey
               && !s.isDirty && s.history.undoDepth == 0 && s.projectURL == proj.standardizedFileURL && (try? Data(contentsOf: proj)) == bytes,
               "saved \(saved) version \(ver ?? -1) opened \(opened) alert '\(openAlert ?? "")'")
 
@@ -600,9 +607,10 @@ enum SpectrumLaneSelfTest {
             check("dropdown.changeUndoRedo", changedOK && noop && undoOK && redoOK, "change \(changedOK) noop \(noop) undo \(undoOK) redo \(redoOK)")
             // 고르지 않음 = nil(의도), 패널·타임라인 경고(주황)
             let un = await choose("(고르지 않음)")
-            let unOK = un && s.timeline.spectrum(sA.id)?.sourceKey == nil && s.spectrumWarnings(s.timeline.spectrum(sA.id)!) == [.unset]
-                && panelWarnings() == [s.spectrumWarningText(.unset)] && orangeish(indicator(s.timeline.spectrum(sA.id)!)) && sourcePopup()?.titleOfSelectedItem == "(고르지 않음)"
-            check("status.unassigned", unOK, "warnings \(panelWarnings()) ind \(rgb(indicator(s.timeline.spectrum(sA.id)!)))")
+            let spUn = s.timeline.spectrum(sA.id)   // T-H1: 없으면 실패(강제 풀기 없음 — 없을 때 `?.sourceKey == nil`은 참이라 보호가 되지 않았다)
+            let unOK = un && spUn != nil && spUn?.sourceKey == nil && spUn.map { s.spectrumWarnings($0) } == [.unset]
+                && panelWarnings() == [s.spectrumWarningText(.unset)] && spUn.map { orangeish(indicator($0)) } == true && sourcePopup()?.titleOfSelectedItem == "(고르지 않음)"
+            check("status.unassigned", unOK, "item \(spUn == nil ? "missing" : "ok") warnings \(panelWarnings()) ind \(spUn.map { rgb(indicator($0)) } ?? "-")")
             // 지워진 소스: 그 계보의 클립을 모두 지우면 "(없음 — 지워진 소스)"가 선택된 채 꺼지고 경고, 키는 그대로. 실행 취소로 되살아남.
             _ = await choose(label(kA) ?? "")
             let tBeforeLift = s.timeline
@@ -615,8 +623,8 @@ enum SpectrumLaneSelfTest {
             let pm = sourcePopup()
             let unavailableItem = pm?.itemArray.first { $0.title == "(없음 — 지워진 소스)" }
             let missingOK = s.timeline.spectrum(sA.id)?.sourceKey == kA && shown && pm?.titleOfSelectedItem == "(없음 — 지워진 소스)" && unavailableItem != nil
-                && s.spectrumWarnings(s.timeline.spectrum(sA.id)!) == [.missingSource] && panelWarnings() == [s.spectrumWarningText(.missingSource)]
-                && reddish(indicator(s.timeline.spectrum(sA.id)!)) && !(pm?.itemTitles.contains(label(kA) ?? "#") ?? true)
+                && s.timeline.spectrum(sA.id).map { s.spectrumWarnings($0) } == [.missingSource] && panelWarnings() == [s.spectrumWarningText(.missingSource)]
+                && s.timeline.spectrum(sA.id).map { reddish(indicator($0)) } == true && !(pm?.itemTitles.contains(label(kA) ?? "#") ?? true)
             let missingDetail = "sel '\(pm?.titleOfSelectedItem ?? "-")' state \(String(describing: stateAfterLift)) warnings \(panelWarnings()) ind \(s.timeline.spectrum(sA.id).map { rgb(indicator($0)) } ?? "-")"
             // "(없음 — 지워진 소스)"를 다시 고르거나 목록에 없는 키를 넣어도 아무것도 바꾸지 않음
             let tMissing = s.timeline, dM = s.history.undoDepth
@@ -636,12 +644,12 @@ enum SpectrumLaneSelfTest {
                 s.commit({ try $0.addingLane(.audio, name: "겹침", id: laneX).unlinking(clip: taPieces[1].id).relocating(clip: taPieces[1].id, toStart: 30, lane: laneX) }, focus: nil)
             }
             s.select(sA.id); await LaneSelfTest.settle()
-            let spOv = s.timeline.spectrum(sA.id)!
-            let ov = s.spectrumWarnings(spOv)
+            let spOv = s.timeline.spectrum(sA.id)   // T-H1: 없으면 실패(강제 풀기 없음)
+            let ov = spOv.map { s.spectrumWarnings($0) } ?? []
             let ovOK: Bool = { if case .overlap(let o)? = ov.first, ov.count == 1, o.first?.range == 30..<60 { return true }; return false }()
-            let ovPanel = panelWarnings().count == 1 && (panelWarnings().first ?? "").contains("겹칩니다") && reddish(indicator(spOv))
+            let ovPanel = panelWarnings().count == 1 && (panelWarnings().first ?? "").contains("겹칩니다") && spOv.map { reddish(indicator($0)) } == true
             s.undo(); s.select(sA.id); await LaneSelfTest.settle()
-            check("status.overlap", ovOK && ovPanel && s.timeline == tBeforeOv && panelWarnings().isEmpty, "\(ov) panel \(panelWarnings())")
+            check("status.overlap", spOv != nil && ovOK && ovPanel && s.timeline == tBeforeOv && panelWarnings().isEmpty, "item \(spOv == nil ? "missing" : "ok") \(ov) panel \(panelWarnings())")
             // 11e. 늦은 값: 그린 뒤 다른 값이 된 경우(from), 다른 스펙트럼을 고른 뒤, 지운 뒤, 끌기 중, 프로젝트를 바꾼 뒤의 옛 팝업 → 아무것도 바꾸지 않음
             let cur = s.timeline, proj = s.projectSession, curKey = s.timeline.spectrum(sA.id)?.sourceKey
             s.setSpectrumSource(sA.id, key: kOther, from: kOther == curKey ? kA : kOther, project: proj)   // 보인 값이 지금 값과 다름
@@ -1276,7 +1284,8 @@ enum SpectrumLaneSelfTest {
         let sp = UUID()
         let x = try base.appending(media: m, videoLane: Lane.videoID, audioLane: Lane.audioID, clipID: UUID())
             .addingLane(.spectrum, name: "스펙트럼", id: sp, outward: true)
-        return try x.addingSpectrum(lane: sp, at: 0, length: 120, sourceKey: x.audioClips[0].lineageKey)
+        guard let key = x.audioClips.first?.lineageKey else { throw EditError.badIndex }   // T-H1: 소리 클립이 없으면 만들기 실패(try?가 받음 — 첨자 함정은 받지 못함)
+        return try x.addingSpectrum(lane: sp, at: 0, length: 120, sourceKey: key)
     }
     /// 이전 형식 fixture: 5(클립만), 6(자막), 7(켜진 자막 효과) — 계보·스펙트럼 없음
     static func plainTimeline(_ base: Timeline, _ m: UUID) throws -> Timeline {
