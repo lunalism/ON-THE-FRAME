@@ -1267,3 +1267,71 @@ ON THE FRAME의 오디오 스펙트럼(R-10~R-12) 설계다. 표시:
 - **검증(2026-10-26, 이 Mac):** Debug 빌드 성공(바뀐 파일의 경고는 이전부터 있던 접근성 API 사용 중단 경고뿐). 유효한 fixture: `timeline-draw` 69/69, `spectrum-lane` 98/98(각 1회). 일부러 잘못 만든 fixture(시험 파일을 잠시 바꿨다가 해시로 되돌림, 소유자 파일·미디어 무관): 쌍 40개 대신 10개 → `setup.timeline` 실패(`problem V1 clips 10 < 40`), 스펙트럼을 영상 레인에 넣어 실패 → `item.setup` 실패(14개 통과 뒤 멈춤), 11절 직전 그 스펙트럼을 지움 → `status.unassigned`·`status.missingSourceUndo`·`status.overlap`·`safety.staleValues`·`persist.sourceAssignment` 5개 실패, 93개 통과. 세 경우 모두 결과 파일이 남고 시스템 로그상 앱 종료 `(0, 0, 0)`(정상), 새 충돌 보고서 0. 고치기 전 코드로 같은 fixture를 돌리지는 않았다(충돌 경고를 일부러 만들지 않음) — 고치기 전에는 그 자리에서 함정이었을 것이라는 것은 코드 읽기다. Release 빌드 성공, Release 실행 파일에 두 시험의 문자열 0(Debug에는 있음). 회귀는 바뀐 두 검사만 돌렸다(다른 검사 파일·제품 코드 변경 없음). 남은 증거: 통과한 실행의 폴더는 스크립트가 늘 지우고, `app/selftest-work/last-timeline-draw-result.json`(1개 실패)·`last-spectrum-lane-result.json`(93/98)은 그 뒤에 돌린 잘못된 fixture 실행으로 덮였다 — 유효한 fixture의 69/69·98/98은 실행 출력으로만 남았다. 잘못된 fixture의 스펙트럼 두 실행 폴더(`spectrum-lane-20261026T100524Z` 15개 중 14 통과·`item.setup` 실패, `…T101218Z` 98개 중 93 통과)는 남아 있다. 지금 두 시험 파일은 유효한 실행 때와 같은 내용이다(해시 확인).
 - **남은 것(검토 안 함 — 줄 패턴 수, 안전 여부 미확인):** `SubtitleSelfTest` 강제 풀기 26, `LaneSelfTest`·`SubtitleWindowSelfTest` 첨자 13씩, `ShortcutSelfTest` 12, `LayerDiagSelfTest`·`ProjectSelfTest` 8씩, `SpectrumPreviewExperiment` 7, `SelfTest` 6, 그 밖 1–3. 구체적 필요가 있을 때 따로 본다. Debug 검사가 전반적으로 충돌하지 않는다고 보지 않는다. 2026-10-26 00:17 SIGTERM의 원인, 소유자가 본 경고의 시각과 보고서의 대응은 모른다(경고 시각·화면 사진이 있으면 맞춰 볼 수 있음).
 - **상태:** T-H1 구현 완료 후보(커밋 안 함). 3단계 프리뷰는 시작하지 않았다.
+
+### 15.12 SP-1A 3A-1 — 가장 작은 공개 스펙트럼 그리기 입구(2026-10-26, 소유자 작업 지시 — 엔진만, 구현·자동 검증, 커밋 안 함)
+
+- **범위:** 3단계(프리뷰)를 소유자 작업 지시로 나눈 첫 단계. 앱이 스펙트럼 한 프레임을 그려 받을 public 입구만 만들었다. 프리뷰 층·`PlayerNSView`·디스플레이 링크·분석 일정·타임라인·만들기/편집·형식 8·저장·`ExportService`(스펙트럼 내보내기 거부 포함)·자막·모양 UI·Debug 노출은 바꾸지 않았다. 앱은 새 API를 부르지 않는다(코드 검색 0). 3A-2 이후는 시작하지 않았다(하위 단계 내용은 이 문서에 정의되어 있지 않음).
+- **공개 API(`app/Engine/Sources/OnTheFrameEngine/SpectrumRenderer.swift`):**
+  ```swift
+  public final class SpectrumFrameRenderer {
+      public init(width: Int, height: Int) throws          // 16~3840 × 16~2160, 캔버스 한 번 할당
+      public var width: Int { get }; public var height: Int { get }
+      public func render(bands: [Float], style: SpectrumItemStyle) throws -> SpectrumRenderedFrame?
+  }
+  public struct SpectrumRenderedFrame: @unchecked Sendable {
+      public let image: CGImage        // 미리 곱한 sRGB 8비트 BGRA(premultipliedFirst, little), 행 바이트 = 폭 × 4, 보통 칠한 부분만 16 px 단위로 자름(대체 경로는 전체 폭 행 띠 — §15.12.1)
+      public let drawRect: CGRect      // 캔버스 화소 좌표(위 왼쪽 원점)에서 image를 놓을 곳, 그 밖은 투명
+      public let canvasWidth: Int, canvasHeight: Int
+  }
+  public enum SpectrumRenderError: Error, Equatable { case invalidStyle(String), invalidValues(String), invalidCanvas(String) }  // package → public
+  ```
+  - `render`: 밴드 수 ≠ `style.bands`, 값이 0~1 유한이 아님, 1~1024개 밖, 모양 검사 실패(색 0–255 밖 포함)면 그리기 전에 던진다. 아날로그 모두 0은 기준선을 그린다(내부와 같음). (처음 문서의 "칠한 곳이 없으면 nil"은 부정확했다 — 실제 빈 결과의 뜻은 §15.12.1.)
+  - 스레드: `SpectrumFrameRenderer`는 한 작업에서만 쓴다(Sendable 아님 — `SpectrumCanvas`와 같음). 돌려준 `SpectrumRenderedFrame`은 다른 스레드로 넘기거나 오래 들고 있어도 된다.
+- **왜 가장 작은가:** 입력은 이미 public인 저장 모양 `SpectrumItemStyle`·밴드 배열·캔버스 크기뿐이다. `SpectrumStyle`·`SpectrumGeometry`·`SpectrumCanvas`·`SpectrumFrameRaster`(가변 캔버스·시험용 화소 접근 포함)는 package 그대로이고, 새 public 형은 그리기 객체 하나·불변 결과 하나이며 기존 오류 enum만 public으로 올렸다. 그리기는 `SpectrumCanvas.render`를 그대로 부른다(새 그리기 코드 없음, 모양 변환은 기존 `SpectrumItemStyle.renderStyle`). 타임라인 프레임 → 밴드 값(분석·일정)은 부르는 쪽 몫이다.
+- **소유권 장치(처음 구현 — 2026-10-26 검토 뒤 §15.12.1에서 바꿈, 기록으로 둠):** 내부 래스터의 그림을 `dataProvider.data`에서 읽어 **새로 할당한 `Data`에 복사**하고, 그 `Data`를 감싼 `CGDataProvider`로 같은 배치(크기·행 바이트·비트 배치·색 공간)의 `CGImage`를 만들어 돌려준다(`SpectrumFrameRenderer.ownedCopy`). 그 버퍼를 가진 것은 그 이미지뿐이고 아무도 쓰지 않는다. 그리기 객체는 지난 프레임을 붙잡지 않는다. 이유: 내부 래스터는 보통 따로 할당한 비트맵을 자른 것이지만, 캔버스 전체를 덮으면 다시 쓰는 캔버스의 `makeImage`, 그 비트맵을 얻지 못하면 `makeImage().cropping`(행 띠)이다(처음 문서는 뒤의 것을 `makeImage`로 잘못 적었다) — 그것이 복사라는 것은 SDK 설명에만 기댄다(§14). 비용: 프레임마다 칠한 부분 크기만큼 두 번 복사(공급자 읽기 + `Data`) — 1080p 기본 모양 약 6 MB, 측정하지 않았다.
+- **검증(2026-10-26, 이 Mac, 생성 값만 — 미디어·프로젝트 없음):**
+  - 새 시험 `SpectrumFrameRendererTests` 6개 통과(처음 구현 기준 — 고친 뒤 8개는 §15.12.1):
+    - 같은 입력에서 내부 `SpectrumCanvas.render`와 **바이트 같음**(배치·비트 배치·색 공간·`drawRect`·캔버스·모든 바이트, 같은 화소 형식이라 변환 없음): 디지털·아날로그 × 위·거울·아래 × (모두 0·고정 씨앗 무작위·모두 1) × 밴드 1·64·1024 = 54경우(nil 9개 = 디지털 모두 0, 둘 다 nil). 가장자리 잘림(좌우·위·아래 밖), 대각선 반투명 색, 캔버스 전체 덮음(내부 `makeImage` 경로), 16×16, 4K. 칠한 화소가 모두 그리기 범위 안(밖 투명) — 공개 이미지와 내부 캔버스 둘 다.
+    - 앞 프레임 독립: 전체 덮음 프레임·자른 프레임을 들고 캔버스를 비우는 그리기와 다른 모양 20번 뒤에도 바이트 그대로, 같은 입력 다시 그리기(A, B, A) 같은 바이트, 두 프레임의 버퍼 주소가 다름(같은 이미지에서 두 번 읽으면 같은 주소 — 공급자가 그 `Data`를 돌려줌을 확인), 다른 스레드에서 읽어도 같음.
+    - 복사 장치: 바꿀 수 있는 버퍼를 복사 없이 감싼 원본은 버퍼를 바꾸면 따라 바뀌고, `ownedCopy` 결과는 그대로.
+    - 잘못된 입력 8가지(개수 불일치·NaN·>1·<0·두께 0·색 300·밴드 0·1025)는 던지고, 앞 프레임 그대로, 다음 그리기 = 새 캔버스 그리기. 잘못된 캔버스 크기 4가지 거부.
+    - 되풀이: 그리기 객체 하나 = 캔버스 하나(2100번 뒤에도), 놓으면 0, 2000번 뒤 발자국 늘지 않음(215.5 → 148.3 MB, 64 MB 상한 시험 — 한 번 측정).
+  - **음성 대조(소스를 잠시 바꿨다가 해시로 되돌림):** ① 복사를 빼고 내부 그림을 그대로 돌려줌 → 6개 모두 통과(이 OS에서는 내부 그림도 뒤 그리기에 바뀌지 않음 — 행동 시험만으로는 장치를 증명하지 못함). ② `ownedCopy`가 원본을 돌려줌 → 복사 장치 시험만 실패. 그래서 소유권 보장은 ② 시험 + 코드 검토(입구가 늘 `ownedCopy`를 거침)에 기댄다.
+  - 첫 집중 실행에서 내 시험의 기대값 실수 1개(nil 수를 3으로 잘못 셈 — 실제 9, 바이트 비교는 통과)로 실패, 기대값을 고쳐 다시 통과. 처음 결과 로그는 남김.
+  - 집중(`…T135253Z`): 25개 실패 0 = 그때 있던 새 시험 **5개**(복사 장치 시험은 그 뒤에 더함) + `SpectrumExportCheckpointTests` 8 + `SpectrumModelTests` 12. 여섯 번째 새 시험(복사 장치)은 그 뒤 집중 실행 `…T135518Z`(6/6)와 엔진 전체 실행에서 통과했다. (처음 보고의 "새 6 + checkpoint 7 + model 12"는 틀린 나눔이었다.)
+  - 엔진 전체 `swift test`: 246개 실행, 57개 건너뜀(옵트인), 실패 0, exit 0(355 s, 느림 재발 없음). 예상 밖 프로세스 종료·새 충돌 보고서 없음.
+  - 앱 기본 `app/scripts/build.sh` Debug·Release 모두 `BUILD SUCCEEDED`. 바뀐 엔진 파일 경고 0(남은 경고는 이번에 바꾸지 않은 파일뿐). 앱 자체 검사는 돌리지 않았다(앱 코드 변경 없음).
+  - 로그(`app/selftest-work/`, Git 무시): `sp3a1-focused-20261026T135140Z.log`(처음 실패), `…T135253Z`·`…T135409Z`·`…T135518Z`(통과), `sp3a1-negctl-nocopy-20261026T135432Z.log`, `sp3a1-negctl-ownedcopy-20261026T135542Z.log`, `sp3a1-engine-full-20261026T135609Z.log`, `sp3a1-app-{Debug,Release}-20261026T140225Z.log`.
+- **한계·가정:** 프리뷰 연결·실제 재생 중 비용·디스플레이 링크 시간 안 그리기는 확인하지 않았다(3A-2 이후). 복사 비용은 재지 않았다. 4K는 바이트 비교 한 경우뿐. 그리기 값은 잠정(D-S5), 한 색만(D-S6는 SP-2). `ProjectFile`·형식 8·`ExportService`·스펙트럼 내보내기 거부는 코드 변경 없음(diff로 확인) — 기존 시험이 통과했다. 3단계는 완료가 아니다.
+- **상태:** 3A-1 구현 완료 후보(커밋 안 함). 다음 3A-2·프리뷰 연결은 작업 지시가 있을 때.
+
+#### 15.12.1 3A-1 검토 지적과 고침 — 대체 경로 화소 정확성·소유권(2026-10-26, 소유자 작업 지시 — 구현·자동 검증, 커밋 안 함)
+
+- **검토 지적(읽기 전용 검토, 증거 종류: 코드 읽기로 본 위험 — 실행으로 재현하지 않은 상태):** `tightCrop`이 자른 비트맵을 얻지 못하면 다시 쓰는 캔버스의 `makeImage().cropping(to:)`(전체 폭 행 띠)를 돌려준다. 처음 `ownedCopy`는 그림의 `dataProvider.data` 앞쪽 바이트를 `bytesPerRow × height`만큼 복사했고, 길이가 그 이상이기만 하면 받아들였다. 부분 이미지의 공급자 데이터가 원래 이미지 전체라면 틀린 화소(대개 투명)를 오류 없이 돌려줄 수 있다는 지적이었다.
+- **재현 시도(고치기 전 코드, `sp3a1fix-prefix-repro-20261026T142833Z.log`):** `SubtitleRenderer.maxBitmapBytesForTest = 1000`으로 그 분기를 강제했다(들어갔음을 내부 래스터로 확인: 1920×182, `drawRect` (0, 709, 1920, 182) — 보통 경로의 좁은 자름이 아님). 이 OS에서는 부분 이미지의 공급자 데이터가 정확히 행 수 × 행 바이트(1 397 760)였고, 고치기 전 입구도 화소가 모두 맞았다(틀림 0, 칠함 31 608/31 608). **의심한 실패는 재현되지 않았다** — 검토의 플랫폼 가정은 이 OS에서 틀렸다. 다만 부분 이미지의 공급자 데이터가 어떤 원점·행 간격을 갖는지는 문서로 보장되지 않으므로, 처음 장치는 문서화되지 않은 동작에 기댄 것이다.
+- **고침(가장 작은, 닫힌 쪽으로 실패):** 화소를 내부 그림(`r.image`)의 공급자에서 꺼내지 않는다. `render`가 돌아오기 직전의 캔버스(같은 스레드, 사이에 그리기 없음 — 내부 그림도 이 캔버스에서 나옴)에서 `drawRect` 부분을 행마다 복사한다.
+  - `render`: `drawRect`가 정수이고 내부 그림과 크기가 같을 때만 복사하고, 아니면 `SpectrumRenderError.invalidCanvas`를 던진다(그림을 돌려주지 않음).
+  - `SpectrumCanvas.ownedImage(_:)`(internal): 사각형이 정수·1×1 이상·캔버스 안인지 확인하고, `withExtendedLifetime(ctx)` 안에서 캔버스 메모리를 빌려 복사한다.
+  - `SpectrumFrameRenderer.ownedCopy(_:bytesPerRow:rect:)`(internal, 바뀐 서명): 원점 (x0, y0)·원본 행 간격으로 행마다 `memcpy`해 새 `Data`(길이 = 폭 × 4 × 높이)에 담고, 행 바이트 = 폭 × 4, 미리 곱한 sRGB BGRA(premultipliedFirst | byteOrder32Little)로 `CGImage`를 만든다. 행 밖 사각형은 거부.
+  - 공개 API(서명·형)는 그대로. `SubtitleRenderer`·다른 제품 코드는 바꾸지 않았다. 새 그리기 알고리즘 없음.
+- **소유권·수명 계약(고친 뒤):** 결과 이미지 → `CGDataProvider` → `CFData`(Swift `Data`를 이은 것, 그 뒤 아무도 쓰지 않음)만 화소를 붙잡는다. 원점·행 간격·형식은 우리 코드가 정한다(캔버스 형식과 같음, 공급자 표현에 기대지 않음). 캔버스 메모리는 복사하는 동안만 빌리고(`withExtendedLifetime`), 복사가 끝나면 결과와 무관하다. 앞서 돌려준 프레임은 뒤 그리기·실패에 바뀌지 않는다. CGImage는 SDK 헤더가 Sendable로 표시한다. `SpectrumRenderedFrame`의 `@unchecked Sendable`은 그대로 두었다(빼도 되는지는 컴파일로 확인하지 않음).
+- **빈 결과의 실제 뜻(내부 의미 그대로, 바꾸지 않음):** 그릴 범위가 없으면 nil — 디지털 모두 0, 범위가 캔버스 밖 전체. 범위는 있으나 칠한 화소가 없으면 투명 1×1 프레임 — 알파 0(시험), 아날로그 밴드 1개(관찰: 1×1 at (0, 297)). 그 밖에는 자른 프레임. 잘못된 입력은 오류.
+- **새·바뀐 시험(`SpectrumFrameRendererTests`, 이제 8개 — 처음 6개는 남김):**
+  - 새 `testAllocationFallbackIsPixelCorrectOrFailsExplicitly`: 원점에서 먼 색 막대(행 약 709–890)로 대체 분기를 강제하고 들어갔는지 확인한 뒤, 결과가 기준(보통 경로로 같은 입력을 그린 내부 캔버스 화소를 직접 읽음)과 화소마다 같고 칠한 화소 수가 같거나(투명 결과는 실패), 또는 `SpectrumRenderError`를 던지는지 본다. 그 뒤 시험 장치 되돌림, 앞 프레임 그대로, 다음 그리기 = 보통 경로를 확인한다. 이번 결과: 화소 맞음(틀림 0, 31 608/31 608) — 실패 경로는 타지 않았다.
+  - 새 `testEmptyResultSemantics`: 위 빈 결과의 뜻.
+  - 바뀐 `testOwnedCopyDetachesFromMutableSource`: 같은 뜻(바꿀 수 있는 원본은 따라 바뀌고 복사본은 그대로)을 새 서명으로 본다. 원점 (5, 3)·행 간격 > 폭, 화소마다 다른 값으로 원점·간격·채널 순서를 확인하고 행 밖 사각형 거부를 더했다.
+  - 시험 도우미 `bytes()`가 CFData 포인터를 빌리는 동안 `withExtendedLifetime`.
+  - 다른 다섯 시험의 기대값은 바꾸지 않았다.
+- **음성 대조(소스를 잠시 바꿨다가 해시로 되돌림):**
+  - N1 잘못된 원점((0,0)에서 복사): 대체 시험 실패(틀림 31 608, 칠함 0 — 투명 결과를 거부), 동등성 시험 여럿 실패 — 53개 단언 실패(`sp3a1fix-negctl-wrongorigin-20261026T143033Z.log`).
+  - N2 복사 없이 캔버스 메모리를 감쌈: 복사 장치 시험 실패("복사본은 그대로"), **앞 프레임 독립 시험도 실패**(뒤 그리기가 들고 있던 프레임을 바꿈 — 이제 입구가 살아 있는 캔버스에서 복사하므로 복사를 빼면 행동 시험에도 드러남). 대조가 행 간격도 바꿔 동등성 시험은 "layout"으로 실패 — 60개 단언 실패(`sp3a1fix-negctl-nocopy-20261026T143115Z.log`).
+  - 처음 구현의 대조 ①(내부 그림을 그대로 돌려줌)은 이번에 다시 돌리지 않았다.
+- **검증(2026-10-26, 이 Mac, 생성 값만):**
+  - 고친 뒤 집중 `SpectrumFrameRendererTests` 8개 실행·통과·실패 0·건너뜀 0(`sp3a1fix-focused-20261026T142951Z.log`).
+  - 스펙트럼 그리기와 비트맵 시험 장치를 쓰는 회귀: 76개 실행·통과·실패 0·건너뜀 0 — Analysis 12, ExportCheckpoint 8, FrameRenderer 8, Model 12, Scheduler 14, SubtitleEffects 12, SubtitlePreviewEdit 10(`sp3a1fix-spectrum-regress-20261026T143219Z.log`).
+  - 엔진 전체 `swift test`: 248개 실행, 57개 건너뜀(옵트인), 실패 0, exit 0, 354 s(`sp3a1fix-engine-full-20261026T143349Z.log`). 246 → 248은 새 시험 2개.
+  - 앱 `app/scripts/build.sh` Debug·Release `BUILD SUCCEEDED`, 바뀐 엔진 파일 경고 0(`sp3a1fix-app-{Debug,Release}-*.log`). 앱은 새 API를 부르지 않는다. 앱 자체 검사는 돌리지 않았다.
+  - 예상 밖 프로세스 종료·새 진단 보고서 없음. 시험은 첫 실행에 모두 통과했다(다시 돌림 없음).
+- **복사·할당(측정 안 함):** 내부 `tightCrop`의 자른 비트맵(할당 + 복사)은 그대로 만들어지고 이제 버려진다. 입구는 캔버스에서 `drawRect` 크기만큼 한 번 복사한다(새 `Data` 1개 + provider + CGImage). 처음 구현의 공급자 읽기(복사 또는 유지)는 없어졌다. 대체 경로에서는 전체 폭 행 띠를 복사한다(1080p 최대 약 7.9 MB, 4K 약 33 MB). 성능이 괜찮다고 말하지 않는다 — 측정은 3A-2/3B.
+- **남은 한계:** 대체 시험은 성공 경로(화소 맞음)만 탔고, `drawRect` 불일치로 던지는 경로는 지금 코드에서 만들 방법이 없어 시험하지 않았다(코드 검토만). 시험 장치는 전역 값이라 병렬 실행에서는 다른 시험과 간섭할 수 있다(기본 직렬). 그 밖은 §15.12 한계 그대로. 3단계는 완료가 아니다.
+- **상태:** 3A-1 구현 완료 후보(고친 뒤, 커밋 안 함). 3A-2·프리뷰 연결은 시작하지 않았다.

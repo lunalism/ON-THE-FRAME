@@ -34,7 +34,8 @@ package struct SpectrumStyle: Sendable, Equatable {
     }
 }
 
-package enum SpectrumRenderError: Error, Equatable {
+/// 그리기 입력 오류(2026-10-26 SP-1A 3A-1부터 public — 공개 그리기 입구 SpectrumFrameRenderer가 던진다)
+public enum SpectrumRenderError: Error, Equatable {
     case invalidStyle(String), invalidValues(String), invalidCanvas(String)
 }
 
@@ -138,11 +139,75 @@ package final class SpectrumCanvas {
         guard x >= 0, x < width, y >= 0, y < height else { return 0 }
         return ctx.data!.assumingMemoryBound(to: UInt32.self)[y * width + x]
     }
+    /// 마지막으로 그린 캔버스의 r 부분(정수 화소, 캔버스 안)을 새로 할당한 버퍼에 복사한 이미지(SP-1A 3A-1 공개 입구용 — SpectrumFrameRenderer.ownedCopy)
+    func ownedImage(_ r: CGRect) throws -> CGImage {
+        guard r.integral == r, r.width >= 1, r.height >= 1, CGRect(x: 0, y: 0, width: width, height: height).contains(r) else {
+            throw SpectrumRenderError.invalidCanvas("copy rect \(r)")
+        }
+        return try withExtendedLifetime(ctx) { try SpectrumFrameRenderer.ownedCopy(UnsafeRawPointer(ctx.data!), bytesPerRow: ctx.bytesPerRow, rect: r) }
+    }
     /// 마지막으로 그린 캔버스에서 r 밖에 칠한 화소 수(전체 훑기 — 시험·진단용)
     package func paintedPixels(outside r: CGRect) -> Int {
         let px = ctx.data!.assumingMemoryBound(to: UInt32.self)
         var n = 0
         for y in 0..<height { for x in 0..<width where px[y * width + x] != 0 && !r.contains(CGPoint(x: Double(x) + 0.5, y: Double(y) + 0.5)) { n += 1 } }
         return n
+    }
+}
+
+// MARK: 공개 그리기 입구(2026-10-26, SP-1A 3A-1 — docs/SPECTRUM-DESIGN.md §15.12)
+// 앱(프리뷰)이 스펙트럼 한 프레임을 그려 받는 가장 작은 public 입구. 그리기는 위 SpectrumCanvas.render를 그대로 쓴다(따로 그리는 코드 없음).
+// 모양은 저장 모양 SpectrumItemStyle(public)을 받아 안에서 renderStyle(package)로 바꾼다. 캔버스·SpectrumStyle·SpectrumGeometry는 package 그대로다.
+
+/// 그린 한 프레임(불변). 화소는 이 값만 가진 버퍼에 복사되어 있어 뒤의 그리기가 바꾸지 못한다.
+/// - image: 미리 곱한 sRGB 8비트(premultipliedFirst, 메모리 B·G·R·A, 행 바이트 = 폭 × 4). 보통 칠한 부분만 16 px 단위로 자른 것이고
+///   (내부 그리기와 같은 바이트), 자른 비트맵을 얻지 못한 경우는 내부 그림과 같은 전체 폭 행 띠다. 화소는 캔버스에서 drawRect 부분을 복사한 것.
+/// - drawRect: 캔버스 화소 좌표(위 왼쪽 원점)에서 image를 놓을 사각형. 그 밖의 캔버스는 모두 투명이다.
+public struct SpectrumRenderedFrame: @unchecked Sendable {   // CGImage는 불변이고 그 버퍼를 다른 곳에서 쓰지 않는다(아래 ownedCopy)
+    public let image: CGImage
+    public let drawRect: CGRect
+    public let canvasWidth: Int, canvasHeight: Int
+}
+
+/// 스펙트럼 프레임 그리기(캔버스 한 번 할당, 크기 16~3840 × 16~2160). 한 작업에서만 쓴다 — 스레드 안전하지 않다(SpectrumCanvas와 같음).
+/// 돌려준 SpectrumRenderedFrame은 그 뒤로 이 그리기와 무관하다: 다른 스레드로 넘기거나 오래 들고 있어도 된다. 이 객체는 지난 프레임을 붙잡지 않는다.
+public final class SpectrumFrameRenderer {
+    private let canvas: SpectrumCanvas
+    public var width: Int { canvas.width }
+    public var height: Int { canvas.height }
+    public init(width: Int, height: Int) throws { canvas = try SpectrumCanvas(width: width, height: height) }
+
+    /// 밴드 값(분석 결과, 0~1 유한, 개수 = style.bands)을 그 모양으로 그린다. 잘못된 모양·값이면 그리기 전에 던진다(캔버스·앞서 돌려준 프레임 모두 그대로).
+    /// 결과(내부 SpectrumCanvas.render 의미 그대로): 그릴 범위가 없으면 nil(디지털 모두 0, 범위가 캔버스 밖 전체). 범위는 있으나 칠한 화소가 없으면
+    /// (알파 0, 아날로그 밴드 1개 등) 투명 1×1 프레임. 그 밖에는 칠한 부분을 16 px 단위로 자른 프레임.
+    public func render(bands v: [Float], style: SpectrumItemStyle) throws -> SpectrumRenderedFrame? {
+        guard v.count == style.bands else { throw SpectrumRenderError.invalidValues("count \(v.count) ≠ style bands \(style.bands)") }
+        guard let r = try canvas.render(v, style: style.renderStyle) else { return nil }
+        // 화소는 내부 그림(r.image)에서 꺼내지 않고 방금 그린 캔버스에서 drawRect 부분을 직접 복사한다. 내부 그림은 보통 따로 자른 비트맵이지만
+        // 비트맵을 얻지 못하면 캔버스 makeImage().cropping(행 띠)이고, 그 공급자 데이터의 원점·행 간격은 문서로 보장되지 않는다(2026-10-26 검토).
+        // drawRect가 내부 그림을 그대로 설명할 때만(같은 크기, 정수, 캔버스 안) 복사하고, 아니면 실패한다.
+        let d = r.drawRect
+        guard d.integral == d, r.image.width == Int(d.width), r.image.height == Int(d.height) else {
+            throw SpectrumRenderError.invalidCanvas("frame rect \(d) vs image \(r.image.width)x\(r.image.height)")
+        }
+        return SpectrumRenderedFrame(image: try canvas.ownedImage(d), drawRect: d, canvasWidth: width, canvasHeight: height)
+    }
+
+    /// base(위 왼쪽 원점, 행 간격 bytesPerRow, 미리 곱한 sRGB BGRA 32비트 — 캔버스와 같은 형식)의 rect 부분을 새로 할당한 Data에 행마다 복사해,
+    /// 그 Data만 가진 CGImage(행 바이트 = 폭 × 4, 데이터 길이 = 행 바이트 × 높이)를 만든다. 부르는 쪽이 rect가 base 안임을 보장한다(SpectrumCanvas.ownedImage가 확인).
+    /// 복사가 끝나면 base와 무관하다: 그 Data는 불변이고 provider → 이미지만 붙잡는다.
+    static func ownedCopy(_ base: UnsafeRawPointer, bytesPerRow: Int, rect: CGRect) throws -> CGImage {
+        let x0 = Int(rect.minX), y0 = Int(rect.minY), w = Int(rect.width), h = Int(rect.height), rowBytes = w * 4
+        guard w >= 1, h >= 1, x0 >= 0, y0 >= 0, (x0 + w) * 4 <= bytesPerRow else { throw SpectrumRenderError.invalidCanvas("copy rect \(rect)") }
+        var owned = Data(count: rowBytes * h)
+        owned.withUnsafeMutableBytes { dst in
+            for r in 0..<h { memcpy(dst.baseAddress! + r * rowBytes, base + (y0 + r) * bytesPerRow + x0 * 4, rowBytes) }
+        }
+        guard let provider = CGDataProvider(data: owned as CFData),
+              let out = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: rowBytes, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
+                                provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+        else { throw SpectrumRenderError.invalidCanvas("image copy") }
+        return out
     }
 }
