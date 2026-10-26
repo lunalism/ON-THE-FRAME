@@ -460,6 +460,17 @@ final class TimelineNSView: NSView {
                 NSColor.systemRed.setStroke(); let p = NSBezierPath(rect: r.insetBy(dx: 1, dy: 1)); p.lineWidth = 2; p.stroke()
             }
         }
+        if let id = st.proposalID, let s = st.proposalStart, let base = store.gestureBase, let sp = base.spectrum(id) {   // 스펙트럼 옮기기(2C-1, 자막과 같은 표시)
+            if st.proposalOK {
+                let p = NSBezierPath(roundedRect: spectrumRect(sp).insetBy(dx: 1, dy: 1), xRadius: 4, yRadius: 4)
+                p.setLineDash([4, 3], count: 2, phase: 0); p.lineWidth = 1
+                NSColor.secondaryLabelColor.setStroke(); p.stroke()
+            } else {
+                let r = spectrumRect(sp, lane: st.proposalLane, start: s)
+                NSColor.systemRed.withAlphaComponent(0.25).setFill(); r.fill()
+                NSColor.systemRed.setStroke(); let p = NSBezierPath(rect: r.insetBy(dx: 1, dy: 1)); p.lineWidth = 2; p.stroke()
+            }
+        }
         if let id = st.proposalID, let s = st.proposalStart, let base = store.gestureBase, let c = base.clip(id) {
             for m in base.group(of: id) {
                 if st.proposalOK {
@@ -614,11 +625,13 @@ final class TimelineNSView: NSView {
 
     /// 스펙트럼 항목의 경고 표시 자리(오른쪽 위)
     static func spectrumWarningRect(_ r: NSRect) -> NSRect { NSRect(x: r.maxX - 15, y: r.minY + 3, width: 11, height: 11) }
-    func spectrumRect(_ s: SpectrumItem) -> NSRect {
-        let l = laneRect(s.lane) ?? .zero
-        return NSRect(x: x(s.start), y: l.minY, width: max(1, CGFloat(s.length) * pixelsPerFrame), height: l.height)
+    /// 스펙트럼 상자. lane·start를 주면 그 자리(옮기기 제안 표시, 2C-1)
+    func spectrumRect(_ s: SpectrumItem, lane: UUID? = nil, start: Int? = nil) -> NSRect {
+        let l = laneRect(lane ?? s.lane) ?? .zero
+        return NSRect(x: x(start ?? s.start), y: l.minY, width: max(1, CGFloat(s.length) * pixelsPerFrame), height: l.height)
     }
-    /// 스펙트럼 누름 판정(SP-1A 2B-2): 고르기 전용. clipHit(트림·옮기기·자르기 도구·문맥 메뉴가 쓰는 판정)과 따로 둬 끌기·트림·자르기에 닿지 않는다.
+    /// 스펙트럼 누름 판정(SP-1A 2B-2 고르기, 2C-1 옮기기): clipHit(트림·자르기 도구·문맥 메뉴가 쓰는 판정)과 따로 둬 클립 메뉴·자르기·트림에 닿지 않는다.
+    /// 가장자리를 따로 보지 않는다(본문과 같음 — 트림은 2C-2).
     /// 그린 상자와 같은 범위 [x(start), x(end)) — 이어 붙은 두 항목의 경계는 오른쪽 항목.
     func spectrumHit(_ p: NSPoint) -> UUID? {
         guard let st = state else { return nil }
@@ -627,8 +640,8 @@ final class TimelineNSView: NSView {
         }
         return nil
     }
-    /// 스펙트럼 항목(2026-10-25, SP-1A 2A): 분홍 점선 상자와 소스 상태 글자. 누름 판정(clipHit)·커서·끌기에 넣지 않아
-    /// 옮기거나 자를 수 없다(2C). 2B-2부터 누르면 고르고(spectrumHit) 고른 항목은 강조색 실선으로 그린다. 스펙트럼이 든 프로젝트를 열면 보인다(2B-1). 소스는 정상인데 그 원본 파일을 찾지 못했으면 "원본 파일 없음"을 덧붙인다
+    /// 스펙트럼 항목(2026-10-25, SP-1A 2A): 분홍 점선 상자와 소스 상태 글자. 누름 판정(clipHit)·커서에 넣지 않아
+    /// 트림·자르기는 없다(2C-2·SP-1A 밖). 2C-1부터 선택 도구로 끌어 옮긴다(spectrumHit → 누름 대기). 2B-2부터 누르면 고르고(spectrumHit) 고른 항목은 강조색 실선으로 그린다. 스펙트럼이 든 프로젝트를 열면 보인다(2B-1). 소스는 정상인데 그 원본 파일을 찾지 못했으면 "원본 파일 없음"을 덧붙인다
     /// (엔진의 "소스 없음" = 그 계보의 소리 조각이 없음과 다른 상태).
     private func drawSpectrum(_ s: SpectrumItem, _ st: TimelineDrawState) {
         let r = spectrumRect(s)
@@ -830,8 +843,10 @@ final class TimelineNSView: NSView {
                 drag = .pending(id, p)
             }
         } else if let sid = spectrumHit(p) {
-            // 스펙트럼(SP-1A 2B-2): 누르면 고르기만 한다(⌘-클릭도 보통 선택). 옮기기·트림은 2C — 끌기를 시작하지 않는다.
-            store.pauseForEdit(); store.select(sid); drag = .none
+            // 스펙트럼(SP-1A 2B-2 고르기, 2C-1 옮기기): 누르면 고르고, 4 pt를 넘겨 끌면 클립·자막과 같은 누름 대기 → 옮기기(선택 도구만 — 자르기·텍스트 도구는
+            // 위에서 이미 끝남). ⌘-클릭은 보통 고르기이고 끌기를 시작하지 않는다(클립 ⌘-클릭과 같음). 가장자리도 본문과 같다 — 트림은 2C-2.
+            store.pauseForEdit(); store.select(sid)
+            drag = e.modifierFlags.contains(.command) ? .none : .pending(sid, p)
         } else {
             store.select(nil); store.selectLane(nil); drag = .none
         }
@@ -848,7 +863,7 @@ final class TimelineNSView: NSView {
             guard abs(p.x - p0.x) > 4 || abs(p.y - p0.y) > 4 else { return }
             guard store.tool == .selection else { drag = .none; return }   // 누른 뒤 도구가 바뀌었으면 옮기지 않는다
             // 누른 클립이 없어졌거나 선택이 바뀌었으면 옮기지 않는다(CP-08: 저장소가 편집 명령 전에 대기를 지우지만, 다른 길로 바뀐 경우의 마지막 확인)
-            guard store.timeline.clip(id) != nil || store.timeline.subtitle(id) != nil, store.selection == id else { drag = .none; return }
+            guard store.timeline.clip(id) != nil || store.timeline.subtitle(id) != nil || store.timeline.spectrum(id) != nil, store.selection == id else { drag = .none; return }
             store.beginGesture(select: id)
             drag = .free(id, p0.x)
             #if DEBUG

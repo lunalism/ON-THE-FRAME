@@ -63,11 +63,13 @@ final class ProjectStore {
         if let c = linkCandidate { s.insert(c) }
         return s
     }
-    /// 고른 스펙트럼(SP-1A 2B-2): 누르면 고른다. 옮기기·트림·복사·자르기는 아직 없다(2C 등).
+    /// 고른 스펙트럼(SP-1A 2B-2): 누르면 고르고 끌어 옮긴다(2C-1). 트림(2C-2)·복사·자르기는 아직 없다.
     var selectedSpectrum: SpectrumItem? { selection.flatMap { timeline.spectrum($0) } }
     /// 이 타임라인에서 고를 수 있는 항목인가(클립·자막·스펙트럼) — 실행 취소·레인 편집 뒤 선택을 남길지
     func isSelectable(_ id: UUID) -> Bool { timeline.clip(id) != nil || timeline.subtitle(id) != nil || timeline.spectrum(id) != nil }
     static let spectrumEditUnsupported = "스펙트럼은 아직 자르거나 복사할 수 없습니다. 지우려면 Delete를 누르세요."
+    /// 스펙트럼 옮기기를 놓은 자리가 같은 스펙트럼 레인의 다른 스펙트럼과 겹칠 때(2C-1). 소스 조각 겹침(계보 경고)·클립 겹침과 다른 제약이다.
+    static let spectrumMoveOverlap = "같은 스펙트럼 레인의 다른 스펙트럼과 겹쳐 옮기지 않았습니다. 빈 곳이나 다른 스펙트럼 레인에 놓으세요."
     private(set) var playhead = 0 {            // 0…durationFrames(끝 위치 포함)
         // 프리뷰 자막 그림의 시간 창(§49): 재생 헤드 근처 자막만 그림을 붙잡는다. 보임·숨김은 동기 층 애니메이션 그대로다.
         didSet { if playhead != oldValue { previewHost?.subtitlePlayheadMoved(to: playhead) } }
@@ -260,6 +262,15 @@ final class ProjectStore {
         })
         #if DEBUG
         // 끌기 진단(Debug 전용, CP-01): 앱 활성·편집기 창 키 상태가 돌아온 때와, 왼쪽 버튼을 누른 채 ⌘가 바뀐 때(⌘Tab 전환 화면과 실제 비활성 구분)
+        // ⌘ 추적 값은 앱이 활성일 때 받는 로컬 이벤트로만 바뀐다 — 비활성 동안 ⌘를 떼면 "누름"으로 남아 다음 ⌘ 누름이 기록되지 않았다(2026-10-26 소유자 기록). 비활성이 될 때 되돌린다.
+        focusObservers.append(NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let was = self.commandDownForDebug
+                self.commandDownForDebug = false
+                self.traceGestureDebug("lifecycle appResignActive commandTrackerReset=\(was)")
+            }
+        })
         focusObservers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.traceGestureDebug("lifecycle appBecomeActive") }
         })
@@ -1153,7 +1164,7 @@ final class ProjectStore {
         history.beginGesture()
         gestureBase = timeline
         #if DEBUG
-        gestureSerialForDebug += 1; traceGestureDebug("begin kind=timeline")
+        gestureSerialForDebug += 1; traceGestureDebug("begin kind=timeline target=\(debugTargetKind(id))")
         #endif
     }
     /// 프리뷰에서 자막 옮기기(V 끌기, §44): 시작·놓기·취소는 다른 끌기와 같은 beginGesture·commitGesture·cancelGesture(한 단계, Esc 취소, D-031)
@@ -1223,6 +1234,16 @@ final class ProjectStore {
             else { freeMoveProposal = (id, s, false, l); history.updateGesture(base, focus: id) }
             return
         }
+        if let base = gestureBase, let sp = base.spectrum(id) {   // 스펙트럼 옮기기(SP-1A 2C-1, 리플 없음): 스펙트럼 레인 사이에서만, 소스·모양·ID 그대로
+            let (d, snap) = base.snappedSpectrumDelta(id, delta: max(Double(-sp.start), delta), threshold: snapFrames)
+            let s = sp.start + d
+            let l = lane.flatMap { base.laneInfo($0)?.kind == .spectrum ? $0 : nil } ?? sp.lane   // 다른 종류 레인 위면 원래 레인(새 레인을 만들지 않음)
+            if let p = freeMoveProposal, p.id == id, p.start == s, p.lane == l, snapGuide == snap { return }   // 같은 프레임·레인이면 다시 넣지 않음(§45.3)
+            if snapGuide != snap { snapGuide = snap }
+            if let t = try? base.relocatingSpectrum(id, toStart: s, lane: l) { freeMoveProposal = (id, s, true, l); history.updateGesture(t, focus: id) }
+            else { freeMoveProposal = (id, s, false, l); history.updateGesture(base, focus: id) }
+            return
+        }
         guard let base = gestureBase, let c = base.clip(id) else { return }
         let earliest = base.group(of: id).map(\.start).min() ?? c.start
         let (d, snap) = base.snappedDelta(clip: id, delta: max(Double(-earliest), delta), threshold: snapFrames)
@@ -1256,9 +1277,12 @@ final class ProjectStore {
         guard let base = gestureBase else { return }
         if transformGesture, let g = gestureTimeline { history.updateGesture(g, focus: selection) }   // 마지막(놓은 위치) 값 그대로
         gestureTimeline = nil; liveTransform = nil
-        if let p = freeMoveProposal, !p.ok { statusMessage = EditError.overlap.description }
+        if let p = freeMoveProposal, !p.ok { statusMessage = base.spectrum(p.id) != nil ? Self.spectrumMoveOverlap : EditError.overlap.description }
         if let r = moveRejection { statusMessage = r.description; moveRejection = nil }
         history.commitGesture(); gestureBase = nil; moveInsertionIndex = nil; freeMoveProposal = nil; snapGuide = nil
+        #if DEBUG
+        traceGestureDebug("committed changed=\(timeline != base)")   // 확정 결과(기록 한 단계 = changed true, depth는 줄 끝)
+        #endif
         let wasTransform = transformGesture; transformGesture = false
         #if DEBUG
         if legacyTransformPreviewForTest && wasTransform { pendingPreviewRebuild = false; timelineChanged(); return }
@@ -1309,8 +1333,17 @@ final class ProjectStore {
     func traceGestureDebug(_ what: String, event: NSEvent? = nil) {
         let ev = event.map { " ev=\($0.type.rawValue) t=\(String(format: "%.3f", $0.timestamp))" } ?? ""
         let g = gestureBase != nil ? "#\(gestureSerialForDebug)\(transformGesture ? "(transform)" : "")" : "none"
-        let line = "dbg \(what)\(ev) gesture=\(g) appActive=\(NSApp.isActive) editorKey=\(editorWindow?.isKeyWindow == true) leftButton=\((NSEvent.pressedMouseButtons & 1) != 0)"
+        let line = "dbg \(what)\(ev) gesture=\(g) appActive=\(NSApp.isActive) editorKey=\(editorWindow?.isKeyWindow == true) leftButton=\((NSEvent.pressedMouseButtons & 1) != 0) depth=\(history.undoDepth)"
         Self.trace.info("\(line, privacy: .public)")
+        traceLinesForTest.append(line); if traceLinesForTest.count > 400 { traceLinesForTest.removeFirst(100) }
+    }
+    /// 자체 검사 전용: 최근 `dbg` 줄(최대 400 — 같은 프로세스 안 검사가 기록 내용을 단언)
+    @ObservationIgnored var traceLinesForTest: [String] = []
+    /// 끌기 대상 종류(진단 전용 — ID·이름·경로는 남기지 않음)
+    func debugTargetKind(_ id: UUID) -> String {
+        if timeline.spectrum(id) != nil { return "spectrum" }
+        if timeline.subtitle(id) != nil { return "subtitle" }
+        switch timeline.lane(of: id) { case .video?: return "videoClip"; case .audio?: return "audioClip"; default: return "other" }
     }
     @ObservationIgnored var interruptCountForTest = 0
     /// 자체 검사 전용: 프리뷰가 정지 화면(무대)을 보이는 중인가
@@ -1326,6 +1359,7 @@ final class ProjectStore {
         history.cancelGesture(); gestureBase = nil; moveInsertionIndex = nil; freeMoveProposal = nil; snapGuide = nil
         let wasTransform = transformGesture; transformGesture = false
         #if DEBUG
+        traceGestureDebug("cancelled")   // 끌기 전 상태로 되돌린 뒤(depth는 줄 끝)
         if legacyTransformPreviewForTest && wasTransform { pendingPreviewRebuild = false; timelineChanged(); return }
         #endif
         if wasTransform { dropStill() }

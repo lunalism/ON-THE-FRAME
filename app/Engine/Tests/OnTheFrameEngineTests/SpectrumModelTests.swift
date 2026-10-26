@@ -284,6 +284,67 @@ final class SpectrumModelTests: XCTestCase {
     }
 
     /// 리플 편집이 스펙트럼도 민다·당기고, 스펙트럼에 걸친 지점에서는 리플을 거부한다
+    /// 2C-1(2026-10-26): 스펙트럼 끌어 옮기기 붙음(snappedSpectrumDelta)과 옮기기(relocatingSpectrum) — 0·클립·다른 스펙트럼 경계, 같은 거리, 음수·넘침,
+    /// 자막 경계는 대상 아님, 다른 종류의 붙음은 스펙트럼 경계에 붙지 않음, 옮겨도 ID·소스·모양·다른 내용 그대로
+    func testSpectrumMoveSnappingAndRelocation() throws {
+        var (t, w, a2) = try base()   // V1·A1 TA 0–120, A2 WAV 20–80
+        let wR = UUID()
+        t = try t.splitting(clip: w, atFrame: 50, newIDs: (w, wR))   // A2 조각 20–50·50–80(같은 계보)
+        let (t1, sp1) = try spectrumLane(t)
+        let sp2 = UUID(), sub = UUID(), s1 = UUID(), s2 = UUID()
+        var style = SpectrumItemStyle.provisionalDefault; style.mode = .analog
+        t = try t1.addingLane(.spectrum, name: "SP2", id: sp2, outward: true).addingLane(.subtitle, name: "T1", id: sub, outward: true)
+        t = try t.addingSpectrum(lane: sp1, at: 200, length: 30, sourceKey: t.clip(w)!.lineageKey, style: style, id: s1)   // 200–230
+        t = try t.addingSpectrum(lane: sp1, at: 240, length: 20, sourceKey: nil, id: s2)                                    // 240–260
+        t = try t.addingSubtitle(lane: sub, at: 300, length: 10, text: "자막")                                                // 300–310(붙음 대상 아님)
+        XCTAssertEqual(t.audioClips.filter { $0.lane == a2 }.map { $0.start..<$0.end }, [20..<50, 50..<80])
+        // 붙음 없음(거리 0): 반올림만
+        XCTAssertTrue(t.snappedSpectrumDelta(s1, delta: 3.4, threshold: 0) == (3, nil))
+        // 0: 시작 200 → 3, 0까지 3
+        XCTAssertTrue(t.snappedSpectrumDelta(s1, delta: -197, threshold: 5) == (-200, 0))
+        // 음수 쪽 0 근처: 시작 −3 → 0에 붙음. 멀리 앞(붙을 곳 없음)은 반올림 그대로(0 제한은 부르는 쪽)
+        XCTAssertTrue(t.snappedSpectrumDelta(s1, delta: -203, threshold: 5) == (-200, 0))
+        XCTAssertTrue(t.snappedSpectrumDelta(s1, delta: -500, threshold: 5) == (-500, nil))
+        // 소리 조각 경계(자른 계보의 경계 50)와 같은 거리: 시작 55(→50, 5)와 끝 85(→80, 5) — 앞선 후보(시작 쪽)
+        XCTAssertTrue(t.snappedSpectrumDelta(s1, delta: -145, threshold: 6) == (-150, 50))
+        // 한 가장자리에서 같은 거리 두 곳: 시작 35는 20·50에서 15 — 작은 위치(차례상 앞)
+        XCTAssertTrue(t.snappedSpectrumDelta(s1, delta: -165, threshold: 15) == (-180, 20))
+        // 다른 레인 클립 끝(V1·A1 120): 끝 118.5 → 120
+        XCTAssertTrue(t.snappedSpectrumDelta(s1, delta: -111.5, threshold: 2) == (-110, 120))
+        // 이웃 스펙트럼: 끝 238.6 → 240(s2 시작), 그 자리로 옮기면 붙어 있고 겹치지 않음
+        let adj = t.snappedSpectrumDelta(s1, delta: 8.6, threshold: 2)
+        XCTAssertTrue(adj == (10, 240))
+        let tAdj = try t.relocatingSpectrum(s1, toStart: 200 + adj.delta)
+        XCTAssertEqual(tAdj.spectrum(s1)!.end, tAdj.spectrum(s2)!.start)
+        // 자기 경계·자막 경계는 대상 아님: 시작 299(자막 300) → 붙지 않음
+        XCTAssertTrue(t.snappedSpectrumDelta(s1, delta: 99, threshold: 3) == (99, nil))
+        XCTAssertTrue(t.snappedSpectrumDelta(s1, delta: 0.4, threshold: 3) == (0, nil))
+        // 숫자가 아니거나 아주 큰 값: 멈추지 않고 제한
+        XCTAssertTrue(t.snappedSpectrumDelta(s1, delta: .nan, threshold: 3) == (0, nil))
+        XCTAssertTrue(t.snappedSpectrumDelta(s1, delta: .infinity, threshold: 3) == (0, nil))   // 숫자가 아닌 값(무한 포함) = 0
+        XCTAssertTrue(t.snappedSpectrumDelta(s1, delta: 1e300, threshold: 3) == (1_000_000_000, nil))
+        XCTAssertTrue(t.snappedSpectrumDelta(s1, delta: -1e300, threshold: 3) == (-1_000_000_000, nil))
+        XCTAssertTrue(t.snappedSpectrumDelta(UUID(), delta: 2.6, threshold: 3) == (3, nil))
+        // 다른 종류의 붙음은 그대로(스펙트럼 경계 200·230·240·260에 붙지 않음): 소리 조각 50–80의 끝 198 → 붙지 않음, 자막 시작 238 → 붙지 않음
+        XCTAssertTrue(t.snappedDelta(clip: wR, delta: 118, threshold: 3) == (118, nil))
+        let subID = t.subtitles[0].id
+        XCTAssertTrue(t.snappedSubtitleDelta(subID, delta: -62, threshold: 3) == (-62, nil))
+        // 옮기기: 다른 스펙트럼 레인, ID·소스·모양 그대로, 클립·자막·다른 스펙트럼 그대로, 끝을 넘으면 길이만 늘어남
+        let moved = try t.relocatingSpectrum(s1, toStart: 400, lane: sp2)
+        let m = moved.spectrum(s1)!
+        XCTAssertEqual([m.lane, m.id], [sp2, s1]); XCTAssertEqual(m.start, 400); XCTAssertEqual(m.length, 30)
+        XCTAssertEqual(m.sourceKey, t.spectrum(s1)!.sourceKey); XCTAssertEqual(m.style, style)
+        XCTAssertEqual(moved.clips, t.clips); XCTAssertEqual(moved.audioClips, t.audioClips); XCTAssertEqual(moved.subtitles, t.subtitles)
+        XCTAssertEqual(moved.spectrum(s2), t.spectrum(s2)); XCTAssertEqual(moved.durationFrames, 430)
+        // 거부: 같은 레인 겹침, 스펙트럼 레인이 아님, 0 앞
+        XCTAssertThrowsError(try t.relocatingSpectrum(s1, toStart: 230)) { XCTAssertEqual($0 as? EditError, .overlap) }
+        XCTAssertThrowsError(try t.relocatingSpectrum(s1, toStart: 0, lane: a2)) { XCTAssertEqual($0 as? EditError, .laneKindMismatch) }
+        XCTAssertThrowsError(try t.relocatingSpectrum(s1, toStart: 0, lane: sub)) { XCTAssertEqual($0 as? EditError, .laneKindMismatch) }
+        XCTAssertThrowsError(try t.relocatingSpectrum(s1, toStart: -1)) { XCTAssertEqual($0 as? EditError, .badIndex) }
+        // 다른 레인에서는 같은 시각이어도 겹치지 않음
+        XCTAssertEqual(try t.relocatingSpectrum(s1, toStart: 240, lane: sp2).spectrum(s1)?.start, 240)
+    }
+
     func testRippleShiftAndCrossing() throws {
         // WAV 소리(A1, 0–60) 다음 TA 영상+소리(60–180)
         var t = Timeline().registering(ta).registering(wav)

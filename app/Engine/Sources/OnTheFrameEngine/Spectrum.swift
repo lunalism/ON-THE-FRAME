@@ -231,6 +231,27 @@ extension Timeline {
         if spectra(inLane: l).contains(where: { $0.id != id && $0.start < m.end && m.start < $0.end }) { throw EditError.overlap }
         return try checked(rebuilt(spectra: spectra.map { $0.id == id ? m : $0 }, duration: max(durationFrames, m.end)))
     }
+    /// 끌어 옮기기 붙음(2026-10-26, SP-1A 2C-1): 스펙트럼을 delta(포인터에서 잰 소수 프레임)만큼 옮길 때 그 시작·끝이 붙을 곳 — 0, 영상·소리 클립의
+    /// 시작·끝, 다른 스펙트럼의 시작·끝, extra — 에서 threshold 프레임 안이면 가장 가까운 곳에 붙인 정수 delta와 붙은 위치를 돌려준다. 없으면 (반올림한 delta, nil).
+    /// 규칙은 snappedSubtitleDelta·snappedDelta와 같다(거리는 반올림 전 값, 같은 거리면 앞선 후보 — 시작 쪽, 작은 위치). 자막 경계에는 붙지 않는다(2C 결정 6:
+    /// 스펙트럼 전용 계산, 다른 종류의 붙음은 바꾸지 않음). 시작이 0보다 앞서는 붙음은 고르지 않는다. 숫자가 아니거나 아주 큰 delta는 넘치지 않게 제한한다.
+    public func snappedSpectrumDelta(_ id: UUID, delta raw: Double, threshold: Double, extra: [Int] = []) -> (delta: Int, snap: Int?) {
+        let raw = raw.isFinite ? min(max(raw, -1e9), 1e9) : 0
+        let delta = Int(raw.rounded())
+        guard let c = spectrum(id), threshold > 0 else { return (delta, nil) }
+        var targets = Set([0] + extra)
+        for o in clips + audioClips { targets.insert(o.start); targets.insert(o.end) }
+        for o in spectra where o.id != id { targets.insert(o.start); targets.insert(o.end) }
+        var best: (dist: Double, delta: Int, snap: Int)?
+        for edge in [c.start, c.end] {
+            for t in targets.sorted() {
+                let d = t - edge, dist = abs(Double(edge) + raw - Double(t))
+                guard dist <= threshold, c.start + d >= 0 else { continue }
+                if best == nil || dist < best!.dist { best = (dist, d, t) }
+            }
+        }
+        return best.map { ($0.delta, $0.snap) } ?? (delta, nil)
+    }
     /// 트림(리플 없음): 보이는 구간을 [start, end)로. 최소 1프레임, 겹치면 거부.
     public func trimmingSpectrum(_ id: UUID, start: Int, end: Int) throws -> Timeline {
         guard let c = spectrum(id) else { throw EditError.unknownClip }

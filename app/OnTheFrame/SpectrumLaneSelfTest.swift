@@ -132,7 +132,7 @@ enum SpectrumLaneSelfTest {
         await LaneSelfTest.key(9, "v", [], w); let selTool = s.tool == .selection
         check("shortcuts.unchanged", afterDelete && split && undone && cutTool && selTool, "delete \(afterDelete) split \(split) undo \(undone) C \(cutTool) V \(selTool)")
 
-        // 6. 스펙트럼 항목: 그려짐. 누르면 고름(2B-2 — 2A에서는 고르지 않았다), 끌기·자르기 도구로 옮기거나 자르지 않음
+        // 6. 스펙트럼 항목: 그려짐. 누르면 고름(2B-2 — 2A에서는 고르지 않았다), 4 pt 아래 끌기·자르기 도구로 옮기거나 자르지 않음(옮기기는 2C-1 — 12절)
         let spID = UUID()
         s.commit({ try $0.addingSpectrum(lane: sl, at: 10, length: 50, sourceKey: $0.clip(a0)?.lineageKey, id: spID) }, focus: nil)
         await LaneSelfTest.settle()
@@ -149,10 +149,10 @@ enum SpectrumLaneSelfTest {
         let dI = s.history.undoDepth
         await click(onItem)
         await LaneSelfTest.mouse(.leftMouseDown, win(onItem), w)
-        await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: onItem.x + 60, y: onItem.y)), w)
-        await LaneSelfTest.mouse(.leftMouseUp, win(NSPoint(x: onItem.x + 60, y: onItem.y)), w)
+        await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: onItem.x + 3, y: onItem.y)), w)   // 4 pt 아래: 옮기지 않음
+        await LaneSelfTest.mouse(.leftMouseUp, win(NSPoint(x: onItem.x + 3, y: onItem.y)), w)
         s.setTool(.cut); await click(onItem); s.setTool(.selection)
-        check("item.selectableNotEditable", s.selection == spID && s.timeline == t2 && s.history.undoDepth == dI && s.gestureBase == nil,
+        check("item.selectableNoEditBelowThreshold", s.selection == spID && s.timeline == t2 && s.history.undoDepth == dI && s.gestureBase == nil,
               "selection \(String(describing: s.selection)) depth \(s.history.undoDepth - dI)")
         // 스펙트럼이 있는 레인은 지우지 않음(2A: 스펙트럼 삭제 UI 없음)
         s.requestRemoveLane(sl); await LaneSelfTest.settle()
@@ -209,17 +209,17 @@ enum SpectrumLaneSelfTest {
         check("open.richRestored", o1 && o1Alert == nil && r1 == rich && Self.states(r1) == Self.richStates && r1.spectra.map(\.sourceKey) == rich.spectra.map(\.sourceKey)
               && r1.spectra.map(\.style) == rich.spectra.map(\.style) && r1.lanes == rich.lanes && lineageOK(r1) && !s.isDirty && s.missingMedia.isEmpty && s.history.undoDepth == 0,
               "opened \(o1) alert '\(o1Alert ?? "")' states \(Self.states(r1))")
-        // 연 뒤: 항목을 누르면 고르기만(2B-2), 끌기는 아무것도 바꾸지 않고, 항목이 든 레인은 지우지 않음(Delete 삭제는 10절)
+        // 연 뒤: 항목을 누르면 고르기만(2B-2), 4 pt 아래 끌기는 아무것도 바꾸지 않고(옮기기는 12절), 항목이 든 레인은 지우지 않음(Delete 삭제는 10절)
         await LaneSelfTest.settle()
         guard let item = r1.spectra.first else { return finish(folder, checks) }   // 열지 못했으면 위 검사가 실패로 남는다
         let itemLane = item.lane
         let onR = viewPoint(itemLane, frame: item.start + item.length / 2)
         await click(onR)
         await LaneSelfTest.mouse(.leftMouseDown, win(onR), w)
-        await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: onR.x + 50, y: onR.y)), w)
-        await LaneSelfTest.mouse(.leftMouseUp, win(NSPoint(x: onR.x + 50, y: onR.y)), w)
+        await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: onR.x + 3, y: onR.y)), w)
+        await LaneSelfTest.mouse(.leftMouseUp, win(NSPoint(x: onR.x + 3, y: onR.y)), w)
         s.requestRemoveLane(itemLane); await LaneSelfTest.settle()
-        check("open.selectOnlyNoEdit", tv.clipHit(onR) == nil && s.selection == item.id && s.timeline == rich && s.history.undoDepth == 0 && !s.alerts.isShowing
+        check("open.selectNoEditBelowThreshold", tv.clipHit(onR) == nil && s.selection == item.id && s.timeline == rich && s.history.undoDepth == 0 && !s.alerts.isShowing
               && s.timeline.laneInfo(itemLane) != nil, "selection \(String(describing: s.selection)) depth \(s.history.undoDepth)")
         // 9b. 다시 저장(같은 위치, ⌘S가 부르는 writeProject) → 같은 문서. 바이트가 같은지도 본다(북마크를 다시 만들어 다를 수 있음 — 기록만)
         let resaved = s.writeProject(to: pR)
@@ -424,21 +424,24 @@ enum SpectrumLaneSelfTest {
         let cmdClick = s.selection == i60.id && s.linkCandidate == nil
         let pD = viewPoint(sp1, frame: 150)
         await LaneSelfTest.mouse(.leftMouseDown, win(pD), w)
-        await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: pD.x + 80, y: pD.y)), w)
-        await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: pD.x + 80, y: pD.y - 40)), w)
-        await LaneSelfTest.mouse(.leftMouseUp, win(NSPoint(x: pD.x + 80, y: pD.y - 40)), w)
+        await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: pD.x + 3, y: pD.y)), w)   // 4 pt 아래(2C-1부터 넘기면 옮김 — 12절)
+        await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: pD.x + 3, y: pD.y - 2)), w)
+        await LaneSelfTest.mouse(.leftMouseUp, win(NSPoint(x: pD.x + 3, y: pD.y - 2)), w)
         let dragNoEdit = s.selection == i120.id && s.timeline == r4 && s.gestureBase == nil && s.history.undoDepth == 0
-        let edgeP = NSPoint(x: tv.x(120) + 2, y: ySp1)   // 항목 가장자리(클립이면 트림 손잡이 자리)
+        let edgeP = NSPoint(x: tv.x(120) + 2, y: ySp1)   // 항목 가장자리(클립이면 트림 손잡이 자리): 2C-1은 트림 없음 — 본문처럼 옮기고 길이 그대로
         await LaneSelfTest.mouse(.leftMouseDown, win(edgeP), w)
         await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: edgeP.x + 40, y: edgeP.y)), w)
         await LaneSelfTest.mouse(.leftMouseUp, win(NSPoint(x: edgeP.x + 40, y: edgeP.y)), w)
-        let edgeNoTrim = s.timeline == r4 && s.gestureBase == nil
+        let movedEdge = s.timeline.spectrum(i120.id)
+        let edgeNoTrim = movedEdge?.length == i120.length && (movedEdge?.start ?? 0) > i120.start && s.gestureBase == nil && s.history.undoDepth == 1
+        s.undo()
+        let edgeUndone = s.timeline == r4 && s.history.undoDepth == 0
         s.setTool(.cut); await click(pI); s.setTool(.selection)
         let cutNoEdit = s.timeline == r4 && s.history.undoDepth == 0
         await click(viewPoint(iCp.lane, frame: 200))   // SP2의 빈 곳 → 선택 해제
         let cleared = s.selection == nil
-        check("select.replaceNoDragTrimCut", cmdClick && dragNoEdit && edgeNoTrim && cutNoEdit && cleared,
-              "cmd \(cmdClick) drag \(dragNoEdit) edge \(edgeNoTrim) cut \(cutNoEdit) cleared \(cleared)")
+        check("select.replaceSubThresholdEdgeMovesNoTrimCut", cmdClick && dragNoEdit && edgeNoTrim && edgeUndone && cutNoEdit && cleared,
+              "cmd \(cmdClick) drag \(dragNoEdit) edge \(edgeNoTrim)/\(edgeUndone) \(movedEdge.map { "\($0.start)+\($0.length)" } ?? "-") cut \(cutNoEdit) cleared \(cleared)")
         // 10i. 명령 보호(이벤트 경로): 스펙트럼을 고른 채 ⌘K·⌘C·⇧Delete는 아무것도 바꾸지 않고 안내, ⌘V는 보통 붙여넣기, ←·→는 재생 헤드만, V·C 도구 그대로
         _ = await LaneSelfTest.regainFocus(w); w.makeFirstResponder(tv)
         s.select(base10.clips.first { $0.start == 0 && $0.lane == Lane.videoID }?.id); s.copySelection()
@@ -698,8 +701,229 @@ enum SpectrumLaneSelfTest {
                   && !(panelWarnings().first ?? "").contains("타임라인에 없습니다") && spM.map { reddish(indicator($0)) } == true && sourcePopup()?.titleOfSelectedItem == label(spM?.sourceKey)
                   && s.timeline == mt, "warnings \(mw) panel \(panelWarnings())")
         }
+        do {   // 12절 이름 범위
+            // 12. 2C-1(2026-10-26): 스펙트럼 끌어 옮기기 — 기존 누름 대기(4 pt)·끌기(beginGesture → updateFreeMove → commitGesture/cancelGesture) 그대로.
+            //     fixture(moveTimeline): V1·A1 TA 쌍 0–120(60에서 자름 — 계보 하나), 자막 150–170, 스펙트럼 레인 둘: L1에 m1 [10,40)(소스 = 그 계보, 아날로그·위쪽),
+            //     m2 [100,130)(고르지 않음), L2에 m3 [0,20)(소스 = 그 계보). 실제 보기에 합성 마우스·키 이벤트.
+            EditorLayout.shared.leftTab = .media
+            let p12 = out.appendingPathComponent("move.ontheframe")
+            guard let b12 = await makeProject(s, file: p12, media: ta, build: Self.moveTimeline) else {
+                return finish(folder, checks + [Check(name: "move.setup", pass: false, detail: s.statusMessage ?? "")])
+            }
+            _ = await LaneSelfTest.regainFocus(w); w.makeFirstResponder(tv)
+            await LaneSelfTest.settle()
+            guard let m1 = b12.spectra.first(where: { $0.start == 10 }), let m2 = b12.spectra.first(where: { $0.start == 100 }),
+                  let m3 = b12.spectra.first(where: { $0.lane != m1.lane }), m2.lane == m1.lane else {
+                return finish(folder, checks + [Check(name: "move.fixture", pass: false, detail: Self.states(b12))])
+            }
+            let L1 = m1.lane, L2 = m3.lane, ppf = tv.pixelsPerFrame
+            /// 내용 비교: 스펙트럼이 아닌 것(영상·소리·자막·레인·미디어)이 base와 같은가
+            func othersSame(_ t: Timeline, _ b: Timeline) -> Bool { t.clips == b.clips && t.audioClips == b.audioClips && t.subtitles == b.subtitles && t.lanes == b.lanes && t.media == b.media }
+            /// 항목 m을 (프레임 f, 레인 l)에서 잡아 (프레임 f2, 레인 l2)까지 끈다 — 단계 나눠 여러 끌기 이벤트, up이면 놓는다
+            func drag(_ f: Int, _ l: UUID, to f2: Int, _ l2: UUID? = nil, steps: Int = 3, up: Bool = true, toY: CGFloat? = nil) async {
+                let p0 = viewPoint(l, frame: f), p1 = NSPoint(x: tv.x(f2), y: toY ?? viewPoint(l2 ?? l, frame: f2).y)
+                await LaneSelfTest.mouse(.leftMouseDown, win(p0), w)
+                for i in 1...steps {
+                    let k = CGFloat(i) / CGFloat(steps)
+                    await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: p0.x + (p1.x - p0.x) * k, y: p0.y + (p1.y - p0.y) * k)), w)
+                }
+                if up { await LaneSelfTest.mouse(.leftMouseUp, win(p1), w) }
+                await LaneSelfTest.settle()
+            }
+            func up(_ f: Int, _ l: UUID) async { await LaneSelfTest.mouse(.leftMouseUp, win(viewPoint(l, frame: f)), w); await LaneSelfTest.settle() }
+            func item(_ id: UUID) -> SpectrumItem? { s.timeline.spectrum(id) }
+
+            // 12a. 누름만: 고르기, 바뀌지 않음, 기록 없음
+            let d0 = s.history.undoDepth
+            await click(viewPoint(L1, frame: 25))
+            check("move.clickSelectsNoEdit", s.selection == m1.id && s.timeline == b12 && s.history.undoDepth == d0 && s.gestureBase == nil)
+            // 12b. 같은 레인 옮기기(여러 끌기 이벤트 → 한 단계): 시작만, ID·소스·모양·길이·다른 내용 그대로, 고른 채
+            await drag(25, L1, to: 175, steps: 4)
+            let a = item(m1.id), tA = s.timeline
+            check("move.sameLane", a?.start == 160 && a?.lane == L1 && a?.length == m1.length && a?.sourceKey == m1.sourceKey && a?.style == m1.style
+                  && othersSame(tA, b12) && tA.spectrum(m2.id) == m2 && tA.spectrum(m3.id) == m3 && s.history.undoDepth == d0 + 1 && s.selection == m1.id
+                  && s.gestureBase == nil && s.isDirty, "item \(a.map { "\($0.start)@\($0.lane == L1 ? "L1" : "?")" } ?? "-") depth \(s.history.undoDepth - d0) ppf \(ppf)")
+            // 12c. 실행 취소 → 처음 자리, 다시 실행 → 옮긴 자리(선택은 그 스펙트럼)
+            s.undo(); let undoneA = s.timeline == b12 && s.selection == m1.id
+            s.redo(); let redoneA = s.timeline == tA && s.selection == m1.id
+            check("move.undoRedo", undoneA && redoneA, "undo \(undoneA) redo \(redoneA)")
+            // 12d. 다른 스펙트럼 레인으로(같은 시각) → 레인만 바뀜, 한 단계
+            await drag(175, L1, to: 175, L2)
+            let tB = s.timeline
+            check("move.crossLane", item(m1.id)?.lane == L2 && item(m1.id)?.start == 160 && item(m1.id)?.style == m1.style && othersSame(tB, b12)
+                  && s.history.undoDepth == d0 + 2, "lane \(item(m1.id)?.lane == L2 ? "L2" : "?") start \(item(m1.id)?.start ?? -1)")
+            // 12e. 다른 종류 레인(V1) 위로 끌면: 원래 스펙트럼 레인(끌기 시작 때 L2)에 두고 시각만, 새 레인 없음
+            await drag(175, L2, to: 205, Lane.videoID)
+            check("move.overNonSpectrumLaneKeepsLane", item(m1.id)?.lane == L2 && item(m1.id)?.start == 190 && s.timeline.lanes == b12.lanes && othersSame(s.timeline, b12),
+                  "lane \(item(m1.id)?.lane == L2 ? "L2" : "?") start \(item(m1.id)?.start ?? -1)")
+            s.undo(); s.undo(); let backToA = s.timeline == tA
+            // 12f. 끝을 넘어 옮기기: 타임라인 길이가 늘어남(m3 L2 0–20 → 200–220). 이전 길이 190 = 12b에서 m1을 160–190으로 옮겨 늘어난 길이
+            //      (실행 취소는 그 단계의 타임라인을 길이째 되살린다 — fixture 처음 길이 170이 아님)
+            let dur0 = s.timeline.durationFrames
+            await drag(10, L2, to: 210)
+            check("move.pastEndExtends", backToA && dur0 == 190 && b12.durationFrames == 170 && item(m3.id)?.start == 200 && s.timeline.durationFrames == 220 && othersSame(s.timeline, b12),
+                  "back \(backToA) dur \(dur0) → \(s.timeline.durationFrames) start \(item(m3.id)?.start ?? -1)")
+            s.undo()
+            // 12g. 0 앞으로: m1(L1 160–190)을 시작이 −15가 될 만큼 끌면 0에서 멈춤(음수 시작 없음)
+            await drag(175, L1, to: 0)
+            check("move.clampsAtZero", item(m1.id)?.start == 0 && item(m1.id)?.length == m1.length && s.history.undoDepth == d0 + 2, "start \(item(m1.id)?.start ?? -1)")
+            s.undo()
+            let tC = s.timeline
+            // 12h. 겹침: 끄는 동안 제안이 거부(빨간 상자, 타임라인 그대로), 놓으면 바뀌지 않음·기록 없음·안내, 겹친 항목 그대로
+            let redAt = viewPoint(L1, frame: 135), pxNo = pixel(redAt), dC = s.history.undoDepth   // 제안 상자 안·m2 밖(붙을 곳에서 10프레임 떨어진 자리)
+            await drag(170, L1, to: 120, up: false)   // m1 160–190 → 110–140, m2 100–130과 겹침
+            let duringOK = s.freeMoveProposal?.ok == false && s.gestureBase != nil && s.timeline == tC
+            tv.display()
+            let pxRed = pixel(redAt)
+            let redder = { (c: NSColor?) in c.map { $0.redComponent - $0.greenComponent } ?? 0 }
+            await up(120, L1)
+            check("move.overlapRejected", duringOK && redder(pxRed) > redder(pxNo) + 0.08 && s.timeline == tC && s.history.undoDepth == dC && s.gestureBase == nil
+                  && s.statusMessage == ProjectStore.spectrumMoveOverlap && s.timeline.spectrum(m2.id) == m2,
+                  "during \(duringOK) px \(rgb(pxNo)) → \(rgb(pxRed)) status '\(s.statusMessage ?? "")'")
+            // 12i. 붙음: 끝 59 → 60(잘린 소리 조각 경계, 스펙트럼 전용 대상), 안내선. Esc로 취소
+            let thrF = Double(TimelineNSView.snapDistance / ppf)
+            await drag(175, L1, to: 44, up: false)   // m1 160–190 → 29–59, 끝이 60(소리 조각 경계)에 붙어 30–60
+            let snapped = item(m1.id)?.start == 30 && s.snapGuide == 60
+            await LaneSelfTest.key(53, "\u{1b}", [], w); await LaneSelfTest.settle()
+            await up(59, L1)
+            check("move.snapToSourceBoundary", snapped && s.timeline == tC && s.gestureBase == nil && s.snapGuide == nil && s.history.undoDepth == dC,
+                  "start \(item(m1.id)?.start ?? -1) guide \(String(describing: s.snapGuide)) threshold \(thrF)")
+            // 12j. Esc: 옮긴 상태에서 취소 → 처음 그대로, 기록 없음. 그 뒤 늦은 끌기·놓기는 아무것도 하지 않음
+            await drag(175, L1, to: 230, up: false)
+            let movedBeforeEsc = item(m1.id)?.start == 215
+            await LaneSelfTest.key(53, "\u{1b}", [], w); await LaneSelfTest.settle()
+            let afterEsc = s.timeline == tC && s.gestureBase == nil
+            await LaneSelfTest.mouse(.leftMouseDragged, win(viewPoint(L1, frame: 250)), w); await up(250, L1)
+            check("cancel.escape", movedBeforeEsc && afterEsc && s.timeline == tC && s.history.undoDepth == dC, "moved \(movedBeforeEsc) esc \(afterEsc)")
+            // 12k. 초점 잃음(편집기 창 키 상태 잃음 — ⌘Tab과 같은 길): 취소, 늦은 놓기는 확정하지 않음
+            await drag(175, L1, to: 230, up: false)
+            let movedBeforeResign = item(m1.id)?.start == 215
+            NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: w); await LaneSelfTest.settle()
+            let afterResign = s.timeline == tC && s.gestureBase == nil
+            await up(230, L1)
+            _ = await LaneSelfTest.regainFocus(w); w.makeFirstResponder(tv)
+            check("cancel.focusLoss", movedBeforeResign && afterResign && s.timeline == tC && s.history.undoDepth == dC, "moved \(movedBeforeResign) resign \(afterResign)")
+            // 12l. 알림 시트(모달): 끄는 중 알림이 뜨면 끌기가 취소되고, 놓기·닫기 뒤에도 바뀌지 않음
+            await drag(175, L1, to: 230, up: false)
+            let movedBeforeAlert = item(m1.id)?.start == 215
+            s.presentAlert(ProjectStore.AlertInfo(title: "검사 알림", message: "스펙트럼 옮기기 중 알림"))
+            let sheet = await LaneSelfTest.waitUntil(3) { s.alerts.isShowing && w.attachedSheet != nil }
+            await LaneSelfTest.settle()
+            let afterAlert = s.timeline == tC && s.gestureBase == nil
+            await up(230, L1)
+            await dismiss()
+            _ = await LaneSelfTest.regainFocus(w); w.makeFirstResponder(tv)
+            check("cancel.modalAlert", movedBeforeAlert && sheet && afterAlert && s.timeline == tC && s.history.undoDepth == dC,
+                  "moved \(movedBeforeAlert) sheet \(sheet) cancelled \(afterAlert) gesture \(s.gestureBase != nil)")
+            // 12m. 도구: 끄는 중 자르기 도구로 바꾸기는 거부(끌기 그대로 확정). 누름 대기 뒤 도구를 바꾸면 이어진 끌기는 옮기지 않음
+            await drag(175, L1, to: 230, up: false)
+            let toolRefused = !s.setTool(.cut) && s.tool == .selection
+            await up(230, L1)
+            let committedWithTool = item(m1.id)?.start == 215 && s.history.undoDepth == dC + 1
+            s.undo()
+            await LaneSelfTest.mouse(.leftMouseDown, win(viewPoint(L1, frame: 175)), w)
+            let switched = s.setTool(.cut)
+            await LaneSelfTest.mouse(.leftMouseDragged, win(viewPoint(L1, frame: 230)), w); await up(230, L1)
+            s.setTool(.selection)
+            check("cancel.toolSwitch", toolRefused && committedWithTool && switched && s.timeline == tC && s.history.undoDepth == dC && s.gestureBase == nil,
+                  "refused \(toolRefused) committed \(committedWithTool) switched \(switched)")
+            // 12n. 끄는 중 새 누름(놓기를 받지 못한 끌기): 취소하고 섞어 확정하지 않음. 두 번 놓기·늦은 끌기도 한 번만
+            await drag(175, L1, to: 230, up: false)
+            await LaneSelfTest.mouse(.leftMouseDown, win(viewPoint(L2, frame: 300)), w)   // 빈 곳 새 누름
+            let afterNewPress = s.timeline == tC && s.gestureBase == nil
+            await up(300, L2)
+            await drag(175, L1, to: 230)
+            let once = s.history.undoDepth
+            await up(230, L1); await LaneSelfTest.mouse(.leftMouseDragged, win(viewPoint(L1, frame: 260)), w); await up(260, L1)
+            check("cancel.newPressAndDuplicateUp", afterNewPress && once == dC + 1 && s.history.undoDepth == once && item(m1.id)?.start == 215,
+                  "newPress \(afterNewPress) depth \(once - dC)/\(s.history.undoDepth - dC) start \(item(m1.id)?.start ?? -1)")
+            s.undo()
+            // 12o. 제자리로 돌아온 끌기: 기록 없음, 저장 상태 그대로
+            let dirtyBefore = s.isDirty
+            await LaneSelfTest.mouse(.leftMouseDown, win(viewPoint(L1, frame: 175)), w)
+            await LaneSelfTest.mouse(.leftMouseDragged, win(viewPoint(L1, frame: 215)), w)
+            await LaneSelfTest.mouse(.leftMouseDragged, win(viewPoint(L1, frame: 175)), w); await up(175, L1)
+            check("move.noOpNoHistory", s.timeline == tC && s.history.undoDepth == dC && s.isDirty == dirtyBefore)
+            // 12p. 끄는 중 프로젝트 교체: 끌기 취소, 새 프로젝트를 바꾸지 않고 옛 선택 없음
+            await drag(175, L1, to: 230, up: false)
+            s.resetProject(); await LaneSelfTest.settle()
+            let fresh = s.timeline
+            await LaneSelfTest.mouse(.leftMouseDragged, win(viewPoint(L1, frame: 260)), w); await up(260, L1)
+            check("cancel.projectReplace", s.gestureBase == nil && s.timeline == fresh && fresh.spectra.isEmpty && s.history.undoDepth == 0 && s.selection == nil)
+            // 12q. 저장·다시 열기: 옮긴 레인·시각·ID·소스·모양 그대로(형식 8), 실행 취소·다시 실행 뒤 저장
+            let o12 = await s.openProject(at: p12); await dismiss()
+            _ = await LaneSelfTest.regainFocus(w); w.makeFirstResponder(tv); await LaneSelfTest.settle()
+            // 연 직후에는 창 키 상태가 늦게 바뀔 수 있다(그 알림은 D-031대로 끌기를 취소함 — 제품 동작): 키 창이 안정된 뒤 끈다. 다시 실패하면 아래 detail로 원인을 가른다.
+            let keyStable = await LaneSelfTest.waitUntil(3) { w.isKeyWindow && NSApp.isActive }
+            await LaneSelfTest.settle()
+            let int0 = s.interruptCountForTest
+            await click(viewPoint(L1, frame: 25))
+            await drag(25, L1, to: 175, L2)
+            let movedQ = s.timeline.spectrum(m1.id)?.start == 160, intQ = s.interruptCountForTest - int0, keyQ = w.isKeyWindow
+            s.undo(); s.redo()
+            let tS = s.timeline
+            let p12b = out.appendingPathComponent("move-2.ontheframe")
+            let w12 = s.writeProject(to: p12b); s.resetProject()
+            let r12 = await s.openProject(at: p12b); await dismiss()
+            let v12 = (try? Data(contentsOf: p12b)).flatMap { try? ProjectFile.decode($0).document.version }
+            let rm = s.timeline.spectrum(m1.id)
+            check("move.persisted", o12 && w12 && r12 && v12 == 8 && s.timeline == tS && rm?.lane == L2 && rm?.start == 160 && rm?.sourceKey == m1.sourceKey && rm?.style == m1.style
+                  && othersSame(s.timeline, b12) && s.timeline.spectrumSourceState(rm ?? m1) == .ok,
+                  "lane \(rm?.lane == L2) start \(rm?.start ?? -1) version \(v12 ?? -1) moved \(movedQ) keyStable \(keyStable) key \(keyQ) interrupts \(intQ)")
+            // 12r. 옮긴 뒤에도 소스 상태·경고·내보내기 막음 그대로: m1은 소스 범위(0–120) 밖이어도 정상(무음 — 2C 결정 1), 경고 없음,
+            //      m2는 고르지 않음 경고, 스펙트럼이 있어 내보내기 막음(엔진 판정 m2 하나 + 계획 거부는 10절)
+            // 12s. Debug 끌기 진단 기록(2026-10-26): 대상 종류(스펙트럼·영상 클립·자막), 확정(바뀜 여부)·취소 줄, 줄 끝의 기록 깊이.
+            //      스펙트럼 옮기기 → Esc 취소 → 제자리 끌기(바뀜 없음) → 영상 클립 옮기기 → 자막 옮기기(클립·자막은 실행 취소로 되돌림)
+            do {
+                // 다시 연 직후: 키 창·보기 그리기 상태가 안정된 뒤(12q와 같은 대기 — 스펙트럼 누름 판정은 보기의 그리기 상태를 쓴다)
+                _ = await LaneSelfTest.regainFocus(w); w.makeFirstResponder(tv)
+                _ = await LaneSelfTest.waitUntil(3) { w.isKeyWindow && NSApp.isActive && tv.spectrumHit(viewPoint(L2, frame: 175)) == m1.id }
+                await LaneSelfTest.settle()
+                let hitReady = tv.spectrumHit(viewPoint(L2, frame: 175)) == m1.id
+                s.traceLinesForTest = []
+                let dq = s.history.undoDepth
+                let stl = s.timeline.lanes(.subtitle).first?.id ?? Lane.videoID
+                await drag(175, L2, to: 215)                                                   // m1 L2 160 → 200
+                await drag(215, L2, to: 245, up: false); await LaneSelfTest.key(53, "\u{1b}", [], w); await up(245, L2)
+                await LaneSelfTest.mouse(.leftMouseDown, win(viewPoint(L2, frame: 215)), w)
+                await LaneSelfTest.mouse(.leftMouseDragged, win(viewPoint(L2, frame: 255)), w)
+                await LaneSelfTest.mouse(.leftMouseDragged, win(viewPoint(L2, frame: 215)), w); await up(215, L2)
+                await drag(30, Lane.videoID, to: 230); s.undo()                              // 영상 클립 0–60 → 200–260
+                await drag(160, stl, to: 260); s.undo()                                       // 자막 150–170 → 250–270
+                let tl = s.traceLinesForTest
+                func depthOf(_ l: String) -> Int { l.components(separatedBy: " depth=").last.flatMap { Int($0) } ?? -1 }
+                let targets = tl.compactMap { l in l.hasPrefix("dbg begin kind=timeline target=") ? l.components(separatedBy: "target=").last?.components(separatedBy: " ").first : nil }
+                let ends = tl.compactMap { l -> String? in
+                    if l.hasPrefix("dbg committed changed=") { return "commit:\(l.contains("changed=true"))@\(depthOf(l) - dq)" }
+                    if l.hasPrefix("dbg cancelled ") { return "cancel@\(depthOf(l) - dq)" }
+                    return nil
+                }
+                check("diag.traceTargetsCommitCancel", hitReady && targets == ["spectrum", "spectrum", "spectrum", "videoClip", "subtitle"]
+                      && ends == ["commit:true@1", "cancel@1", "commit:false@1", "commit:true@2", "commit:true@2"] && s.history.undoDepth == dq + 1
+                      && !tl.joined().contains(".mp4") && !tl.joined().contains(m1.id.uuidString),
+                      "hitReady \(hitReady) targets \(targets) ends \(ends)")
+                s.undo()
+            }
+            let w2 = s.timeline.spectrum(m2.id).map { s.spectrumWarnings($0) } ?? []
+            check("move.guardsIntact", rm.map { s.spectrumWarnings($0) } == [] && w2 == [.unset]
+                  && s.timeline.spectrumExportBlockers().map(\.spectrumID) == [m2.id], "m1 \(rm.map { s.spectrumWarnings($0) } ?? []) m2 \(w2)")
+        }
         EditorLayout.shared.leftTab = .media
         finish(folder, checks)
+    }
+    /// 2C-1 옮기기 fixture: V1·A1 TA 쌍 0–120(60에서 자름 — 소리 조각 둘이 같은 계보), 자막 150–170, 스펙트럼 레인 둘: 첫 레인 [10,40)(그 계보, 아날로그·위쪽)·
+    /// [100,130)(고르지 않음), 둘째 레인 [0,20)(그 계보)
+    static func moveTimeline(_ base: Timeline, _ m: UUID) throws -> Timeline {
+        let c = UUID(), sp1 = UUID(), sp2 = UUID(), st = UUID()
+        var x = try base.appending(media: m, videoLane: Lane.videoID, audioLane: Lane.audioID, clipID: c)
+        x = try x.splitting(clip: c, atFrame: 60)
+        guard let key = x.audioClips.first?.lineageKey else { throw EditError.badIndex }
+        x = try x.addingLane(.subtitle, name: "자막", id: st, outward: true).addingSubtitle(lane: st, at: 150, length: 20, text: "자막")
+        x = try x.addingLane(.spectrum, name: "스펙트럼", id: sp1, outward: true).addingLane(.spectrum, name: "스펙트럼", id: sp2, outward: true)
+        var analog = SpectrumItemStyle.provisionalDefault; analog.mode = .analog; analog.sides = .above
+        x = try x.addingSpectrum(lane: sp1, at: 10, length: 30, sourceKey: key, style: analog)
+        x = try x.addingSpectrum(lane: sp1, at: 100, length: 30, sourceKey: nil)
+        return try x.addingSpectrum(lane: sp2, at: 0, length: 20, sourceKey: key)
     }
 
     /// 여러 미디어로 프로젝트 만들기(2B-3): 이름으로 미디어 ID를 찾아 build에 넘긴다(가져온 차례와 무관).

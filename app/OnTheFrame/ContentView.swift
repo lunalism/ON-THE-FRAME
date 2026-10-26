@@ -730,7 +730,7 @@ struct InspectorView: View {
                     if l.kind == .audio { row("소리", l.muted ? "음소거" : "음량 \(l.volumePercent)%") }
                     switch l.kind {
                     case .subtitle: row("자막", "\(store.timeline.subtitles(inLane: l.id).count)개")
-                    case .spectrum: row("스펙트럼", "\(store.timeline.spectra(inLane: l.id).count)개(누르면 고르고 Delete로 지움 — 옮기기·트림·소스 바꾸기는 아직 없음)")
+                    case .spectrum: row("스펙트럼", "\(store.timeline.spectra(inLane: l.id).count)개(누르면 고르고, 끌어 옮기고, Delete로 지움 — 길이 바꾸기는 아직 없음)")
                     case .video, .audio: row("클립", "\(store.timeline.clips(inLane: l.id).count)개")
                     }
                     Text("번호(V1·A1…)는 가운데 경계에서 센 위치이고 이름과 따로입니다. 이름·순서·음량은 왼쪽 \"클립 조정\" 탭이나 레인 머리 메뉴에서 바꿉니다.")
@@ -809,7 +809,7 @@ struct AdjustmentsView: View {
                     target(icon: "waveform.path", title: "스펙트럼",
                            subtitle: "스펙트럼 · \(laneText(sp.lane)) · \(store.settings.timecode(sp.start))–\(store.settings.timecode(sp.end))")
                     AdjustSection(title: "오디오 소스") { SpectrumSourceAdjust(store: store, item: sp) }
-                    Text("옮기기·길이·모양은 아직 바꿀 수 없습니다. Delete로 지웁니다.")
+                    Text("타임라인에서 끌어 옮깁니다(스펙트럼 레인 사이 포함). 길이·모양은 아직 바꿀 수 없습니다. Delete로 지웁니다.")
                         .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else if let id = store.selection, let c = store.timeline.clip(id), let kind = store.timeline.lane(of: id) {
                     target(icon: kind == .video ? "film" : "waveform", title: store.mediaByID[c.mediaID]?.name ?? "클립",
@@ -1106,7 +1106,7 @@ struct LaneSettingsAdjust: View {
                 case .video: "위 레인이 아래 레인을 가립니다."
                 case .audio: "음소거하지 않은 오디오 레인을 모두 더합니다."
                 case .subtitle: "자막은 모든 영상 위에 그리고, 위 자막 레인이 아래 자막 레인 위에 그립니다."
-                case .spectrum: "스펙트럼은 영상 위·자막 아래에 그립니다. 스펙트럼을 누르면 고르고 Delete로 지웁니다. 스펙트럼이 있는 레인은 지울 수 없습니다(먼저 스펙트럼을 지우세요)."
+                case .spectrum: "스펙트럼은 영상 위·자막 아래에 그립니다. 스펙트럼을 누르면 고르고, 끌어 옮기고, Delete로 지웁니다. 스펙트럼이 있는 레인은 지울 수 없습니다(먼저 스펙트럼을 지우세요)."
             } }())
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
