@@ -1335,3 +1335,103 @@ ON THE FRAME의 오디오 스펙트럼(R-10~R-12) 설계다. 표시:
 - **복사·할당(측정 안 함):** 내부 `tightCrop`의 자른 비트맵(할당 + 복사)은 그대로 만들어지고 이제 버려진다. 입구는 캔버스에서 `drawRect` 크기만큼 한 번 복사한다(새 `Data` 1개 + provider + CGImage). 처음 구현의 공급자 읽기(복사 또는 유지)는 없어졌다. 대체 경로에서는 전체 폭 행 띠를 복사한다(1080p 최대 약 7.9 MB, 4K 약 33 MB). 성능이 괜찮다고 말하지 않는다 — 측정은 3A-2/3B.
 - **남은 한계:** 대체 시험은 성공 경로(화소 맞음)만 탔고, `drawRect` 불일치로 던지는 경로는 지금 코드에서 만들 방법이 없어 시험하지 않았다(코드 검토만). 시험 장치는 전역 값이라 병렬 실행에서는 다른 시험과 간섭할 수 있다(기본 직렬). 그 밖은 §15.12 한계 그대로. 3단계는 완료가 아니다.
 - **상태:** 3A-1 구현 완료 후보(고친 뒤, 커밋 안 함). 3A-2·프리뷰 연결은 시작하지 않았다.
+
+### 15.13 SP-1A 3A-2 — 분석과 프레임 조율(2026-10-26~27, 소유자 작업 지시 — 엔진만, 구현·자동 검증, 커밋 안 함)
+
+- **범위:** 타임라인 프레임 + 스펙트럼 항목 → 기존 엔진 함수로 정한 분석 입력 → `SpectrumAnalysisScheduler` 밴드 → `SpectrumFrameRenderer`(3A-1) 그린 프레임을 잇는 엔진 부품 하나. 보이는 프리뷰 층·디스플레이 링크·`PlayerNSView`·내보내기(거부 그대로)·형식 8·저장·타임라인 조작·모양 UI는 바꾸지 않았다. 앱은 새 부품을 부르지 않는다(3B).
+- **공개 API(`app/Engine/Sources/OnTheFrameEngine/SpectrumFrameCoordinator.swift`):**
+  ```swift
+  public final class SpectrumFrameCoordinator: @unchecked Sendable {
+      public typealias SourceOpener = @Sendable (MediaAsset) async throws -> any SpectrumPCMProvider
+      public static let fileOpener: SourceOpener                   // SpectrumFileSource.open(url:mediaID:)
+      public init(settings: RenderSettings = .m1, limits: SpectrumSchedulerLimits = .init(), deliveryQueue: DispatchQueue, opener: SourceOpener = fileOpener)
+      public func update(timeline: Timeline, media: [MediaAsset])  // 지금 상태 알림
+      public func resetProject()                                   // 프로젝트 교체
+      public func request(spectrum: UUID, frame: Int, canvasWidth: Int, canvasHeight: Int, priority: Int = 0,
+                          completion: @escaping @Sendable (SpectrumFrameOutcome) -> Void) -> SpectrumFrameTicket
+      public func cancel(_: SpectrumFrameTicket)
+  }
+  public enum SpectrumFrameOutcome { case ready(bands: [Float], frame: SpectrumRenderedFrame?), notVisible, itemMissing, unsetSource, missingSource,
+                                     overlap, mediaUnavailable(UUID), superseded, cancelled, dropped, failed(SpectrumFrameFailure) }
+  public enum SpectrumFrameFailure { case source(SpectrumAnalysisError), analysis(SpectrumAnalysisError), render(SpectrumRenderError) }
+  ```
+  - 요청마다 정확히 한 번 `deliveryQueue`에서 알린다. "기다림"은 끝나지 않은 표(ticket)다(따로 상태 값을 돌려주지 않음). 3A-1 API는 바꾸지 않았다.
+  - `ready`의 `frame`이 nil이면 그릴 범위가 없다(디지털 모두 0 — 소스 조각이 없는 곳의 무음 포함). 무음을 따로 상태로 두지 않았다(분석이 0을 내는 기존 의미 그대로).
+- **스레드·액터 경계(코드):** 가변 상태는 모두 전용 직렬 큐(`dev.ontheframe.spectrum.coordinator`, userInitiated) 안에서만 바뀐다. 조율이 만든 일정의 `callbackQueue`가 그 큐라 일정 완료도 그 큐에서 처리하고, 그리기(3A-1 입구, 캔버스 하나)도 그 큐에서 한다. 디코딩·FFT는 일정의 전용 작업자 큐. 원본 열기는 분리된 작업(`Task.detached`). 공개 메서드는 표 번호를 잠금으로 받고 큐에 넣기만 한다 — 주 스레드에서 디코딩·분석·그리기·복사를 하지 않는다. 같은 스레드에서 부른 update/request/cancel은 부른 차례대로 처리된다.
+- **그리기 위치 선택:** 조율 안에서 그린다(큐 하나에 캔버스 하나 — 3A-1 그리기 객체는 스레드 안전하지 않음). 결과 프레임은 소유 버퍼라 다른 큐로 넘겨도 된다. 4단계 내보내기는 자기 펌프에서 같은 입구·같은 판정 함수를 쓰면 되고 이 조율(프리뷰용 비동기)을 재사용할 필요는 없다고 본다(제안, 미검증).
+- **다시 쓴 엔진 규칙(새로 만들지 않음):** `spectrum(_:)`·`spectrumFrameState`(보임·고르지 않음·지워짐·D-S8 겹침)·`spectrumMediaID`·`spectrumPieces`(계보 조각·클립 음량·음소거·페이드·레인 이득 — `SpectrumSourcePiece(clip:lane:)`)·`SpectrumItemStyle.analysisSettings`(창·오프셋·밴드)·`SpectrumFrameRequest`·일정의 정수 프레임/표본 대응·창 겹침 거부(`overlappingPieces` → `overlap`). 원본 소리를 늘이거나 옮기거나 바꾸지 않는다.
+- **오래된 결과 막기(코드):**
+  - 요청마다 `Plan`(프로젝트 회차·항목 ID·프레임·모양 전체·원본 위치(미디어 ID·경로·FileIdentity)·그 계보의 모든 조각)을 쥔다. 이것이 같으면 결과는 지금 프레임의 값이다.
+  - `update`: 지금 상태로 다시 계산한 Plan이 다른 요청만 `superseded`로 끝내고 그 일정 요청을 취소한다. Plan이 같은 요청(관계없는 스펙트럼, 스펙트럼을 옮기거나 트림해도 그 프레임이 보이고 입력이 같은 경우)은 그대로 둔다. 원본 열기를 기다리던 요청은 새 상태로 다시 정한다.
+  - 완료 때 같은 비교를 다시 한다 — 취소가 늦거나 일어나지 않아도 오래된 값을 `ready`로 알리지 않는다.
+  - `resetProject`: 회차 +1, 끝나지 않은 요청을 모두 `superseded`(원본을 여는 중인 요청 포함), 원본·그리기 캔버스를 놓고 `invalidateSession`(일정 캐시 비움, 진행 중 디코딩 취소). 교체 전에 시작한 열기 결과는 버린다.
+  - 보수적인 점: 같은 계보의 다른 조각을 편집해도(그 프레임 창 밖이라도) Plan이 달라져 superseded다 — 값은 맞지만 다시 계산한다. 일정 캐시 열쇠는 창 안 조각만 보므로 다시 요청하면 대개 캐시에서 온다.
+- **원본·보안 범위(코드 + 앱 코드 읽기):** 앱은 프로젝트 동안 보안 범위 접근을 쥐고(`ProjectStore.scopedURLs`, 프로젝트 교체·종료 때 멈춤) 찾은 원본만 `assets`(MediaAsset)에 둔다. 조율은 그 목록만 받고 접근을 시작·멈추지 않으며, 북마크·경로를 저장하지 않고 파일을 쓰지 않는다. 목록에 없는 미디어는 `mediaUnavailable`. 원본은 위치(미디어 ID·경로·FileIdentity)마다 한 번 연다. 재연결로 위치가 바뀌면 옛 원본을 놓고(진행 중 디코딩이 끝날 때까지는 그 작업이 쥠) 새 위치로 다시 연다. 열기 실패는 그 위치·회차 동안 기억해 같은 실패로 끝낸다(재연결·`resetProject` 뒤 다시 시도). 원본 파일이 제자리에서 바뀌는 경우(재연결 없음)는 FileIdentity가 update에 들어와야 알아챈다 — 앱 쪽 갱신은 3B에서 확인할 일.
+- **시험(`SpectrumFrameCoordinatorTests` 11개 — 합성 원본 TonePCM: 원본 1–2초에만 1000 Hz, 생성 fixture `aud-steady48s` 등록 타임라인, 실제 모델 편집):**
+  - 대응(손 계산): 소리 가운데·클립 안 소리 앞·조각 없음·창 끝(78 960 < 80 000 → 0, 다음 프레임 > 0)·소리 뒤 창. 자르기 + 오른쪽 조각 옮기기(빈틈 무음, 옮긴 조각 소리), 다섯 프레임에서 `SpectrumAnalysis.bands`와 같은 값, 복사·붙여넣기(새 계보 — 원래 스펙트럼은 무음, 사본 계보 스펙트럼은 소리), 소스 범위 밖 스펙트럼 구간은 무음.
+  - 이득: 클립 음량 50% = −6.02 dB(값 차 0.1003 ±0.002), 레인 음량 50% = 같은 값, 클립·레인 음소거 = 0, 페이드 인 = 직접 분석과 같은 값, 오프셋 +500 ms = 정확히 15프레임 뒤 값, 창 200 ms 경계.
+  - 상태: 고르지 않음·지워짐·D-S8 겹침·원본 없음·안 보임·없는 항목(원본을 열지 않음), 열기 실패(두 번째는 다시 열지 않고 같은 실패).
+  - 그리기: `ready` 프레임 = 같은 밴드·모양을 3A-1 입구로 따로 그린 것과 바이트 같음, 뒤 요청·캔버스 크기 바뀜(4K) 뒤에도 앞 프레임 그대로.
+  - 기다림(멈춘 디코딩 동안 알림 없음, 풀면 ready 한 번), 분석 중 프로젝트 교체(멈춘 채로 superseded, 풀려도 더 없음, 원본을 여는 중 교체도 superseded), 편집 12가지(항목 삭제·프레임 밖 트림·소스 바꾸기·소스 조각 옮기기·음량·페이드·클립 음소거·색·밴드 수·재연결 → superseded, 프레임 안 트림·옮기기 → ready, 관계없는 스펙트럼 B는 ready), 미리 끝내기를 끈 채 늦은 완료 거부(분석은 끝까지 돌았음), 취소(한 번, 늦은 완료 없음, 여는 중 취소), 캐시(같은 입력 다시 분석 안 함, 바뀐 입력은 새 값, 되돌리면 캐시 값·다시 디코딩 없음).
+  - 실제 파일: 기본 opener(`SpectrumFileSource`, 생성 WAV 440 Hz) = 직접 분석과 같은 값, 일회용 복사본으로 재연결 → 같은 값, 옛 원본 놓음.
+  - 결정성: 오래된 결과 시험은 디코딩·열기를 문으로 멈춰 차례를 정한다. 기다림은 조건 폴링(상한 5–20 s)이고 정답을 시간에 기대지 않는다. 한 곳(미리 끝내기 끈 시험)은 "완료 전에는 알림 없음"을 50 ms 동안 본다.
+- **음성 대조(소스를 잠시 바꿨다가 해시로 되돌림):** 완료 때 비교 제거 → 늦은 완료 시험 실패. update 미리 끝내기 제거 → 편집 시험 실패(10개 단언). 첫 조각만 씀 → 대응 시험 실패(4개). `resetProject`의 끝내기 제거 → 처음엔 통과(일정에 넣은 요청은 `invalidateSession` → 완료 비교로도 superseded) — 원본을 여는 중 교체 시험을 더한 뒤 실패(5 s 안에 끝나지 않음). 로그 `app/selftest-work/sp3a2-negctl-*`.
+- **실행 기록(2026-10-26~27, 이 Mac):**
+  - 첫 두 실행은 시험 코드 컴파일 오류(단언 안의 `await`, 탈출 닫힘)로 시험이 돌지 않았다(`sp3a2-coord-first-*`·`sp3a2-coord-run1-*`). 고친 뒤 처음 돈 실행부터 11/11 통과(`sp3a2-coord-run2-*`). 여는 중 교체 사례를 더한 뒤 11/11(`sp3a2-coord-run4-*`). `run3`은 편집이 적용되지 않은 채 돈 같은 시험이다(기록으로 둠).
+  - 엔진 전체 `swift test`: 260개 실행, 58개 건너뜀(옵트인 — 새 측정 1개 포함), 실패 0, exit 0, 355 s(`sp3a2-engine-full-20261026T150315Z.log`). 248 → 260 = 조율 시험 11 + 측정 1.
+  - 앱 `app/scripts/build.sh` Debug·Release `BUILD SUCCEEDED`(새·바뀐 엔진 파일 경고 0). 앱 코드 변경 없음 — 앱 자체 검사는 돌리지 않았다.
+  - 예상 밖 프로세스 종료·새 진단 보고서 없음.
+- **기준 측정(`SpectrumCoordinatorBench`, `OTF_SPECTRUM_COORD_BENCH=1 swift test -c release -Xswiftc -enable-testing -Xswiftc -DOTF_PROTO_RELEASE`, 한 번, `sp3a2-bench-release-20261026T150021Z.log`):**
+  - 조건: Apple M4 Pro(12코어, 24 GB), macOS 26.6.2, 최적화 빌드. 일회용 생성 WAV 24초(48 kHz 스테레오, 사인 넷 + 약한 잡음, 끝나면 지움), 실제 `SpectrumFileSource`. 조건마다 300프레임(10초). 모양 A = 잠정 기본(64밴드 거울 디지털, 최대 높이 480), B = 큰 모양(256밴드, 전체 폭, 최대 높이 540, 두께 6).
+  - 구성 요소: 덩어리 디코딩(8 s + 여유) 3회 p50 3.05 ms·최대 52.8 ms(첫 덩어리), 분석(미리 디코딩한 순수 계산) 64밴드 p50 0.476·p95 0.483 ms, 256밴드 p50 0.479·p95 0.488 ms.
+
+    | 그리기(프레임당) | 내부 p50 / p95 / 최대 | 입구(+소유 복사) p50 / p95 / 최대 | 소유 버퍼 평균 / 최대 |
+    |---|---|---|---|
+    | 1080p A | 0.588 / 0.670 / 1.10 ms | 0.644 / 0.743 / 1.19 ms | 2.91 / 3.98 MB |
+    | 1080p B | 0.832 / 1.06 / 1.59 ms | 0.904 / 1.13 / 1.77 ms | 4.21 / 5.69 MB |
+    | 4K A | 2.84 / 3.29 / 3.89 ms | 3.23 / 3.73 / 4.90 ms | 11.6 / 15.8 MB |
+    | 4K B | 3.96 / 4.10 / 4.78 ms | 4.47 / 4.67 / 6.31 ms | 16.7 / 22.6 MB |
+
+  - 조율 전체(요청 → deliveryQueue 알림, 차례로 하나씩): 차가움(첫 요청은 원본 열기 포함, 디코딩 2번·분석 300번) / 따뜻함(밴드 캐시):
+
+    | 조건 | 차가움 p50 / p95 / 최대(첫) | 따뜻함 p50 / p95 / 최대 |
+    |---|---|---|
+    | 1080p A | 1.13 / 1.24 / 5.58 ms | 0.655 / 0.736 / 0.798 ms |
+    | 1080p B | 1.41 / 1.92 / 19.9 ms | 0.921 / 1.15 / 1.30 ms |
+    | 4K A | 3.57 / 4.12 / 27.8 ms | 3.09 / 3.49 / 3.69 ms |
+    | 4K B | 4.82 / 5.18 / 16.7 ms | 4.31 / 4.50 / 4.91 ms |
+
+  - 시간 맞춘 부하(새 조율·차가운 캐시, 10초, 틱마다 요청을 기다리지 않고 넣음, 60 Hz는 프레임마다 두 번): 30 Hz p50 7.8–13.0 ms·최대 20.9–24.3 ms, 한 틱(33.3 ms)보다 늦음 0/300(네 조건 모두). 60 Hz p50 5.0–8.6 ms·최대 16.0–20.9 ms, 한 틱(16.7 ms)보다 늦음 2·2·1·0 /600. 모든 결과 ready. 차례로 할 때보다 p50이 큰 까닭은 확인하지 않았다(틱 사이 쉼에 따른 CPU 상태 등 — 가설).
+  - 메모리: phys_footprint 시작 7.0 MB, 단계 사이 표본 최대 424 MB, 끝 361 MB(시험 프로세스 전체 — 조건마다 만든 조율·일정 캐시·캔버스·실행 시간 할당기 보존 포함, 나눠 재지 않음). 할당 수는 재지 않았다.
+  - 주 스레드: 조율은 주 스레드에서 무거운 일을 하지 않는다(코드 구조). 이 측정은 주 스레드 시간을 따로 재지 않았다.
+  - 재지 않은 것: CA commit·실제 디스플레이 링크 프레임 놓침·화면 합성(3B/3C), 다른 소리 형식(AAC 등) 디코딩, 600프레임(10초 300프레임으로 줄임 — 네 조건 × 다섯 단계 시간 160 s 안), 긴 원본, 동시에 여러 스펙트럼.
+- **알려진 위험·미검증:** (처음 기록) `SpectrumItem`의 겹침 판정(`spectrumFrameState`)이 30 fps를 가정한다 — 조율은 `RenderSettings.fps`를 받지만 30이 아니면 둘이 어긋난다(제품 30 fps). → 조사·고침 §15.13.1(30이 아니면 조율이 거부). 같은 원본 위치의 열기 실패는 재연결·교체 전까지 다시 시도하지 않는다. 캔버스 크기를 번갈아 요청하면 그리기 객체를 다시 만든다(4K 31.6 MB). 4K 그리기 + 복사는 프레임당 수 ms·수십 MB 이동이다(위 표). 소유 복사·조율 그리기가 프리뷰에서 충분한지는 3B 측정 몫이다. 성능이 충분하다고 말하지 않는다.
+- **3B에 필요한 것(제안):** 앱 `ProjectStore`가 프로젝트 교체 때 `resetProject` → `update`, 편집·재연결·`assets` 변화 때 `update`를 부른다. 프리뷰 층은 받은 프레임을 `drawRect`로 영상 위·자막 아래에 놓고, 다른 요청의 `superseded`·`cancelled`는 버린다. 재생 헤드 기준 우선순위·미리 요청(앞쪽 몇 프레임)과 지나간 요청 취소, 원본 접근이 없을 때 표시. 디스플레이 링크 시각 ↔ 프레임 대응은 3C.
+- **3B 원본 접근 수명 순서(2026-10-27 소유자 승인 — 기록만, 아직 구현 안 함):** 프로젝트를 바꿀 때 ① `resetProject()`로 옛 조율 회차를 무효로 하고 ② 기존 `stopAllScopes`로 옛 보안 범위 접근을 놓고 ③ 기존 앱 기반으로 새 프로젝트의 미디어 접근을 세우고 ④ `update(timeline:media:)`로 새 타임라인과 접근 가능한 MediaAsset을 넘긴다. `resetProject`가 접근 해제보다 먼저여야 접근이 끝나는 동안 옛 요청이 유효한 것으로 다뤄지지 않는다. 취소는 이미 도는 디코딩을 곧바로 멈추지 못할 수 있으므로 완료 때 오래된 결과 거부는 계속 필요하다.
+- **독립 Codex 리뷰 관문(2026-10-27 소유자 승인 계획 — 이번에 돌리지 않음):** 3단계 프리뷰 통합과 소유자 보고 실제 Mac 수동 확인 뒤, 2C-3 모양 UI와 4단계 스펙트럼 내보내기 그리기 전에 독립 Codex 리뷰를 한다. 우선순위: Debug 시험 도구 충돌·비정상 종료, 스펙트럼 프레임·소스 타이밍, 비동기 취소·오래된 콜백, 그림 소유권·CGImage 수명·Sendable, 프리뷰 층 순서·그리기 정확성, 프로젝트 교체·보안 범위 미디어 접근, 형식 8 저장·비파괴 편집, 성능·캐시 동작, 남은 미검증 경우·알려진 회귀. 결과는 코드 읽기로 본 위험과 재현한 실패를 나눠 적는다.
+- **상태:** 3A-2 구현 완료 후보(커밋 안 함). 3B·3C·3D·4단계는 시작하지 않았다. 3단계는 완료가 아니다.
+
+#### 15.13.1 3A-2 프레임레이트 일치 조사와 고침(2026-10-27, 소유자 작업 지시 — 엔진만, 구현·자동 검증, 커밋 안 함)
+
+- **확인한 계약(코드):**
+  - 타임라인 격자는 30 fps 하나다. `Timeline`에는 fps 값이 없고, 클립·스펙트럼의 start·length·sourceIn과 `MediaRef.frameCount`는 30 fps 정수 프레임이다(`Timeline.swift` 주석).
+  - 소리 파일 검사는 프레임 수를 30으로 계산한다(`Media.swift` — 영상 검사는 `settings.fps`를 쓰지만 기본 `.m1`).
+  - `ProjectFile.decode`는 렌더 설정이 `.m1`(1920×1080 30 fps)이 아니면 거부한다.
+  - 앱(`ProjectStore.settings = .m1`)·엔진·시험·실험 어디에서도 30이 아닌 `RenderSettings`를 만들지 않는다(코드 검색).
+  - `RenderSettings`는 fps를 검사하지 않는다(공개 `var fps: Int32`).
+  - `Timeline.spectrumFrameState`·`spectrumAnalysisReach`는 fps를 받지 않고, 분석 창·오프셋(ms)을 프레임 여유로 바꿀 때만 상수 30을 쓴다: m = ⌈ms·30/1000⌉ + 1. 보임(start ≤ n < end)은 정수 프레임이라 fps와 무관하다.
+  - 분석(`SpectrumFrameMap`·`SpectrumAnalysis`·일정)은 요청의 fps로 프레임 k → 표본 ⌊(2kR + fps)/(2fps)⌋를 계산한다(fps 1–1000 허용, 0은 `invalidRequest`).
+  - 3A-2 조율은 `init(settings:)`의 `settings.fps`를 그대로 요청에 넣었다.
+- **어긋남 확인(고치기 전 코드, 실행 — `sp3a2fps-prefix-20261026T151643Z.log`):** 30 fps로 만든 타임라인(소리 50–80)에서 조율을 fps 60으로 만들면 프레임 65가 `ready`·밴드 모두 0(30 fps라면 소리 가운데 — 잘못 읽은 무음). fps 24·25·29도 `ready`(다른 시간축). fps 0만 기존 검사로 `invalidRequest`. 즉 30이 아닌 fps를 주면 모든 프레임의 프레임→표본 대응이 틀리고(겹침 여유만이 아님) 그럴듯한 값이 `ready`로 나갔다.
+- **판정:** 제품 경로의 결함은 아니다(제품은 늘 30 fps). 커밋하지 않은 3A-2 조율의 공개 입력이 지원하지 않는 값을 받아들여 잘못 해석하는 잠재 결함이었다. 다른 fps 지원은 요구가 없어 만들지 않았다.
+- **고침(가장 작은 — 공개 서명 그대로):** 조율에 `timelineFPS = 30`(내부 상수)을 두고, `settings.fps`가 30이 아니면 모든 요청을 판정·원본 열기 전에 `failed(.analysis(.invalidRequest("fps N — timeline grid is 30 fps")))`로 끝낸다. 30 fps 동작·저장 형식·미디어 정책·`spectrumFrameState`는 바꾸지 않았다(정수 프레임 규칙 그대로, 부동소수점 변환 없음). 크기(width·height)는 조율이 쓰지 않아 검사하지 않는다.
+- **새 시험(`SpectrumFrameCoordinatorTests` 13개 = 앞 11 + 2, 기대값은 손 계산):**
+  - `testVisibilityAndBoundaryFrames`: 트림 [40, 90)에서 39 안 보임·40·89 보임(값 = 트림 전)·90 안 보임. 소리 구간과 같은 스펙트럼 [50, 80)에서 49·80 안 보임, 50·79 > 0. 무음 경계 48 = 0·49 > 0. 같은 계보 겹침 [50, 60): 분석 창 겹침 프레임 = 49…61(1600k ± 2160 계산, `SpectrumAnalysis.chunks`가 그 프레임에서만 `overlappingPieces`), 조율 `overlap` = 47…62(spectrumFrameState 여유 3 — 보수적으로 앞뒤 2프레임 넓음), 46·63 `ready`. 트림 [55, …)으로 54 안 보임·55 겹침(보임이 먼저).
+  - `testUnsupportedFrameRateRejected`: `.m1`과 3840×2160 30 fps는 정상, fps 60·24·25·29·0은 보이는 프레임·안 보이는 프레임 모두 `invalidRequest`, 원본을 열지 않음. 고치기 전 실행에서 이 시험이 실패했다(위 어긋남 — 음성 대조 역할).
+- **실행(2026-10-27, 이 Mac):**
+  - 고친 뒤 조율 13/13(`sp3a2fps-focused-20261026T151703Z.log`) — 오래된 결과·취소 시험 포함 그대로 통과.
+  - 관련 회귀 91개 실패 0: 조율 13, 그리기 입구 8, 모델 12, 분석 12, 일정 14, 내보내기 점검 8, Timeline 12, LaneTimeline 6, ProjectFile 6(`sp3a2fps-regress-20261026T151716Z.log`).
+  - 엔진 전체: 262개 실행, 58개 건너뜀, 실패 0, exit 0(`sp3a2fps-engine-full-20261026T151841Z.log`). 실행 시간 7298 s — 시작 5분 뒤(00:23:55) Mac이 유휴 잠자기에 들어가 02:20:15에 깼다(`pmset -g log`, 약 6980 s). 느렸던 시험은 자막 내보내기·실제 미디어 분석 시험(조율을 쓰지 않음)이고 잠자기 동안과 겹친다 — 알려진 느림(§S.6)과 같은 종류로 보며 코드 결과가 아니다. 다시 돌리지 않았다(실패 없음).
+  - 앱 Debug·Release `BUILD SUCCEEDED`, 조율 파일 경고 0. 예상 밖 종료·새 진단 보고서 없음.
+- **3B·3C 영향:** 3B는 조율을 `.m1`(또는 30 fps)로 만들어야 한다. 3C의 디스플레이 링크 시각 → 타임라인 프레임은 30 fps 정수 격자(`RenderSettings.frame(containing:)`/`nearestFrame` 같은 기존 정수 규칙)로 바꾼 뒤 조율에 넘긴다. 60 Hz 화면은 같은 프레임을 두 번 요청한다(§15.13 측정과 같음).
+- **남은 것:** 다른 fps 지원은 없다(요구 없음 — 지원한다고 말하지 않음). `spectrumFrameState`의 상수 30은 그대로다(조율이 30만 받으므로 일치). 겹침 여유가 분석 창보다 앞뒤로 넓은 것(보수적 — 실제 겹침이 닿지 않는 프레임 2개씩도 `overlap`)은 기존 동작이고 바꾸지 않았다.
