@@ -59,10 +59,15 @@ final class ProjectStore {
     /// 화면에 선택으로 보이는 클립: 주 선택의 묶음 + 연결 후보
     var selectedIDs: Set<UUID> {
         var s = Set(selection.map { timeline.group(of: $0).map(\.id) } ?? [])
-        if let sel = selection, timeline.subtitle(sel) != nil { s.insert(sel) }   // 자막(2026-10-22)은 묶음이 없다
+        if let sel = selection, timeline.subtitle(sel) != nil || timeline.spectrum(sel) != nil { s.insert(sel) }   // 자막(2026-10-22)·스펙트럼(2B-2)은 묶음이 없다
         if let c = linkCandidate { s.insert(c) }
         return s
     }
+    /// 고른 스펙트럼(SP-1A 2B-2): 누르면 고른다. 옮기기·트림·복사·자르기는 아직 없다(2C 등).
+    var selectedSpectrum: SpectrumItem? { selection.flatMap { timeline.spectrum($0) } }
+    /// 이 타임라인에서 고를 수 있는 항목인가(클립·자막·스펙트럼) — 실행 취소·레인 편집 뒤 선택을 남길지
+    func isSelectable(_ id: UUID) -> Bool { timeline.clip(id) != nil || timeline.subtitle(id) != nil || timeline.spectrum(id) != nil }
+    static let spectrumEditUnsupported = "스펙트럼은 아직 자르거나 복사할 수 없습니다. 지우려면 Delete를 누르세요."
     private(set) var playhead = 0 {            // 0…durationFrames(끝 위치 포함)
         // 프리뷰 자막 그림의 시간 창(§49): 재생 헤드 근처 자막만 그림을 붙잡는다. 보임·숨김은 동기 층 애니메이션 그대로다.
         didSet { if playhead != oldValue { previewHost?.subtitlePlayheadMoved(to: playhead) } }
@@ -531,6 +536,7 @@ final class ProjectStore {
     /// 분할: 선택한 클립(없으면 재생 헤드 아래 영상, 없으면 소리 클립)을 재생 헤드에서 나눈다. 연결된 짝도 함께.
     /// 고른 것이 자막이면 그 자막을 나눈다(두 조각 같은 글자·모양, 2026-10-22).
     func splitAtPlayhead() {
+        if selectedSpectrum != nil { statusMessage = Self.spectrumEditUnsupported; return }   // 스펙트럼 자르기는 아직 없다(2B-2, 클립 명령에 넘기지 않음)
         if let id = selection, timeline.subtitle(id) != nil {
             let right = UUID()
             commit({ try $0.splittingSubtitle(id, atFrame: playhead, newIDs: (UUID(), right)) }, focus: right)
@@ -547,6 +553,11 @@ final class ProjectStore {
     func deleteSelection(ripple: Bool = false) {
         guard let id = selection else { return }
         if timeline.subtitle(id) != nil { commit({ try ripple ? $0.rippleDeletingSubtitle(id) : $0.liftingSubtitle(id) }, focus: nil); return }
+        // 스펙트럼(SP-1A 2B-2, Debug·Release): 일반 삭제만(빈틈 남김, 한 단계, 레인은 그대로). 스펙트럼 리플 삭제는 아직 없다.
+        if timeline.spectrum(id) != nil {
+            if ripple { statusMessage = "스펙트럼 리플 삭제는 아직 지원하지 않습니다. Delete로 지우면 빈틈을 남깁니다."; return }
+            commit({ try $0.liftingSpectrum(id) }, focus: nil); return
+        }
         commit({ try ripple ? $0.rippleDeleting(clip: id) : $0.lifting(clip: id) }, focus: nil)
     }
 
@@ -556,7 +567,7 @@ final class ProjectStore {
         cancelPendingPress()
         pauseForEdit()
         let f = history.undo()
-        selection = f.flatMap { timeline.clip($0) != nil || timeline.subtitle($0) != nil ? $0 : nil }
+        selection = f.flatMap { isSelectable($0) ? $0 : nil }
         timelineChanged()
     }
     func redo() {
@@ -565,7 +576,7 @@ final class ProjectStore {
         cancelPendingPress()
         pauseForEdit()
         let f = history.redo()
-        selection = f.flatMap { timeline.clip($0) != nil || timeline.subtitle($0) != nil ? $0 : nil }
+        selection = f.flatMap { isSelectable($0) ? $0 : nil }
         timelineChanged()
     }
 
@@ -576,7 +587,8 @@ final class ProjectStore {
         if inlineEdit != nil, id != inlineEdit?.existingID { commitInlineEditIfAny() }   // 다른 것을 고르면 글 편집 확정(§44)
         if let c = colorSession, c.id != id { finishColorSession() }                    // 색 조정 세션도(D-039)
         // 자막은 연결이 없어 ⌘-클릭도 보통 선택이다(2026-10-22)
-        guard extend, let id, let sel = selection, sel != id, timeline.subtitle(id) == nil, timeline.subtitle(sel) == nil else { selection = id; if id != nil { selectedLane = nil }; return }
+        guard extend, let id, let sel = selection, sel != id, timeline.subtitle(id) == nil, timeline.subtitle(sel) == nil,
+              timeline.spectrum(id) == nil, timeline.spectrum(sel) == nil else { selection = id; if id != nil { selectedLane = nil }; return }
         if timeline.group(of: sel).contains(where: { $0.id == id }) { return }
         linkCandidate = linkCandidate == id ? nil : id
     }
@@ -616,7 +628,7 @@ final class ProjectStore {
     /// 정보 패널이 보일 레인: 고른 레인, 없으면 선택한 클립의 레인
     var inspectedLane: Lane? {
         if let l = selectedLane, let lane = timeline.laneInfo(l) { return lane }
-        return selection.flatMap { timeline.laneID(of: $0) ?? timeline.subtitle($0)?.lane }.flatMap { timeline.laneInfo($0) }
+        return selection.flatMap { timeline.laneID(of: $0) ?? timeline.subtitle($0)?.lane ?? timeline.spectrum($0)?.lane }.flatMap { timeline.laneInfo($0) }
     }
     func selectLane(_ id: UUID?) { selectedLane = id; if id != nil { selection = nil } }
     /// 레인 편집(실행 취소 한 단계). 편집 중(드래그)에는 하지 않는다.
@@ -630,7 +642,7 @@ final class ProjectStore {
             history.apply(t, focus: selection)
             if let lane { selectedLane = lane }
             if let l = selectedLane, t.laneInfo(l) == nil { selectedLane = nil }
-            if let s = selection, t.clip(s) == nil, t.subtitle(s) == nil { selection = nil }
+            if let s = selection, !isSelectable(s) { selection = nil }
             statusMessage = nil
             timelineChanged()
         } catch let e as EditError { statusMessage = e.description } catch { statusMessage = error.localizedDescription }
@@ -653,6 +665,81 @@ final class ProjectStore {
         }
     }
 
+    #if DEBUG
+    /// 스펙트럼 추가(SP-1A 2B-2, Debug 전용 — 4단계 내보내기 그리기 전 노출 정책 2026-10-26): 타임라인 문맥 메뉴가 누른 소리 클립 ID와 메뉴를 만든 때의
+    /// 프로젝트 회차를 넘긴다(그 뒤 고른 클립이 아니라 누른 클립). 프로젝트가 바뀌었거나 클립이 없어졌거나 끌기·알림 중이면 아무것도 하지 않는다.
+    /// 구간·소스는 엔진 그대로(누른 조각의 구간, 그 조각의 계보 키). 알맞은 스펙트럼 레인이 없으면 새 레인과 함께 한 단계. 만든 스펙트럼을 고른다.
+    func addSpectrum(fromAudioClip id: UUID, session: Int) {
+        guard session == projectSession, gestureBase == nil, alert == nil, timeline.audioClips.contains(where: { $0.id == id }) else {
+            statusMessage = "스펙트럼을 추가하지 않았습니다(메뉴를 연 뒤 프로젝트나 클립이 바뀜)."
+            return
+        }
+        let sid = UUID()
+        commit({ try $0.addingSpectrum(fromAudioClip: id, id: sid, newLaneName: newLaneName(.spectrum)) }, focus: sid)
+    }
+    #endif
+
+    // MARK: 스펙트럼 소스(SP-1A 2B-3, 2026-10-26 — Debug·Release)
+
+    /// 소스 목록의 한 항목: 값은 계보 키(저장되는 sourceKey), 글은 보이기만(정체가 아님 — 편집으로 바뀔 수 있음)
+    struct SpectrumSourceOption: Identifiable, Equatable { let key: UUID; let label: String; var id: UUID { key } }
+    /// 클립 조정 패널의 소스 목록: 엔진 spectrumSources() 차례 그대로(계보 하나 = 항목 하나, 복사본은 따로).
+    /// 글 = "파일 이름 — 첫 조각의 레인 라벨 — 전체 구간" + 조각이 여럿이면 " · 조각 n개". 같은 글이 둘 이상이면 차례대로 " (2)"·" (3)"을 붙인다(화면만).
+    func spectrumSourceOptions() -> [SpectrumSourceOption] {
+        let t = timeline, tc = settings.timecode
+        let srcs = t.spectrumSources()
+        let labels = Self.disambiguated(srcs.map { src in
+            let lane = src.pieces.first?.lane.map { t.laneLabel($0) } ?? "—"
+            let name = t.media.first { $0.id == src.mediaID }?.name ?? "소리"
+            return "\(name) — \(lane) — \(tc(src.range.lowerBound))–\(tc(src.range.upperBound))" + (src.pieces.count > 1 ? " · 조각 \(src.pieces.count)개" : "")
+        })
+        return zip(srcs, labels).map { SpectrumSourceOption(key: $0.key, label: $1) }
+    }
+    /// 같은 글에 차례 번호를 붙여 서로 다르게(첫 번째는 그대로). 순서는 들어온 차례.
+    static func disambiguated(_ labels: [String]) -> [String] {
+        var seen: [String: Int] = [:]
+        return labels.map { l in seen[l, default: 0] += 1; return seen[l]! == 1 ? l : "\(l) (\(seen[l]!))" }
+    }
+    /// 스펙트럼의 소스 경고(서로 다른 상태 — 패널·타임라인 표시). 엔진 상태(고르지 않음·소스 없음·정상)에 앱의 원본 파일 없음(missingMedia)과
+    /// 엔진 겹침 판정(분석 창이 닿는 범위 — 내보내기 막음과 같은 범위)을 더한다. 소스 키는 바꾸지 않는다.
+    enum SpectrumWarning: Equatable { case unset, missingSource, missingMedia(String), overlap([SpectrumOverlap]) }
+    static func spectrumWarnings(_ s: SpectrumItem, in t: Timeline, missing: Set<UUID>) -> [SpectrumWarning] {
+        switch t.spectrumSourceState(s) {
+        case .unset: return [.unset]
+        case .missing: return [.missingSource]
+        case .ok:
+            var w: [SpectrumWarning] = []
+            if let m = t.spectrumMediaID(s), missing.contains(m) { w.append(.missingMedia(t.media.first { $0.id == m }?.name ?? "원본")) }
+            if let k = s.sourceKey {
+                let o = t.spectrumOverlaps(key: k, within: t.spectrumAnalysisReach(s))
+                if !o.isEmpty { w.append(.overlap(o)) }
+            }
+            return w
+        }
+    }
+    func spectrumWarnings(_ s: SpectrumItem) -> [SpectrumWarning] { Self.spectrumWarnings(s, in: timeline, missing: Set(missingMedia.keys)) }
+    /// 경고 글(클립 조정 패널에 늘 보임 — 잠깐 뜨는 상태 줄만으로 알리지 않음)
+    func spectrumWarningText(_ w: SpectrumWarning) -> String {
+        switch w {
+        case .unset: return "소스를 고르지 않았습니다. 이 스펙트럼은 그릴 소리가 없어 내보낼 수 없습니다."
+        case .missingSource: return "소스 오디오가 타임라인에 없습니다(그 소리 클립을 모두 지움). 다른 소스로 바꾸지 않았습니다 — 실행 취소로 되살리거나 목록에서 고르세요."
+        case .missingMedia(let n): return "소스의 원본 파일을 찾을 수 없습니다: \(n). 파일 > 미디어 재연결…로 다시 연결하세요(소스는 그대로)."
+        case .overlap(let o):
+            let tc = settings.timecode
+            let lanes = Set(o.flatMap(\.clipIDs).compactMap { timeline.clip($0)?.lane }).map { timeline.laneLabel($0) }.sorted().joined(separator: "·")
+            let r = o.first.map { "\(tc($0.range.lowerBound))–\(tc($0.range.upperBound))" } ?? ""
+            return "같은 소스의 조각이 같은 시각에 겹칩니다(\(lanes), \(r)\(o.count > 1 ? " 외 \(o.count - 1)곳" : "")). 겹친 곳은 그리지 않고 내보내기를 막습니다."
+        }
+    }
+    /// 소스 바꾸기(클립 조정 패널, 한 단계). project = 패널을 그린 프로젝트 회차, from = 그때 보인 소스(그 사이 실행 취소 등으로 바뀌었으면 늦은 값 — 무시).
+    /// 고른 스펙트럼이 아니거나 없어졌거나, 끌기·알림 중이거나, 같은 값이면 아무것도 하지 않는다. 목록에 없는 소스(지워진 계보)는 넣지 않는다 — 다른 소스로 바꾸지도 않는다.
+    func setSpectrumSource(_ id: UUID, key: UUID?, from: UUID?, project: Int) {
+        guard project == projectSession, gestureBase == nil, alert == nil, selection == id, let sp = timeline.spectrum(id), sp.sourceKey == from else { return }
+        guard sp.sourceKey != key else { return }
+        if let k = key, timeline.spectrumSource(key: k) == nil { statusMessage = EditError.spectrumUnknownSource.description; return }
+        commit({ try $0.settingSpectrumSource(id, key) }, focus: id)
+    }
+
     // MARK: 복사·붙여넣기(2026-10-11)
 
     /// 앱 안 클립 클립보드: 복사한 프로젝트 ID, 내용(클립 값), 복사할 때 고른 클립. 시스템 클립보드와 따로다(텍스트 복사·붙여넣기는 그대로).
@@ -664,6 +751,7 @@ final class ProjectStore {
     /// 복사(⌘C): 고른 클립과 연결된 짝. 프로젝트를 바꾸지 않고 실행 취소 기록도 없다.
     func copySelection() {
         finishColorSession()   // 열린 모양 조정 세션(효과 켜기 등)을 먼저 넣어 복사본이 보이는 모양을 갖게(2026-10-23 검토)
+        if selectedSpectrum != nil { statusMessage = Self.spectrumEditUnsupported; return }   // 스펙트럼 복사는 아직 없다(2B-2)
         guard gestureBase == nil, let id = selection,
               let c = (timeline.subtitle(id) != nil ? try? timeline.copying(subtitle: id) : try? timeline.copying(clip: id)) else { statusMessage = "복사할 클립을 먼저 고르세요."; return }
         clipClipboard = ClipClipboard(project: projectID, content: c, selected: id)
@@ -692,7 +780,7 @@ final class ProjectStore {
     }
     /// 메뉴 "복사하기"·"붙여넣기": 편집기에 초점이 있으면 클립, 텍스트 입력·다른 창이면 응답자 체인(표준 텍스트 복사·붙여넣기)
     func menuCopy() {
-        if KeyRouting.menuTargetsEditor(self) { if canCopy { copySelection() } else { NSSound.beep() } }
+        if KeyRouting.menuTargetsEditor(self) { if canCopy { copySelection() } else { NSSound.beep(); if selectedSpectrum != nil { statusMessage = Self.spectrumEditUnsupported } } }
         else { NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil) }
     }
     /// 텍스트 전용 편집 메뉴(CP-07): 편집기 초점이면 경고음, 아니면 응답자 체인의 표준 동작
@@ -790,7 +878,7 @@ final class ProjectStore {
     func requestRemoveLane(_ id: UUID) {
         guard let lane = timeline.laneInfo(id), gestureBase == nil else { return }
         guard canRemoveLane(lane) else {   // 자막·스펙트럼 레인은 0개여도 된다
-            statusMessage = lane.kind == .spectrum ? "스펙트럼이 있는 레인은 아직 지울 수 없습니다(이 빌드는 스펙트럼 편집을 지원하지 않음)." : EditError.lastLane.description
+            statusMessage = lane.kind == .spectrum ? "스펙트럼이 있는 레인은 지울 수 없습니다. 스펙트럼을 골라 Delete로 먼저 지우세요." : EditError.lastLane.description
             return
         }
         let ids = Self.laneContentIDs(timeline, id)
@@ -1972,11 +2060,9 @@ extension ProjectStore {
         do { decoded = try ProjectFile.decode(data, settings: s) } catch let e as ProjectFile.LoadError {
             return fail(e.description, "decode")
         } catch { return fail(error.localizedDescription, "decode") }
-        // 스펙트럼(형식 8, 2026-10-25 SP-1A 1단계): 이 빌드의 편집기는 스펙트럼 레인·클립을 아직 보이거나 편집하지 못한다.
-        // 열어서 다른 종류처럼 다루거나 저장하며 잃지 않도록 열지 않는다.
-        if decoded.timeline.needsSpectrumFormat {
-            return fail("이 프로젝트에는 스펙트럼이 있습니다. 이 빌드는 스펙트럼 편집을 아직 지원하지 않아 열지 않습니다(파일은 그대로 둡니다).", "spectrum")
-        }
+        // 스펙트럼(형식 8): 2026-10-25 SP-1A 1단계의 임시 열기 거부는 2B-1(2026-10-26)에서 뺐다 — 타임라인이 스펙트럼 레인·항목을 제 종류로
+        // 읽기 전용 표시하고(2A), 엔진 편집·저장이 스펙트럼을 그대로 들고 간다. 검사는 decode 그대로(형식 9 이상·형식 7 이하의 형식 8 값·잘못된 값 거부).
+        // 소스 키는 바꾸지 않는다(조각이 없으면 "소스 없음", 원본 파일이 없으면 missingMedia — 서로 다른 상태). 내보내기는 엔진이 계속 거부한다.
         Self.trace.info("open decoded version=\(decoded.document.version, privacy: .public) media=\(decoded.document.media.count, privacy: .public) clips=\(decoded.document.videoClips.count + decoded.document.audioClips.count, privacy: .public) at \(self.monoSeconds() - t0, format: .fixed(precision: 3), privacy: .public)s")
         openProgress?.total = decoded.document.media.count
         openProgress?.stage = "원본 미디어 확인 중"

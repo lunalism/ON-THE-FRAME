@@ -730,7 +730,7 @@ struct InspectorView: View {
                     if l.kind == .audio { row("소리", l.muted ? "음소거" : "음량 \(l.volumePercent)%") }
                     switch l.kind {
                     case .subtitle: row("자막", "\(store.timeline.subtitles(inLane: l.id).count)개")
-                    case .spectrum: row("스펙트럼", "\(store.timeline.spectra(inLane: l.id).count)개(이 빌드는 표시만 — 만들기·편집 없음)")
+                    case .spectrum: row("스펙트럼", "\(store.timeline.spectra(inLane: l.id).count)개(누르면 고르고 Delete로 지움 — 옮기기·트림·소스 바꾸기는 아직 없음)")
                     case .video, .audio: row("클립", "\(store.timeline.clips(inLane: l.id).count)개")
                     }
                     Text("번호(V1·A1…)는 가운데 경계에서 센 위치이고 이름과 따로입니다. 이름·순서·음량은 왼쪽 \"클립 조정\" 탭이나 레인 머리 메뉴에서 바꿉니다.")
@@ -804,6 +804,13 @@ struct AdjustmentsView: View {
                     target(icon: "captions.bubble", title: s.isBlank ? "빈 자막" : (s.text.split(separator: "\n", omittingEmptySubsequences: false).first.map(String.init) ?? "자막"),
                            subtitle: "자막 · \(laneText(s.lane))")
                     SubtitleAdjustView(store: store, item: s)
+                } else if let sp = store.selectedSpectrum {
+                    // 스펙트럼(SP-1A 2B-3): 오디오 소스 고르기와 소스 경고만. 옮기기·트림·모양은 2C.
+                    target(icon: "waveform.path", title: "스펙트럼",
+                           subtitle: "스펙트럼 · \(laneText(sp.lane)) · \(store.settings.timecode(sp.start))–\(store.settings.timecode(sp.end))")
+                    AdjustSection(title: "오디오 소스") { SpectrumSourceAdjust(store: store, item: sp) }
+                    Text("옮기기·길이·모양은 아직 바꿀 수 없습니다. Delete로 지웁니다.")
+                        .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else if let id = store.selection, let c = store.timeline.clip(id), let kind = store.timeline.lane(of: id) {
                     target(icon: kind == .video ? "film" : "waveform", title: store.mediaByID[c.mediaID]?.name ?? "클립",
                            subtitle: "\(kind == .video ? "영상 클립" : "소리 클립") · \(laneText(c.lane))")
@@ -847,6 +854,36 @@ struct AdjustmentsView: View {
     func laneText(_ id: UUID?) -> String {
         guard let id, let l = store.timeline.laneInfo(id) else { return "—" }
         return "\(store.timeline.laneLabel(id)) · \(l.name)"
+    }
+}
+
+/// 스펙트럼 오디오 소스(SP-1A 2B-3): 목록의 값은 계보 키(글·차례가 아님). "(고르지 않음)" = nil. 지금 소스가 목록에 없으면(지워진 계보)
+/// "(없음 — 지워진 소스)"를 선택된 채 보인다(다시 골라도 그대로) — 다른 소스로 바꾸지 않는다. 목록을 그리는 것만으로는 타임라인을 바꾸지 않는다.
+/// 고르면 그린 때의 회차·보인 값과 함께 넘긴다(setSpectrumSource가 늦은 값을 거름). 경고는 늘 보인다.
+struct SpectrumSourceAdjust: View {
+    @Bindable var store: ProjectStore
+    let item: SpectrumItem
+    var body: some View {
+        let opts = store.spectrumSourceOptions(), project = store.projectSession, current = item.sourceKey
+        let unavailable = current.map { k in !opts.contains { $0.key == k } } ?? false
+        let warnings = store.spectrumWarnings(item)
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("오디오 소스", selection: Binding(get: { current }, set: { store.setSpectrumSource(item.id, key: $0, from: current, project: project) })) {
+                Text("(고르지 않음)").tag(UUID?.none)
+                if unavailable { Text("(없음 — 지워진 소스)").tag(current) }   // 골라도 같은 값이라 아무것도 바뀌지 않음(SwiftUI 항목 끄기는 팝업 항목에 적용되지 않음 — 관찰)
+                ForEach(opts) { Text($0.label).tag(Optional($0.key)) }
+            }
+            .labelsHidden().controlSize(.small).accessibilityLabel("스펙트럼 오디오 소스")
+            if warnings.isEmpty {
+                Text("소스 정상 — 그 소리 계보의 조각이 움직이면 따라갑니다.").font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(Array(warnings.enumerated()), id: \.offset) { _, w in
+                Label(store.spectrumWarningText(w), systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(w == .unset ? Color.orange : Color.red).fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)   // 고를 수 있는 글(복사 가능) — 접근성 트리에도 글로 보인다
+            }
+        }
+        .disabled(store.gestureBase != nil)
     }
 }
 
@@ -1069,7 +1106,7 @@ struct LaneSettingsAdjust: View {
                 case .video: "위 레인이 아래 레인을 가립니다."
                 case .audio: "음소거하지 않은 오디오 레인을 모두 더합니다."
                 case .subtitle: "자막은 모든 영상 위에 그리고, 위 자막 레인이 아래 자막 레인 위에 그립니다."
-                case .spectrum: "스펙트럼은 영상 위·자막 아래에 그립니다. 이 빌드는 레인과 항목을 표시만 하고, 스펙트럼이 있는 레인은 지울 수 없습니다."
+                case .spectrum: "스펙트럼은 영상 위·자막 아래에 그립니다. 스펙트럼을 누르면 고르고 Delete로 지웁니다. 스펙트럼이 있는 레인은 지울 수 없습니다(먼저 스펙트럼을 지우세요)."
             } }())
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }

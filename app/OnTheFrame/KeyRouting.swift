@@ -182,7 +182,7 @@ enum KeyRouting {
         case .openProject: if store.gestureBase == nil { store.requestOpenProject(nil); done = true }
         case .save: if store.gestureBase == nil { store.saveProject(); done = true }
         case .saveAs: if store.gestureBase == nil { store.saveProject(saveAs: true); done = true }
-        case .copy: if store.canCopy { store.copySelection(); done = true }
+        case .copy: if store.canCopy { store.copySelection(); done = true } else if store.selectedSpectrum != nil { store.statusMessage = ProjectStore.spectrumEditUnsupported }   // 스펙트럼 복사 없음(2B-2): 경고음 + 안내
         case .paste: if store.canPaste { store.pasteAtPlayhead(); done = true } else if store.clipClipboard == nil { store.statusMessage = EditError.clipboardEmpty.description }
         }
         if !done { NSSound.beep() }   // 꺼진 동작: 메뉴 키 등가물과 같이 경고음만

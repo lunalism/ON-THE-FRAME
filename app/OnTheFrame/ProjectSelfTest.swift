@@ -139,15 +139,27 @@ enum ProjectSelfTest {
         let newerMsg = s.alert?.message ?? ""; await dismiss()
         check("open.rejectsMalformedAndNewer", !okBad && !okNewer && s.timeline == reopened && s.projectURL == p1.standardizedFileURL && s.recentProjects == recents2
               && badMsg.contains("손상") && newerMsg.contains("더 새로운 버전"), "bad '\(badMsg)' newer '\(newerMsg)'")
-        // 7b. 스펙트럼이 든 프로젝트(형식 8)는 이 빌드의 앱이 아직 열지 않는다(SP-1A 1단계 임시 장치) — 파일·현재 상태 그대로
-        let spec = out.appendingPathComponent("spectrum.ontheframe")
-        let specData = (try? reopened.addingLane(.spectrum, name: "SP", id: UUID()))
-            .flatMap { try? ProjectFile.encode($0, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: spec) }
+        // 7b. 스펙트럼이 든 형식 8(SP-1A 2B-1, 2026-10-26 — 1단계의 임시 열기 거부를 뺌): 열리고 타임라인이 그대로(스펙트럼 레인 포함), 저장 상태, 파일 그대로.
+        //     같은 내용을 형식 7로 적은 파일은 잘못된 파일로 거부한다(현재 상태·파일 그대로). 그 뒤 p1을 다시 열어 아래 검사를 잇는다.
+        let spec = out.appendingPathComponent("spectrum.ontheframe"), spec7 = out.appendingPathComponent("spectrum-v7.ontheframe")
+        let specTimeline = try? reopened.addingLane(.spectrum, name: "SP", id: UUID())
+        let specData = specTimeline.flatMap { try? ProjectFile.encode($0, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: spec) }
         try? specData?.write(to: spec)
         let okSpec = await s.openProject(at: spec)
-        let specMsg = s.alert?.message ?? ""; await dismiss()
-        check("open.rejectsSpectrumProject", specData != nil && !okSpec && specMsg.contains("스펙트럼") && s.timeline == reopened && s.projectURL == p1.standardizedFileURL
-              && (try? Data(contentsOf: spec)) == specData, "opened \(okSpec) msg '\(specMsg)'")
+        let specAlert = s.alert?.message; await dismiss()
+        let specVersion = specData.flatMap { try? ProjectFile.decode($0).document.version }
+        check("open.spectrumProject", specData != nil && okSpec && specAlert == nil && s.timeline == specTimeline && s.timeline.lanes(.spectrum).count == 1
+              && s.projectURL == spec.standardizedFileURL && !s.isDirty && specVersion == 8 && (try? Data(contentsOf: spec)) == specData,
+              "opened \(okSpec) version \(specVersion ?? -1) alert '\(specAlert ?? "")'")
+        if var o = specData.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) {
+            o["version"] = 7; try? JSONSerialization.data(withJSONObject: o).write(to: spec7)
+        }
+        let spec7Data = try? Data(contentsOf: spec7)
+        let okSpec7 = await s.openProject(at: spec7)
+        let spec7Msg = s.alert?.message ?? ""; await dismiss()
+        check("open.rejectsSpectrumDeclaredV7", spec7Data != nil && !okSpec7 && spec7Msg.contains("올바르지 않") && s.timeline == specTimeline
+              && s.projectURL == spec.standardizedFileURL && (try? Data(contentsOf: spec7)) == spec7Data, "msg '\(spec7Msg)'")
+        _ = await s.openProject(at: p1); await dismiss()
         // 8. 가져오는 중에는 프로젝트를 바꾸지 않는다
         s.importFiles([src.appendingPathComponent("otf-A.mp4")])
         s.requestOpenProject(p1)

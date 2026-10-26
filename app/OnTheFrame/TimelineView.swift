@@ -612,24 +612,47 @@ final class TimelineNSView: NSView {
         }
     }
 
+    /// 스펙트럼 항목의 경고 표시 자리(오른쪽 위)
+    static func spectrumWarningRect(_ r: NSRect) -> NSRect { NSRect(x: r.maxX - 15, y: r.minY + 3, width: 11, height: 11) }
     func spectrumRect(_ s: SpectrumItem) -> NSRect {
         let l = laneRect(s.lane) ?? .zero
         return NSRect(x: x(s.start), y: l.minY, width: max(1, CGFloat(s.length) * pixelsPerFrame), height: l.height)
     }
-    /// 스펙트럼 항목(2026-10-25, SP-1A 2A): 읽기 전용 표시 — 분홍 점선 상자와 소스 상태 글자. 누름 판정(clipHit)·커서·끌기에 넣지 않아
-    /// 고르거나 옮길 수 없다(편집 UI는 2B·2C). 지금 앱은 스펙트럼이 든 프로젝트를 열지 않으므로 Debug 자체 검사에서만 보인다.
+    /// 스펙트럼 누름 판정(SP-1A 2B-2): 고르기 전용. clipHit(트림·옮기기·자르기 도구·문맥 메뉴가 쓰는 판정)과 따로 둬 끌기·트림·자르기에 닿지 않는다.
+    /// 그린 상자와 같은 범위 [x(start), x(end)) — 이어 붙은 두 항목의 경계는 오른쪽 항목.
+    func spectrumHit(_ p: NSPoint) -> UUID? {
+        guard let st = state else { return nil }
+        for (lane, l) in Self.layout(st.timeline.lanes) where lane.kind == .spectrum && p.y >= l.minY && p.y <= l.maxY {
+            return st.timeline.spectra(inLane: lane.id).first { p.x >= x($0.start) && p.x < x($0.end) }?.id
+        }
+        return nil
+    }
+    /// 스펙트럼 항목(2026-10-25, SP-1A 2A): 분홍 점선 상자와 소스 상태 글자. 누름 판정(clipHit)·커서·끌기에 넣지 않아
+    /// 옮기거나 자를 수 없다(2C). 2B-2부터 누르면 고르고(spectrumHit) 고른 항목은 강조색 실선으로 그린다. 스펙트럼이 든 프로젝트를 열면 보인다(2B-1). 소스는 정상인데 그 원본 파일을 찾지 못했으면 "원본 파일 없음"을 덧붙인다
+    /// (엔진의 "소스 없음" = 그 계보의 소리 조각이 없음과 다른 상태).
     private func drawSpectrum(_ s: SpectrumItem, _ st: TimelineDrawState) {
         let r = spectrumRect(s)
+        let selected = st.selection == s.id
         let path = NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
-        NSColor.systemPink.withAlphaComponent(0.22).setFill(); path.fill()
-        path.setLineDash([4, 3], count: 2, phase: 0); path.lineWidth = 1
-        NSColor.systemPink.withAlphaComponent(0.8).setStroke(); path.stroke()
+        (selected ? NSColor.controlAccentColor.withAlphaComponent(0.45) : NSColor.systemPink.withAlphaComponent(0.22)).setFill(); path.fill()
+        if !selected { path.setLineDash([4, 3], count: 2, phase: 0) }
+        path.lineWidth = selected ? 2 : 1
+        (selected ? NSColor.controlAccentColor : NSColor.systemPink.withAlphaComponent(0.8)).setStroke(); path.stroke()
+        // 소스 경고 표시(2B-3): 고르지 않음 주황, 소스 없음·원본 파일 없음·겹침 빨강. 그리기만(누름 판정·끌기와 무관).
+        let warnings = ProjectStore.spectrumWarnings(s, in: st.timeline, missing: st.missing)
+        if let w = warnings.first, r.width > 14, let img = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "스펙트럼 소스 경고") {
+            let tinted = img.withSymbolConfiguration(.init(paletteColors: [w == .unset ? .systemOrange : .systemRed])) ?? img
+            tinted.draw(in: Self.spectrumWarningRect(r))
+        }
         guard r.width > 24 else { return }
         let source: String
         switch st.timeline.spectrumSourceState(s) {
         case .unset: source = "소스 고르지 않음"
         case .missing: source = "소스 없음"
-        case .ok: source = st.timeline.spectrumMediaID(s).flatMap { st.names[$0] } ?? "소스"
+        case .ok:
+            let m = st.timeline.spectrumMediaID(s)
+            source = (m.flatMap { st.names[$0] } ?? "소스") + (m.map { st.missing.contains($0) } == true ? " · 원본 파일 없음" : "")
+                + (warnings.contains { if case .overlap = $0 { return true }; return false } ? " · 조각 겹침" : "")
         }
         NSString(string: "≋  스펙트럼 · " + source).draw(with: NSRect(x: r.minX + 6, y: r.minY + 4, width: max(0, r.width - 12), height: 16),
                                                      options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
@@ -806,6 +829,9 @@ final class TimelineNSView: NSView {
                 store.select(id)
                 drag = .pending(id, p)
             }
+        } else if let sid = spectrumHit(p) {
+            // 스펙트럼(SP-1A 2B-2): 누르면 고르기만 한다(⌘-클릭도 보통 선택). 옮기기·트림은 2C — 끌기를 시작하지 않는다.
+            store.pauseForEdit(); store.select(sid); drag = .none
         } else {
             store.select(nil); store.selectLane(nil); drag = .none
         }
@@ -882,8 +908,25 @@ final class TimelineNSView: NSView {
         add(linked ? "재생 헤드에서 자르기(연결된 쌍)" : "재생 헤드에서 자르기", store.gestureBase == nil, #selector(menuSplit))
         add(linked ? "삭제 — 빈틈 남김(연결된 쌍)" : "삭제 — 빈틈 남김", store.gestureBase == nil, #selector(menuLift))
         add(linked ? "리플 삭제(연결된 쌍, 모든 레인)" : "리플 삭제(모든 레인)", store.gestureBase == nil, #selector(menuRipple))
+        #if DEBUG
+        // 스펙트럼 추가(SP-1A 2B-2): Debug 전용(4단계 전 노출 정책), 누른 것이 소리 클립일 때만. 누른 클립과 메뉴를 만든 때의 프로젝트 회차를 항목에 묶는다.
+        if store.timeline.audioClips.contains(where: { $0.id == id }) {
+            m.addItem(.separator())
+            let it = NSMenuItem(title: "스펙트럼 추가", action: #selector(menuAddSpectrum(_:)), keyEquivalent: "")
+            it.target = self; it.isEnabled = store.gestureBase == nil
+            it.representedObject = SpectrumMenuTarget(clip: id, session: store.projectSession)
+            m.addItem(it)
+        }
+        #endif
         return m
     }
+    #if DEBUG
+    final class SpectrumMenuTarget: NSObject { let clip: UUID, session: Int; init(clip: UUID, session: Int) { self.clip = clip; self.session = session } }
+    @objc func menuAddSpectrum(_ sender: NSMenuItem) {
+        guard let t = sender.representedObject as? SpectrumMenuTarget else { return }
+        store.addSpectrum(fromAudioClip: t.clip, session: t.session)
+    }
+    #endif
     @objc private func menuUnlink() { store.unlinkSelection() }
     @objc private func menuLink() { store.linkSelection() }
     @objc private func menuSplit() { store.splitAtPlayhead() }
