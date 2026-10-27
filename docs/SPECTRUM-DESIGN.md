@@ -1407,7 +1407,7 @@ ON THE FRAME의 오디오 스펙트럼(R-10~R-12) 설계다. 표시:
   - 재지 않은 것: CA commit·실제 디스플레이 링크 프레임 놓침·화면 합성(3B/3C), 다른 소리 형식(AAC 등) 디코딩, 600프레임(10초 300프레임으로 줄임 — 네 조건 × 다섯 단계 시간 160 s 안), 긴 원본, 동시에 여러 스펙트럼.
 - **알려진 위험·미검증:** (처음 기록) `SpectrumItem`의 겹침 판정(`spectrumFrameState`)이 30 fps를 가정한다 — 조율은 `RenderSettings.fps`를 받지만 30이 아니면 둘이 어긋난다(제품 30 fps). → 조사·고침 §15.13.1(30이 아니면 조율이 거부). 같은 원본 위치의 열기 실패는 재연결·교체 전까지 다시 시도하지 않는다. 캔버스 크기를 번갈아 요청하면 그리기 객체를 다시 만든다(4K 31.6 MB). 4K 그리기 + 복사는 프레임당 수 ms·수십 MB 이동이다(위 표). 소유 복사·조율 그리기가 프리뷰에서 충분한지는 3B 측정 몫이다. 성능이 충분하다고 말하지 않는다.
 - **3B에 필요한 것(제안):** 앱 `ProjectStore`가 프로젝트 교체 때 `resetProject` → `update`, 편집·재연결·`assets` 변화 때 `update`를 부른다. 프리뷰 층은 받은 프레임을 `drawRect`로 영상 위·자막 아래에 놓고, 다른 요청의 `superseded`·`cancelled`는 버린다. 재생 헤드 기준 우선순위·미리 요청(앞쪽 몇 프레임)과 지나간 요청 취소, 원본 접근이 없을 때 표시. 디스플레이 링크 시각 ↔ 프레임 대응은 3C.
-- **3B 원본 접근 수명 순서(2026-10-27 소유자 승인 — 기록만, 아직 구현 안 함):** 프로젝트를 바꿀 때 ① `resetProject()`로 옛 조율 회차를 무효로 하고 ② 기존 `stopAllScopes`로 옛 보안 범위 접근을 놓고 ③ 기존 앱 기반으로 새 프로젝트의 미디어 접근을 세우고 ④ `update(timeline:media:)`로 새 타임라인과 접근 가능한 MediaAsset을 넘긴다. `resetProject`가 접근 해제보다 먼저여야 접근이 끝나는 동안 옛 요청이 유효한 것으로 다뤄지지 않는다. 취소는 이미 도는 디코딩을 곧바로 멈추지 못할 수 있으므로 완료 때 오래된 결과 거부는 계속 필요하다.
+- **이전 순서 표현의 역사 기록(후보 준비와 교체 확정의 구분은 §15.14의 2026-10-27 소유자 명확화로 대체):** 프로젝트를 바꿀 때 ① `resetProject()`로 옛 조율 회차를 무효로 하고 ② 기존 `stopAllScopes`로 옛 보안 범위 접근을 놓고 ③ 기존 앱 기반으로 새 프로젝트의 미디어 접근을 세우고 ④ `update(timeline:media:)`로 새 타임라인과 접근 가능한 MediaAsset을 넘긴다. `resetProject`가 접근 해제보다 먼저여야 접근이 끝나는 동안 옛 요청이 유효한 것으로 다뤄지지 않는다. 취소는 이미 도는 디코딩을 곧바로 멈추지 못할 수 있으므로 완료 때 오래된 결과 거부는 계속 필요하다.
 - **독립 Codex 리뷰 관문(2026-10-27 소유자 승인 계획 — 이번에 돌리지 않음):** 3단계 프리뷰 통합과 소유자 보고 실제 Mac 수동 확인 뒤, 2C-3 모양 UI와 4단계 스펙트럼 내보내기 그리기 전에 독립 Codex 리뷰를 한다. 우선순위: Debug 시험 도구 충돌·비정상 종료, 스펙트럼 프레임·소스 타이밍, 비동기 취소·오래된 콜백, 그림 소유권·CGImage 수명·Sendable, 프리뷰 층 순서·그리기 정확성, 프로젝트 교체·보안 범위 미디어 접근, 형식 8 저장·비파괴 편집, 성능·캐시 동작, 남은 미검증 경우·알려진 회귀. 결과는 코드 읽기로 본 위험과 재현한 실패를 나눠 적는다.
 - **상태:** 3A-2 구현 완료 후보(커밋 안 함). 3B·3C·3D·4단계는 시작하지 않았다. 3단계는 완료가 아니다.
 
@@ -1435,3 +1435,278 @@ ON THE FRAME의 오디오 스펙트럼(R-10~R-12) 설계다. 표시:
   - 앱 Debug·Release `BUILD SUCCEEDED`, 조율 파일 경고 0. 예상 밖 종료·새 진단 보고서 없음.
 - **3B·3C 영향:** 3B는 조율을 `.m1`(또는 30 fps)로 만들어야 한다. 3C의 디스플레이 링크 시각 → 타임라인 프레임은 30 fps 정수 격자(`RenderSettings.frame(containing:)`/`nearestFrame` 같은 기존 정수 규칙)로 바꾼 뒤 조율에 넘긴다. 60 Hz 화면은 같은 프레임을 두 번 요청한다(§15.13 측정과 같음).
 - **남은 것:** 다른 fps 지원은 없다(요구 없음 — 지원한다고 말하지 않음). `spectrumFrameState`의 상수 30은 그대로다(조율이 30만 받으므로 일치). 겹침 여유가 분석 창보다 앞뒤로 넓은 것(보수적 — 실제 겹침이 닿지 않는 프레임 2개씩도 `overlap`)은 기존 동작이고 바꾸지 않았다.
+
+
+### 15.14 Stage 3B-1 수명 관리 부분 구현(2026-10-27, 소유자 명확화 지시, 커밋·게시 안 함)
+
+> 이 절은 직전 수명 부분 작업 당시의 구현·검증 기록이다. 이어서 연결한 정지 overlay의 현재 상태는 §15.15. 기존 증거는 그대로 보존한다.
+
+**구현 상태:** 수명 관리의 작은 부분을 구현했다. **정지 스펙트럼 화면 통합은 아직 없다. 3B-1·3B·3단계 완료가 아니다.** 소유자가 허용한 일관된 작은 단계로 한정했다. 다음 작업은 이 수명을 실제 정지 화면 층·프레임/탐색 identity와 연결하는 것이다.
+
+#### 트랜잭션 경계와 소유권(코드로 확인)
+
+- `openProject(at:)`는 원래부터 두 단계다. 파일 읽기·decode·후보 북마크 접근 시작·MediaProbe·후보 timeline/cache/scopes 구성은 준비 단계다. 현재 프로젝트와 기존 `scopedURLs`는 유지한다. 마지막 `cancelled()`·현재 timeline/gesture 충돌 검사까지 통과해야 교체한다.
+- 확정 경계는 그 검사 바로 뒤의 `stopAllScopes()`다. 여기에서 앱 `SpectrumPreviewSession`의 epoch/revision을 **main actor에서 동기적으로** 올리고 엔진 `resetProject()`를 큐에 넣은 뒤, 기존 소유 메커니즘으로 옛 접근을 해제한다. 후보 scopes를 인계하고 기존 `replaceProject`가 timeline/cache/bookmarks/missing을 설치한다. `timelineChanged → refreshAssets`가 현재 timeline과 접근 가능한 `assets`로 coordinator를 update한다. 후보 접근은 준비 때 이미 시작했으므로 다시 시작하지 않는다.
+- 확정 경계에서 프로젝트 설치·접근 인계는 기존처럼 동기적이고 throw/await가 없다. 그 뒤의 비동기 composition 실패는 이미 교체된 프로젝트의 프리뷰 오류이며 이전 프로젝트로 rollback하는 경로가 아니었다. 이 동작은 바꾸지 않았다.
+- decode 실패는 후보 접근을 얻기 전 실패한다. 검증 중 취소·편집 충돌은 원래처럼 후보 scopes만 해제한다. 여기에 reset을 넣지 않았다. 찾지 못한 미디어를 missing으로 열 수 있는 기존 동작도 그대로다.
+- 새 빈 프로젝트와 앱 종료도 기존 `stopAllScopes`를 거쳐 무효화 후 접근을 놓는다. scope/bookmark 소유권을 복제하지 않았고 새 영구 경로·프로젝트 필드를 추가하지 않았다.
+
+#### 앱 측 coordinator 경계
+
+- `ProjectStore`가 `SpectrumPreviewSession` 하나를 소유하고, 이것이 `.m1` coordinator를 소유한다. `refreshAssets`는 기존 timeline과 검사 캐시에서 만든 authorized assets만 넘긴다. 일반 편집·재연결에서는 update만 하고 프로젝트 epoch를 reset하지 않는다.
+- 요청 시 epoch/revision을 캡처한다. 엔진의 ticket·epoch·Plan 검사에 더해, main actor 완료 전달 직전에 앱 epoch/revision이 다르면 `superseded`로 전달한다. 이미 엔진에서 `ready`를 만들고 전달 대기 중인 경우도 거부한다. 이 단계는 모든 update에 revision을 올리는 보수적인 방식이다(관계없는 편집에도 앱 요청 재시도가 필요할 수 있음).
+- 엔진 원본 열기·decode·FFT·픽셀 그리기는 기존 작업 큐에 있다. 앱에는 CALayer를 변경하거나 새 렌더 알고리즘을 실행하는 코드가 없다. cancel은 기존 ticket 취소를 전달한다. 취소만으로 안전성을 주장하지 않는다.
+- 아직 화면 이미지가 없으므로 위 검사는 **앱 완료 전달의 안전성**이며 실제 화면의 오래된 이미지 제거를 검증한 것은 아니다. view teardown·빠른 seek·표시 프레임·item generation·현재 이미지 해제는 다음 화면 연결에서 추가해야 한다.
+
+#### 검증과 증거
+
+- 생성 WAV 복사본과 고유 후보 프로젝트를 사용하는 `app/scripts/spectrum-lifecycle-test.sh`. 실제 보안 범위 북마크를 생성·resolve하여 후보/기존 접근 각 1개인 상태를 확인한다. 원본 열기와 후보 준비 끝을 continuation gate로 정한다. 완료 대기는 상한 있는 조건 폴링이며 경합 순서를 sleep으로 정하지 않는다. 준비 실패는 FAIL JSON으로 기록한다.
+- 최종 수명 검사 **25/25 PASS**: 성공 교체의 invalidate→release→transfer→install 순서·authorized mapping, 잘못된 파일 열기 실패 시 기존 상태와 진행 요청 보존, 후보 접근 획득 후 취소 시 후보만 해제, 후보 검증 중 기존 편집 보존·후보 거절, 일반 편집에 epoch reset 없음, 열기 실패/취소 뒤 coordinator 사용 가능, 원본 열기 중 교체의 terminal 한 번, 이미 생성된 ready의 재열기/재연결/빈 프로젝트 교체 뒤 거부, 재연결 새 원본으로 ready. 로그 `app/selftest-work/sp3b1-lifecycle-verified.log`와 그 안의 고유 실행 폴더 JSON. 앞선 18/18·23/23 실행도 보존했다.
+- 엔진 관련 회귀 **39개 실패 0**(coordinator 13·공개 renderer 8·모델 12·ProjectFile 6), `sp3b1-engine-focused.log`. 엔진 소스 변경은 없다. 엔진 전체는 이번에 반복하지 않았다.
+- 빌드·기존 앱 회귀 비교의 최종 결과는 아래 추가 기록에 둔다. 최초 기본 샌드박스 빌드는 Xcode 캐시 쓰기 거부로 실패(`sp3b1-debug-first.log`), 권한 확장 후 최초 빌드는 시험의 settings 인자 누락·Gate Sendable 경고(`sp3b1-debug-run2.log`)로 실패했다. 고친 뒤 Debug 빌드 성공. 이 기존 build 스크립트는 실패도 exit 0이어서 로그의 BUILD SUCCEEDED/FAILED를 직접 확인했다.
+
+#### 미구현·수동 확인·성능 경계
+
+- 실제 spectrum overlay·drawRect 배치·Y축·투명도·clip·영상 위/자막 아래 순서·현재 확인된 정지 프레임 선택은 아직 구현/검증하지 않았다. `PlayerNSView`·기존 자막 층·seekToken/displayedFrame 규칙은 변경하지 않았다. 주기적 time observer를 정확한 표시 프레임으로 쓰지 않는다. 기존 승인된 멈춤 때 한 프레임 차이 한계(§10.19)는 해결하지 않았다.
+- `withoutSubtitleItems` 비교와 composition 생성 경로는 그대로다. coordinator update는 별도 큐 입력이며 새 composition 재구성을 추가하지 않는다. 기존 spectrum-only 편집의 불필요한 재구성은 아직 남아 있다. 다음 화면 통합에서 제한된 overlay-only 비교를 별도 검증해야 한다.
+- 이 기능의 **소유자 화면 수동 검증은 아직 불가**다. 개발 검증은 Debug 빌드 성공 확인 뒤 저장소 루트에서 `app/scripts/spectrum-lifecycle-test.sh`로 재현한다(기존 생성 WAV fixture가 필요하며, 없으면 FAIL로 종료한다). 공유 수동 fixture를 다시 만들지 않고 고유 복사본·고유 프로젝트만 쓴다. 소유자가 검증했다고 주장하지 않는다.
+- 이번에는 실제 정지 화면 latency·main thread overlay 작업·CA commit·반복 표시 메모리·1080p/4K 요청 차이를 측정하지 않았다. 엔진 시험의 headless renderer 기록은 interactive 성능이 아니다. 30/60Hz 연속 재생 성능을 주장하지 않는다.
+- 남은 3B-1: 정지 overlay·확인된 프레임/seek/view identity·상태별 그림 제거/오류 진단·레이어/기하/투명도·실제 UI 경합 검사·composition 재구성 최소화·소유자 절차·화면 성능 관찰. 3B-2/3B-3의 후속 범위는 별도 지시에 따르며 이번에 구현하지 않았다. 연속 재생·display link timing/프레임 누락은 3C, 3D·모양 UI·스펙트럼 내보내기 그리기도 포함하지 않았다.
+
+- **추가 검증:** 기존 스펙트럼 레인·편집·저장 자체 검사 98/98 PASS(`sp3b1-spectrum-lane.log`, 생성 미디어의 고유 복사본, 기존 단언 변경 없음). 최종 Debug `sp3b1-debug-verified.log`·Release `sp3b1-release-verified.log` 모두 BUILD SUCCEEDED. 새 두 Swift 파일의 최종 빌드 경고 없음(기존 앱 경고는 남음). `git diff --check`·새 스크립트 `zsh -n` 통과.
+- **기존 열기 흐름 실패 증거:** OpenFlow 기존 자체 검사 15개 중 2개 FAIL, 최종 앱에서 같은 두 실패 재현(`sp3b1-openflow.log`·`sp3b1-openflow-run2.log`): `untitled.simulatedSaveThenOpenPanel`(예상 확인창/열기 패널 없음, url nil·dirty true), `repeat.requestsStillWork`(열기 패널 이벤트 없음). 각각의 나머지 13개는 PASS(마지막 로그 항목 포함). 최초 실패를 지우거나 기존 단언을 약하게 바꾸지 않았다. 기준 HEAD `5a09bc6`를 `git archive`로 고유 임시 폴더에 추출하고 내부 APFS DerivedData의 `SP3B1Baseline` 하위에 별도 빌드했다(BUILD SUCCEEDED, `sp3b1-baseline-build.log`). 그 변경 전 앱에서도 **같은 두 실패가 같은 형태로 재현**됐다(`sp3b1-openflow-baseline.log`, 15개 중 2개 FAIL). 이번 변경만으로 생긴 실패는 아니라는 비교 증거이며, 제품/시험 도구 어느 쪽의 원인인지는 미확정이다. 이 실패를 이번 수명 검사의 통과와 섞어 전체 PASS로 보고하지 않는다.
+- **종료 증거:** 최초 빌드 실패 뒤 이전 바이너리를 잘못 실행한 시험 앱은 새 검사 진입점이 없어 결과를 만들지 못했다(`sp3b1-lifecycle-run1.log`). 제가 띄운 해당 시험 앱/대기 스크립트만 명시적으로 TERM 종료했다(소유자 앱 아님). 예상 밖 앱 충돌과 구분한다. 이후 runner는 실행 파일의 검사 진입점 존재를 확인하고, 누락 fixture도 FAIL로 종료하도록 했다.
+
+- **최종 관찰:** 새 OnTheFrame 충돌 진단 보고서 없음(이번 실행 구간 검색), 정상 결과 파일을 만든 검사에서 예상 밖 종료 관찰 없음. 소유자 앱은 종료하지 않았다. 보존한 앱/엔진/실험/DerivedData 디렉터리 할당 크기의 합은 약 6.5 GiB(소스 포함 보수 합계, 20 GiB 예산 아래). 실제 앱 메모리 footprint 측정과는 다르다. 문서 네 개의 로컬 링크 212개 대상 파일 존재 확인, `git diff --check`·새 스크립트 구문 검사 통과. staging·commit·push·fetch·branch 변경 없음; 기존 `.claude/`·`.DS_Store`와 백업 참조 보존. 소유자 원본 미디어/프로젝트 수정 없음.
+
+
+### 15.15 Stage 3B-1 정지 스펙트럼 overlay 연결(2026-10-27, 소유자 continuation 지시, 미커밋)
+
+> 이전 구현 작업의 당시 기록이다. 아래의 소유자 확인 대기/실화면 미확인 표시는 당시 상태로 보존한다. 2026-10-27 수신한 소유자 관찰과 추가 조사는 §15.16.
+
+**구현 범위:** `PlayerNSView`에 현재 확인된 정지 탐색 프레임의 스펙트럼을 연결했다. §15.14의 `SpectrumPreviewSession`·coordinator·프로젝트 열기 트랜잭션을 재사용했다. 새 coordinator/프로젝트 회차·분석/그리기 알고리즘·저장 필드·UI 모양 조절을 만들지 않았다. 아래 검증은 자동 실행과 에이전트 확인이며 소유자 수동 PASS가 아니다. Stage 3B 전체·3단계 전체 완료가 아니다.
+
+#### 층과 좌표
+
+- 아래부터 기존 `AVPlayerLayer` → 기존 drag stage → 새 투명 `spectrumCanvas` → 기존 `subtitleHost`. 스펙트럼 캔버스는 고정 1920×1080, anchorPoint 0, `masksToBounds = true`, 배경색 없음. 자막 층의 합성·시간 애니메이션·편집 기능은 그대로다.
+- 기존 `fit`을 재사용한다: k = min(viewWidth/1920, viewHeight/1080), 캔버스 position = ((viewWidth−1920k)/2, (viewHeight−1080k)/2), scale = (k,k). 영상의 aspect fit과 같은 검은 여백을 유지한다.
+- 각 `SpectrumRenderedFrame.image`는 crop 크기 그대로 CALayer contents에 넣는다. 캔버스 왼쪽 위 원점 `drawRect(x,y,w,h)`를 CA 왼쪽 아래 원점 `(x,1080−(y+h),w,h)`로 놓는다. crop을 전체 캔버스로 늘이지 않는다. 프레임 소유 화소는 기존 엔진 renderer 계약 그대로다.
+- `timeline.spectra`의 레인/시작 정렬을 반대로 그린다(아래 레인 먼저, 위 레인이 위에). 유효한 타임라인은 같은 레인에서 스펙트럼이 겹치지 않는다. 보이는 항목을 모두 독립적으로 요청하고 결과가 없는 항목만 비운다.
+
+#### 확인된 프레임 계약
+
+- 기존 `displayedFrame`은 재생 중 periodic time observer의 playhead도 받아서 정밀한 영상 프레임 증명이 아니다. 이 값을 새 스펙트럼의 authoritative clock으로 쓰지 않았다. 기존 자막의 displayedFrame/seekHeld 알고리즘은 유지한다.
+- 새 overlay의 `confirmedFrame`은 **현재 seekToken의 성공한 exact-seek 완료**에서만 세운다. 현재 AVPlayerItem, 적용된 preview generation, 정지 상태가 맞아야 한다. 재구성 뒤 원래 수행하던 await seek도 같은 token/시작·완료 추적에 연결했다(새 재생 timebase 없음).
+- 새 탐색 시작은 이전 요청 취소·이미지 제거·확인 프레임 해제다. 이전 token 완료는 새 스펙트럼 확인을 덮어쓰지 못한다. 기존 탐색 완료는 요청 당시의 view를 약하게 캡처해 새 view로 전달하지 않는다.
+- 재생 시작 시 지운다. **재생 후 보통 Pause만 누르면 확인 프레임이 없어 spectrum을 숨긴다.** ←/→ 또는 타임라인 탐색이 성공하면 다시 보인다. Pause 뒤 보정 seek를 새로 넣지 않았다. 기존 승인된 한 프레임 멈춤 차이(§10.19)는 해결하지 않았으며 정확한 디스플레이 시각 일치를 주장하지 않는다.
+- view가 새로 window에 붙었을 때 현재 item/generation이 준비되고 정지 상태면 기존 `seek(to: playhead)`로 다시 확인한다. 재구성·탐색이 겹쳐 현재 항목의 완료를 확인할 수 없는 경우에는 빈 층으로 남을 수 있다(다음 명시적 탐색으로 재확인).
+
+#### 오래된 그림 제거와 미디어
+
+- `PausedSpectrumOverlay`는 view와 store를 약하게 참조한다. view/request serial은 기존 세션의 epoch/revision에 더하는 **view 수명/요청 번호**이며 별도 프로젝트 회차가 아니다. 완료 때 serial·epoch/revision·frame·seekToken·현재 item·적용 generation·현재 previewHost·window 존재·정지/gesture/still 상태를 모두 검사한다.
+- 타임라인/authorized media 갱신, 새 탐색, 재생 시작, 모든 timeline/fade/transform gesture 시작, 프로젝트 교체, representable dismantle, view removal, window close에서 즉시 이미지와 ticket을 놓는다. 완료 후 취소가 늦어도 guard가 거부한다. gesture 중에는 그리지 않고, 확정/취소 뒤 안전한 현재 프레임에서만 갱신한다. drag stage 중에는 확인이 불확실하므로 숨긴다.
+- `ready(nil)`은 contents nil/zero frame, 투명 1×1 결과는 그 투명 결과로 교체한다. `notVisible/itemMissing/unsetSource/missingSource/overlap/mediaUnavailable/cancelled/superseded/dropped`는 빈 그림이다. failed도 비우고 Debug의 기존 store logger에 진단한다. 이전 그림 fallback·다른 소스 대체·새 blocking alert 없음. 기존 경고는 유지한다.
+- nonempty ready는 표시 전 작업 큐에서 `FileIdentity.of`·readability가 현재 검사된 authorized MediaAsset과 같은지 확인한다. 파일이 없어졌거나 제자리 교체/변경이면 비운다(북마크·scope 획득 없음). 그 비동기 검사 뒤 앱/view identity를 다시 검사한다. 파일 metadata·decode·FFT·픽셀 렌더는 main actor 밖이고 CALayer 변경은 main actor다.
+- 외부 파일 변화의 상시 watcher는 없다. 이미 표시된 정지 이미지에 대한 외부 파일 손실 감지는 다음 요청/입력 갱신 때다. 기존 missing-media 경고 상태 재검사는 재열기/재연결 경로에 따른다. 제자리 변경 파일은 기존 cache의 identity로 억지로 표시하지 않고 다시 검사/재연결해야 한다.
+- §15.14의 prepare/commit 순서를 유지한다. 실패·취소는 기존 epoch/revision·scope·그림을 보존한다. 성공 교체는 scope 해제 전에 overlay와 세션을 무효화한다. 창만 닫으면 기존 프로젝트/scope 수명은 기존 앱대로 유지하고 overlay만 놓는다.
+
+#### 영상 재구성의 작은 비교 변경
+
+- `previewVideoInputs`는 subtitle items·spectrum items·spectrum lane metadata만 제외하고 video/audio clips, 나머지 lanes, media와 media dictionaries, **전체 durationFrames**를 유지한다. 재구성이 없고 drag still이 없으며 적용 generation이 맞는 기존 자막 전용 갱신 분기에서만 이 값을 비교한다.
+- 이 값이 같으면 player item을 유지하고 자막·스펙트럼 층만 갱신한다. 스펙트럼 구간 확장으로 전체 길이가 바뀌거나 audio/video 입력이 바뀌면 기존 composition 재구성을 한다. composer 전체를 재설계하지 않았다. 타임라인 갱신 중 적용 전의 중복 overlay 요청도 피한다.
+
+#### 자동 검증·실패 증거
+
+- `app/scripts/spectrum-overlay-test.sh`: 공유 수동 fixture를 다시 만들지 않는다. 매번 고유 RUN에서 생성 6초 48 kHz stereo PCM16 WAV(440 Hz, 진폭 0.4)를 만들고 기존 생성 otf-TA 영상만 복사한다. 프로젝트는 고유 UUID 파일로 직접 저장/재열기하며 실제 저장 패널을 자동 확인하지 않는다. malformed fixture는 FAIL JSON으로 끝낸다.
+- 최종 focused **54/54 PASS**, `app/selftest-work/sp3b1-overlay-final-validation.log`와 거기 적힌 RUN JSON. 실제 view/window에 붙은 CALayer contents·frame을 검사한다. CA로 렌더한 비대칭 스펙트럼을 top-left owned pixels와 비교: painted 2079, alpha 차이>1 픽셀 0, drawRect 밖 칠한 픽셀 0. aspect fit·clip·다중 레인·자막 보존·암시적 애니메이션 없음도 검사한다.
+- 경계 19/20/99/100, nil/transparent, unassigned/deleted/media-unavailable, 음량/페이드/음소거, D-S8 [50,60) 겹침의 보수적인 [47,63) 창, source 재지정/무음, trim/move/delete, Undo/Redo, 전체 길이 변경 때만 재구성, 빠른 연속 seek, 이미 생성된 ready 지연, 실제 생성 원본을 잠시 이동한 뒤 cached ready 거부/복원, gesture 중 지연 결과·취소/확정, view removal/reattach/창 닫기, relink, 실패/취소된 열기 보존, 교체/같은 파일 재열기를 포함한다.
+- 경합은 ready 전달을 continuation gate로 정한다. 시간 sleep을 경합 정답으로 쓰지 않는다. 조건 폴링은 유한 상한을 둔다. 이전 자체 검사 단언은 약하게 바꾸지 않았다.
+- 초기 증거 보존: 시험의 CGImage 조건부 cast 컴파일 오류(`sp3b1-overlay-debug2.log`), Debug dylib를 인식하지 못한 runner의 실행 전 FAIL(`sp3b1-overlay-run1.log`), fixture 영상의 연결 오디오 레인 누락 FAIL(`run2`), 2초 WAV 밖인 63/99에 nonempty를 기대한 두 fixture 단언 FAIL(`run3`). 실행 전 FAIL은 앱 충돌이 아니다. 새 고유 6초 톤으로 fixture를 고쳤고, 그 뒤 47/47·49/49·확장 54/54 통과 로그를 모두 보존했다.
+- 최종 Debug `sp3b1-overlay-debug-final4.log`, Release `sp3b1-overlay-release-validated.log` 모두 BUILD SUCCEEDED. 새 overlay/창 관찰자 코드 경고 없음(초기 observer deinit 경고는 자동 해제 소유 객체로 수정, 기존 앱 경고 남음). 기존 수명·편집·프리뷰·자막 최종 회귀 결과는 아래 추가 기록. 엔진 코드는 변경하지 않았고 이번 continuation에서 engine-only benchmark/전체 엔진 검사를 다시 돌리지 않았다(§15.14의 39개는 그때의 증거).
+- OpenFlow의 기존 13/15 한계와 변경 전 HEAD 동일 재현은 §15.14 그대로 미해결이다. 이번에 고쳤다고 표시하지 않는다.
+
+#### 성능 관찰(기준·합격선 아님)
+
+- 이 Mac, macOS 26.6.2, Debug native app, 1920×1080 30fps 프로젝트, otf-TA 영상+자막+위 WAV, 64-band digital above 비대칭 선 스펙트럼 2개. 기능 검사로 cache가 이미 준비된 뒤 frames 20…79로 **60번 순차 exact seek**. 마지막 120개의 수락된 item 결과(끝의 frame 30 재확인 포함)를 표본으로 삼았다.
+- 요청 → source metadata 확인을 포함한 수락/층 변경 직전 콜백 latency p50 **6.560 ms**. CA contents/frame 설정 및 `CATransaction.commit()` 호출의 main-thread CPU 구간 p50 **0.156 ms**. 전체 main-thread 작업(요청 준비/레이아웃 포함)을 따로 분리하지 않았다. 실제 화면 표시 시각·CA 서버/GPU commit 완료·vsync/프레임 누락은 측정하지 않았다.
+- 같은 60번 탐색 전후 전체 앱 phys_footprint **207.470 → 207.642 MiB**. AVFoundation·분석 cache·할당기 포함이며 overlay만의 메모리나 장기 상한을 뜻하지 않는다. 단 한 번의 제한된 관찰이다.
+- 앱 캔버스는 1080p 고정이다. 이번 4K 앱 측정 없음. §15.13의 별도 Release engine-only 1080p/4K 값은 headless 조건이며 이 앱 관찰이나 연속 재생 성능과 섞지 않는다. 30/60Hz smooth playback 주장은 없고 실제 continuous timing/프레임 누락은 3C다.
+
+#### 소유자 Mac 확인 절차(아직 소유자 PASS 없음)
+
+1. Debug 빌드 성공 확인 뒤 저장소 루트에서 `MODE=-OTFSpectrumOverlayManual app/scripts/spectrum-overlay-test.sh`. 고유 RUN과 결과를 출력하고 검사 뒤 앱을 남긴다. RUN의 `manual-project.txt`에 실제 고유 저장 파일이 적힌다. 실행마다 새 fixture이며 기존 파일을 재생성/덮어쓰지 않는다.
+2. 처음에는 frame 30. 영상 위 붉은 spectrum, 그 위 흰 자막을 확인한다. 창 크기를 바꿔 aspect fit/여백/clip을 본다. 기준선은 왼쪽 y420→오른쪽 y600 방향이며 막대는 위쪽이다. 위 SP를 선택해 Delete하면 아래 녹색 SP가 보이고 Undo하면 붉은 SP가 돌아와야 한다. 단일 440 Hz tone이므로 일부 밴드만 솟는 것은 정상이다.
+3. 19/20/99/100 경계를 탐색해 interval 전/첫/끝/뒤를 본다. 보통 Play→Pause 뒤에는 spectrum이 숨겨지는 것이 이 slice의 보수적인 동작이며, ←/→로 확인된 정지 프레임을 얻으면 다시 보인다. 빠르게 연속 탐색해 이전 위치의 그림이 남지 않는지 본다.
+4. SP의 source를 고르지 않음으로 바꾸면 해당 그림만 사라지고 경고가 유지돼야 한다. 다시 WAV source로 복원한다. SP를 audio end(180) 밖으로 늘여 그 밖을 탐색하면 무음으로 비어야 한다. 최종 프로젝트에서 사용하는 RUN의 `sources/relinked.wav`만 잠시 이동하고 탐색/다시 열기하면 숨김/기존 missing 경고를 확인할 수 있다. 소유자 원본은 쓰지 않는다. 원위치 복원 또는 기존 재연결로 되살린다.
+5. 겹침은 일회용 WAV clip을 frame 60에서 나누고 새 audio lane으로 오른쪽 조각을 frame 50에 옮겨 같은 계보의 [50,60) overlap을 만든다. D-S8 경고와 frame 47…62의 숨김, 46/63의 표시를 확인한다(정확한 경계는 자동 검사도 있음). Undo로 복원한다.
+6. 새 프로젝트/다른 프로젝트로 바꾸면 옛 spectrum이 남지 않아야 한다. File > 다른 이름으로 저장…으로 RUN 안에 **별도의 고유 파일명**을 직접 선택해 저장한 뒤, File > 열기로 바로 그 파일을 다시 연다(실제 파일명 확인). 기존 소유자 파일을 덮어쓰지 않는다. manual script를 다시 실행하는 것은 앞 파일의 재열기 검사가 아니다.
+
+#### 남은 범위
+
+- 소유자 실제 Mac 조작/정성 PASS는 대기다. 정지 seek 완료 계약을 넘어 정확한 물리적 displayed video frame을 증명하거나 일반 Pause의 한 프레임 차이를 고친 것이 아니다.
+- 확인되지 않은 정지/drag/rebuild 전환에서는 빈 층을 우선한다. 외부 파일 상시 감시와 실제 디스플레이 성능/긴 시간·큰 항목 수 검증은 없다. 실제 analysis/render 강제 실패·queue dropped/cancelled의 모든 UI 조합을 fault injection한 것은 아니다(분기 처리와 기존 엔진 증거를 구분). 예기치 않은 입력/실패 내구성은 향후 독립 리뷰 대상이다.
+- 3B-2/3B-3의 후속 범위는 별도 지시/검토에 따른다. continuous playback·display link·실제 display timing은 3C, 3D·2C-3 모양 UI·spectrum export drawing은 이번에 구현하지 않았다. export refusal·Debug-only creation·형식 8·trim/move/undo 규칙은 유지했다.
+
+- **최종 회귀(같은 최종 코드):** 수명 25/25(`sp3b1-overlay-final-lifecycle.log`), 기존 스펙트럼 레인/편집 98/98(`sp3b1-overlay-final-lane.log`), 기존 영상 preview 내부 5개 + 출력 프레임 16개 판정 PASS(`sp3b1-overlay-final-preview.log`), 자막 시간 창 56/56(`sp3b1-overlay-final-subtitle.log`). 묶음 `sp3b1-overlay-final-regressions.log` 네 단계 PASS. 기존 테스트/단언 변경 없음. Stage 3A 엔진 소스 변경 없음.
+- **수동 확인 준비 실행:** `sp3b1-overlay-manual-ready.log`에서도 54/54 PASS. 고유 RUN `app/selftest-work/spectrum-overlay-20261026T183230Z-qHxhFy`의 `manual-project.txt`와 `paused-spectrum-71F574EB-191B-4EBD-B509-31BC137EE3C8.ontheframe`를 보존했고 Debug 앱을 남겼다. owner 수동 확인 결과는 아직 없다.
+- **화면 확인 경계/도구 실패:** native app에 붙은 view의 층과 CA 렌더 픽셀은 위 자동 검사로 확인했고, 생성 `spectrum-ca.png`의 붉은 막대 방향도 에이전트가 파일로 확인했다(실제 화면 캡처 아님). 실제 앱 화면을 읽으려던 CUA `getApp`은 장시간 응답하지 않아 timeout/kernel reset으로 끝났다. 그 뒤 수동 Debug 앱 프로세스가 살아 있음을 읽기 전용으로 확인했고, 이번 구간의 새 OnTheFrame crash diagnostic은 없었다. **이 도구 실패를 앱 충돌로 바꾸거나 실화면 정성 확인 PASS로 보고하지 않는다.** 도구 대기 중 경과한 시간은 장시간 안정성/성능 측정이 아니다. 구현·자동 검증과 실화면/소유자 확인을 분리해 추적한다.
+- **안전/정적 확인:** 관련 앱/엔진/실험/DerivedData 디렉터리 할당 합계 약 6.91 GiB(소스 포함 보수 합계, 20 GiB 아래). 고유 증거와 앱 유지. 프로젝트 형식 8·원본 media·export refusal·Debug-only creation·전역 Git identity·백업 refs 유지. staging/commit/push/fetch/branch 변경 없음. 최종 `git diff --check`·스크립트 `zsh -n` 통과, 로컬 문서 링크 215개 대상 존재 확인(누락 0).
+
+- **수락 상태:** 정지 overlay 구현과 위 자동 검증을 마친 후보다. 실제 화면 정성 확인은 도구 실패로 남아 있어 3B-1 완료를 확정하지 않는다. 다음 한정 단계는 준비된 고유 프로젝트로 소유자 Mac 확인을 하고, 확인된 정지 전환/identity 한계만 후속 3B 범위로 검토하는 것이다. 3C 연속 재생을 이번 완료에 포함하지 않는다.
+
+
+### 15.16 소유자 관찰 정리·frame 120/질감 조사·남은 안전성 검증(2026-10-27, 소유자 지시, 미커밋)
+
+**범위와 출처:** 기존 미커밋 구현을 유지했다. 제품 동작 코드의 확인된 결함은 발견하지 않았고 수정하지 않았다. 기존 Debug 자체 검사에 네 검사를 추가하고 아래 문서만 갱신했다. 이번 지시는 소유자가 스크린샷과 함께 확인한 내용을 텍스트로 전달했다. 이 turn에 원본 스크린샷 파일이 별도로 첨부된 것은 아니므로 픽셀 대조/스크린샷 보관을 했다고 주장하지 않는다. 소유자 보고, 직접 읽은 미디어, 자동 검사, 코드 검토를 구분한다.
+
+#### 소유자가 실제 Mac에서 보고한 범위
+
+| 상태 | 소유자 보고 | 확대해서 주장하지 않는 것 |
+|---|---|---|
+| frame 19 | 붉은 반응 막대와 자막이 보이지 않음 | 모든 source/항목 조합 검증 |
+| frame 20 | 붉은 막대와 흰 자막이 나타남 | 모든 interval 경계의 수동 PASS |
+| frame 30 | 영상 위 spectrum 막대, 그 위 흰 자막 | 물리적 영상 프레임의 전역 정밀 일치 |
+| 위 spectrum 변경 후 비교 | 아래 spectrum이 계속 보였고 제안한 비교가 됐다고 보고 | 특정 Delete·Undo·Redo 조작을 했다는 추정 |
+| frame 119 / 120 | 119에서는 영상 배경이 남고 120에서는 검정 | 당시 모든 player/stage 상태를 복원했다는 주장 |
+| 큰 적·녹색 사각 질감 | preview의 넓은 부분에 보임 | 이를 renderer 결함으로 선판정 |
+
+프로젝트 교체·재연결·빠른 seek·Save As/재열기는 이번 단계의 **추가 소유자 수동 보고가 없다.** Undo/Redo 역시 소유자 PASS로 추가하지 않는다(자동 증거는 별개). 이전 CUA timeout 기록은 그대로 보존하되 이번 소유자 보고가 해당 범위의 실화면 증거를 더한 것이다.
+
+#### frame 120: A — 마지막 영상 클립 범위 밖(정상 tail gap)
+
+- 조사 대상은 §15.15에서 남긴 고유 일회용 프로젝트와 그 `sources/otf-TA.mp4`·`relinked.wav`다. 이전 파일을 다시 생성하거나 저장하지 않고 읽기만 했다. 실제 저장 상태: format 8, video `[0,120)`/source `[0,120)`, WAV `[0,180)`, 전체 timeline 180, spectrum 두 항목과 subtitle `[20,100)`.
+- 실제 AVAssetReader로 video를 끝까지 스트리밍 decode: **120개 샘플**, 30 fps, track `[0,4.0 s)`, 첫 PTS 0, 마지막 PTS **119/30 = 3.966666… s**. 유효한 source index는 0…119다. 4초 영상에 index 120 샘플이 있다는 뜻이 아니다.
+- 기존 `CompositionPlanner.plan`을 그대로 사용한 실제 계획: `[0,4.0 s)` layerInstructions 1개, `[4.0,6.0 s)` layerInstructions 0개·검정 배경. frame 120은 전체 project 끝(180)이 아니라 **영상이 없는 tail의 첫 프레임**이다. D-018의 project 끝 마지막 프레임 유지 문제와 구분한다.
+- 실제 계획을 AVAssetImageGenerator로 읽었다: frame 119의 실제 시각은 119/30이고 원본과 composition의 BGRA 평균 절대 차이 **0.0**. frame 120의 composition actualTime은 **4.0 s**, RGB>2인 픽셀 **0**(완전 검정). frame 30도 원본/composition 평균 차이 **0.0**.
+- 주의: 원본 generator에 120/30초를 요청했을 때는 tolerance 0이어도 **actualTime 119/30초**의 마지막 그림을 돌려줬다. `source-120.png`는 요청 이름일 뿐 유효한 source frame 120의 증거가 아니다. 실제 sample count와 actualTime으로 판정했다.
+- **분류 A.** 기존 검정 gap 정책과 일치하며 이 구성에서 preview 회귀나 renderer 결함으로 볼 근거가 없다. C(원본의 의도적 black frame 120)도 아니다 — 해당 샘플 자체가 없다. 일반 영상 끝 처리·seek timebase·stage 동작을 고치지 않았다. A-010/기존 one-frame Pause 한계를 해결했다고 표시하지 않는다.
+
+#### 큰 사각 무늬: 소스에 포함된 의도적 부하용 질감
+
+- spectrum이 전혀 개입하지 않은 **원본 decode frame 30**에 같은 유형의 큰 적·녹색 질감 사각형이 존재한다. 기존 composition의 영상-only frame 30은 원본과 BGRA 차이 0.0이다. 소유자 스크린샷 원본과의 직접 픽셀 비교는 하지 않았다.
+- `DevFixtures.toneA`는 `SourceVideoSpec`의 v2 생성기를 재사용한다. `experiments/e2-4k/Sources/E2Core/Fixtures.swift`의 `drawTexture`가 256×256 결정적 잡음 tile을 반복해 넣는다. FHD 좌표의 영역은 **x200, y450, width1700, height450**. 생성기 주석에 단색 영상의 압축/디코딩 부하가 비현실적으로 쉬웠던 것을 보완하기 위한 질감이라고 기록돼 있다(2026-10-10).
+- 같은 저장 프로젝트·실제 WAV로 coordinator/renderer만 독립 실행한 frame 30: drawRect **(1184,330,96,218)**, 실제 칠한 픽셀 **2,079**. 결과는 좁은 붉은 막대뿐이며 큰 texture rectangle을 포함하지 않는다. 이전 CA 전체 캔버스 alpha/clip 검증은 §15.15에 보존했다.
+- **분류: 원본 fixture에 내장된 의도적 내용.** 이 무늬를 spectrum transparency/pixel-layout 결함으로 판정하거나 추측에 따른 시각 수정은 하지 않았다. 원본·공유 fixture·owner project 모두 그대로다.
+
+#### seek/프로젝트 안전성 추가 검증
+
+- 기존 `SpectrumOverlaySelfTest`의 54개 단언은 유지하고 **네 검사만 추가**, **58/58 PASS**:
+  - 최신 frame 33이 표시된 뒤, 교체된 frame 31 token의 `finished: true` 콜백을 명시적으로 전달해도 confirmedFrame·현재 이미지 identity·assignment 수 불변.
+  - 같은 이전 token의 `finished: false` 콜백도 새 이미지를 지우지 않음. 이는 결정적 callback 주입 시험이며 물리적 화면 표시 지연을 측정한 것은 아니다.
+  - 후보 project의 authorized scope를 준비해 gate로 멈춘 동안 기존 epoch/scopes/이미지 유지.
+  - 그 사이 현재 high source를 nil로 편집한 뒤 후보를 풀면 열기는 거절되고, 현재 편집된 timeline·비어 있는 high/남아 있는 low 그림·기존 projectSession/epoch/scopes/revision이 보존됨. 후보 검사 전 snapshot으로 덮어쓰지 않음.
+- 기존 삭제/source 재지정·Undo/Redo·unset/missing/media loss·무음·rapid seek/late ready·성공/실패/취소 교체·relink·view/window teardown/recreation·다중 항목/stacking 검사를 같은 실행에서 다시 통과했다. 기존 test 이름 54개가 새 결과 58개에 모두 남아 있음을 결과 JSON으로 확인했다.
+- mute/coverage 밖 무음과 구분해 새 고유 WAV에 실제 PCM zero 구간 `[2,3)s`를 생성한 headless 검사도 추가했다. 같은 source id로 메모리 사본에만 relink하고 세 프레임 요청: **30 ready/image, 75 ready(max band 0·image nil), 95 ready/image**. spectrum interval 안의 실제 파일 무음임을 확인했다. `inspect-silence.swift`·`silence-compile.log`·`silence-inspection.log` 보존, compile/run exit 0. 기존 원본/저장 project 수정 없음. UI의 nil 이미지 제거는 위 58개 기존 단언과 구분해 확인했다.
+- 기존 `SpectrumLifecycleSelfTest`도 **25/25 PASS**로 재실행했다. 실제 scope 준비/해제와 교체 commit 경계의 기존 단언을 그대로 사용했다. 제품의 `ProjectStore`/`SpectrumPreviewSession`/`PausedSpectrumOverlay`와 engine 구현은 이번에 변경하지 않았다.
+
+#### D-S8: 정확한 split/move 구성으로 별도 확인
+
+- 이전 54개 UI 검사의 overlap fixture는 full audio `[0,180)`에 같은 계보의 짧은 `[50,60)` 조각을 더한 구성이다. 이번에는 소유자 절차와 같은 **실제 엔진 split/move**를 원본 저장 timeline의 메모리 사본에서 실행했다(파일 저장 없음).
+- WAV를 frame 60에서 split: left `[0,60)`, sourceIn 0; right를 새 audio lane의 50으로 이동: right `[50,170)`, sourceIn 60. 두 조각은 같은 lineage이며 실제 겹침은 `[50,60)`다. 원본은 6초 48kHz stereo 440Hz WAV, spectrum은 30fps/64 bands/window 90ms/offset 0인 저장 설정 그대로다.
+- 실제 coordinator/file source 결과: **46 ready(image 있음, max band 0.86712205), 47 overlap, 62 overlap, 63 ready(image 있음, max band 0.86712205)**. 보수적인 숨김 `[47,63)`와 일치한다. 정책을 바꾸지 않았다.
+- 이 네 경계의 새 real-Mac owner PASS는 없다. 수동 확인은 고유 disposable 복사본에서 60 split → 오른쪽 조각을 새 audio lane 50에 이동 → 46/47/62/63을 명시적으로 탐색해 표시/숨김/숨김/표시를 보는 최소 절차다. 기존 파일을 덮어쓰지 않는다.
+
+#### 실행·증거·GUI 안전
+
+- 이번 고유 증거 폴더: `app/selftest-work/sp3b1-owner-validation-20261027T015519Z-ZJ0Fnu/`. `inspection.log`·`inspect.swift`·`compile.log`, `project-summary.json`(bookmark 데이터 제외), `source-30.png`·`source-119.png`·`composition-120.png`·`spectrum-only-crop-30.png` 보존. CLI는 기존 `libOnTheFrameEngine.a`를 재사용했으며 컴파일·실행 exit 0, 새 engine 소스/분석/합성 알고리즘은 만들지 않았다.
+- `overlay-test.log` **58/58**, `lifecycle-test.log` **25/25**. 각각 기존 승인 launcher를 사용해 별도 고유 fixture를 만들고 순차 실행했다. 두 GUI 자체 검사는 겹치지 않았고 정상 결과 후 자체 `NSApp.terminate` 경로로 끝냈다. launcher/script exit은 각각 **0**(`*-launcher-exit.txt`). `open`을 통하므로 앱 child의 숫자 exit status를 직접 관찰한 값과 혼동하지 않는다. 끝난 뒤 해당 앱 프로세스 없음 확인.
+- 추가 Debug 시험 때문에 앱 **Debug·Release 둘 다 재빌드하여 BUILD SUCCEEDED**(`debug-build.log`, `release-build.log`). 초기 compiler error/실행 timeout/의도적 crash 없음. 기존 빌드 스크립트는 실패도 exit 0일 수 있어 실제 BUILD 문구를 확인했다.
+- 사용자/시스템 DiagnosticReports 두 디렉터리의 검사 전후 목록에 새 OnTheFrame report 없음. 이번 실행에서 예기치 않은 app exit 징후를 관찰하지 않았다는 범위이며 **전역 crash-free 증명이 아니다**. 소유자가 전에 본 unexpected-termination 알림의 원인은 새로 규명하지 않았고 T-H1 보호를 유지한다. 이전 CUA timeout은 도구 실패 기록 그대로다. 이번에는 CUA를 재시도하지 않았다.
+- 재사용만 한 이전 증거: lane 98/98, subtitle window 56/56, preview 내부 5+프레임 16 PASS, engine 관련 39개 PASS, 기존 OpenFlow 13/15 및 변경 전 HEAD 동일 두 실패. **이 항목을 이번에 재실행했다고 표시하지 않는다.** §15.14–15.15의 최초 실패·이전 로그·성능 조건도 보존했다.
+- 검사 전후 SHA-256 비교에서 기존 app Swift 소스들·기존 scripts·보존된 project/media/shared TA fixture 중 변경된 것은 의도한 `SpectrumOverlaySelfTest.swift` 하나뿐이었다(`before-sha256.json`, `after-integrity-summary.json`). 원본 project/media는 읽기만 했다. 새 테스트의 파일 이동/저장은 새 고유 RUN 복사본에만 적용했다.
+
+#### 상태와 남은 owner 확인
+
+- frame 19/20/30의 실화면 표시·층 순서와 high/low 비교는 이제 **소유자 보고로 부분 확인됨**. 이전 CUA 미확인 때문에 이 관찰까지 미확인으로 두지 않는다. frame 120과 큰 무늬는 해당 fixture의 정상 내용/구성으로 설명돼 제품 수정을 막는 미해결 renderer 결함으로 취급하지 않는다.
+- **권고: 확인된 정지 seek 프레임 범위의 3B-1 구현 체크포인트 후보로 검토 가능.** 이번 bounded validation 작업은 위 분류와 추가 안전성 검증까지 마쳤다. 전체 3B·Stage 3 완료 선언이나 3C 시작 승인은 아니다.
+- owner 미보고: project switch/실패·취소 열기 체감, relink/missing source, 빠른 seek의 실화면 잔상, 정확한 고유 Save As 파일 재열기, D-S8 네 경계, 명시적 Undo/Redo 조작. 자동 증거와 owner 수동 확인을 바꾸어 적지 않는다.
+- 일반 Play→Pause는 새 confirmed frame이 없으므로 숨기고 다음 명시적 seek/←→ 후 표시하는 기존 제한 그대로다. 기존 one-frame pause 한계·외부 파일 상시 watcher 없음·물리적 display timing/전체 fault-injection matrix 미검증도 남는다. Stage 3C animated playback/display link·spectrum export·style UI를 구현하지 않았다.
+- 다음 한정 작업 제안: 공유 fixture를 재생성하지 않는 기존 manual runner로 **새 고유 disposable 프로젝트**를 준비해 위 owner 미보고 동작만 확인하고, 그 결과와 이 증거를 묶어 3B-1 체크포인트를 검토한다. commit/push는 이번 지시대로 하지 않는다.
+
+- **정적/데이터 최종 확인:** `git diff --check`·기존 두 launcher의 `zsh -n` 통과, 관련 문서 로컬 링크 217개 누락 0. 확인한 앱/엔진/실험/DerivedData 관련 디렉터리 합계 약 6.93 GiB(소스 포함 보수 합계, 20 GiB 아래). 브랜치 `feature/subtitles`, HEAD/로컬 upstream `5a09bc670c1143f622eb774d16e38d734e33a160`, main `44943ea` 유지. 이전 7 modified/6 new 파일과 `.claude/`·`.DS_Store`·backup refs 보존. 이번 수정 경로는 `SpectrumOverlaySelfTest.swift`, 이 문서, `ROADMAP.md`, `HANDOFF.md` 네 개이며 제품 구현 수정/새 저장 형식/연속 재생/export/style UI/staging/commit/push 없음.
+
+
+### 15.17 소유자 수동 검증 기록·3B-1 최종 체크포인트 검토(2026-10-27)
+
+**판정: READY WITH DOCUMENTED LIMITATIONS.** 확인된 정지 seek 프레임의 Stage 3B-1 체크포인트 범위다. 전체 3B/Stage 3 완료나 다음 단계 승인이 아니다. Stage 3C는 미착수이며, Stage 3 통합과 소유자 검증 뒤의 독립 Codex 리뷰 계획도 그대로 남는다. 이 검토는 그 독립 전체 통합 리뷰를 대신하지 않는다. 이번에는 기존 문서 세 개만 갱신했고 기능·검사 코드는 수정하지 않았다.
+
+#### 소유자 보고 — 실제 Mac 관찰(2026-10-27)
+
+아래 PASS는 소유자가 전달한 관찰이며 자동 테스트 결과가 아니다. 스크린샷의 픽셀 단위 검증을 했다고 주장하지 않는다. §15.16의 미보고 항목 중 아래에 명시한 범위만 이번 보고로 갱신하며 과거 증거는 보존한다.
+
+| 범위 | 소유자 관찰(PASS) |
+|---|---|
+| base frame 19 / 20 | 19: spectrum strokes·자막 없음 / 20: 둘 다 보임 |
+| base frame 30 | 영상 위 spectrum, 그 위 자막이 올바르게 겹침 |
+| base frame 99 / 100 | 99: spectrum·자막 보임 / 100: 둘 다 없음 |
+| base frame 119 / 120 | 119: 원본 영상 보임 / 120: 영상 클립 종료 뒤 검정 배경 |
+| Delete / Undo / Redo | high 삭제 때 low 유지 → Undo로 high 복원 → Redo로 high 다시 제거 |
+| 빠른 seek | frame 100에서 spectrum 제거, frame 20에서 다시 표시 |
+| Save As·종료·재실행 | Desktop에 고유 복사본을 Save As로 저장, Debug 앱을 닫고 재실행한 뒤 **바로 그 파일**을 열어 frame 30의 spectrum·자막 확인 |
+| 프로젝트 전환·복귀 | 다른 프로젝트를 열면 이전 overlay·자막 제거, Desktop 시험 프로젝트를 다시 열면 정상 복귀 |
+| D-S8 경계 | 46 보임 / 47 숨김 / 62 숨김 / 63 보임 — 네 값 모두 기존 엔진 예상과 일치 |
+
+D-S8 provenance: 소유자가 지정한 **앱 생성** 고유 fixture는 `~/Desktop/SP3B1-DS8-App-20261027-8C41D7.ontheframe`이며 앱에서 성공적으로 열었다고 보고했다. 이전 CLI 생성 D-S8 fixture는 sandbox 앱 접근에 실패했다. 그 실패는 보존하며 원인/북마크·권한 차이를 확정하지 않는다. 앱 생성 파일의 성공으로 CLI 실패 원인이 해결됐다고 보지 않는다. 이번 작업에서는 어느 Desktop 프로젝트도 읽거나 수정하지 않았다. **실제 미디어 재연결 수동 검증은 여전히 미확인**이며, 실패·취소 열기의 owner PASS도 추가하지 않는다.
+
+#### 전체 미커밋 코드 검토 — 증거 분류
+
+7 tracked 수정 파일과 새 구현/검사/스크립트 6개를 모두 읽었다. `ContentView.swift`, `OnTheFrameApp.swift`, `ProjectStore.swift`, 이 문서·DECISIONS·ROADMAP·HANDOFF의 diff 및 아래 여섯 새 파일을 포함한다. 엔진의 coordinator·저장 형식·export 거부 경로도 관련 문맥으로 확인했다.
+
+| 분류 | 확인 내용과 경계 |
+|---|---|
+| confirmed implementation | `openProject`는 임시 후보 scope·미디어 검증 중 기존 timeline/session/overlay를 유지한다. 실패·취소·편집 충돌은 후보만 해제한다. 최종 검사 뒤 await 없이 overlay 무효화 → 앱 epoch/revision 증가·coordinator reset 호출 → 옛 scope 해제 → 준비된 후보 scope 인계 → 프로젝트 설치·현재 media update 순서다. |
+| confirmed implementation | `SpectrumPreviewSession`의 epoch/revision과 overlay serial, 최신 seek token/frame, player item identity, generation, host/window, 재생·gesture·still 상태를 결과 수락 전에 다시 검사한다. 파일 metadata 검사 await 뒤에도 이 검사를 반복한다. |
+| confirmed implementation | 확인 프레임은 최신 exact-seek 성공에서 얻는다. 영상·drag stage 위/자막 아래의 별도 투명 CA canvas, 레인 역순의 복수 항목, 1920×1080 aspect fit·clip·top-left drawRect의 y 변환을 사용한다. nil/오류/누락/겹침 결과는 contents를 비운다. |
+| confirmed implementation | 삭제/Undo/Redo 등 `timelineChanged` 경로는 revision 갱신·즉시 무효화 후 재요청한다. spectrum-only 편집은 전체 길이와 video/audio 입력이 같고 재구성/정지 화면 전환이 없으면 player item을 유지한다. 길이가 바뀌면 재구성한다. |
+| confirmed implementation | 새 seek·play·교체·view detach/window close는 옛 그림을 지우고 늦은 결과를 거부한다. 약한 host/item 참조를 사용한다. self-test 두 파일 전체·hook·launcher 진입은 DEBUG 경계 안이며 실제 overlay/session은 Release에도 포함된다. Xcode의 동기화 source group이 새 Swift 파일을 포함한다. 엔진 형식 8 및 spectrum export 거부는 변경되지 않았다. |
+| previously tested behavior | 아래의 기존 자동 증거는 위 구현의 회귀·경합·geometry·nil·scope·teardown 검증을 보강한다. 이번 실행 결과가 아니다. |
+| owner-reported observation | 위 표의 실화면 경계·층 순서·Delete/Undo/Redo·빠른 seek·정확한 Save As 재열기·프로젝트 전환·D-S8 네 경계만 해당한다. |
+| code-inspection risk | coordinator reset/cancel은 직렬 큐에 예약된다. scope 해제 전에 앱의 결과 수락 fence는 즉시 올라가지만 모든 진행 중 opener/decoder가 동기적으로 종료됐다는 보장은 아니다. 기존 수명 검사는 stale ready 거부를 보이며 I/O drain 전체의 증명은 아니다. metadata 검사는 파일 상시 감시가 아니며 검사 직후 외부 변경 가능성도 남는다. 새 재현 결함으로 판정하지 않았고 독립 리뷰 대상으로 남긴다. |
+| unresolved limitation | 아래 범위와 기존 역사적 실패는 그대로이며 이번 검토로 해결되지 않았다. |
+
+새 `SpectrumLifecycleSelfTest.swift`, `SpectrumOverlaySelfTest.swift`의 결정적 gate·경합 검사, 고유 fixture 저장·복사와 두 launcher도 정적으로 검토했다. launcher는 결과 JSON을 기다리고 timeout 때 앱·증거를 남긴다. owner 파일을 대상으로 실행하지 않았다. 실제 render/source/analysis 실패와 drop/cancel의 모든 UI 조합에 대한 fault injection은 완료되지 않았다. **정적 검토에서 이 한정 체크포인트를 막는 새 구체적 결함은 발견하지 못했다.**
+
+#### 이전 자동 증거 재사용(이번에는 재실행하지 않음)
+
+- Overlay **58/58 PASS**, Lifecycle **25/25 PASS** — §15.16.
+- Spectrum lane **98/98 PASS**, Subtitle window **56/56 PASS**, Preview **내부 5 + frame 16 PASS**, targeted engine **39 PASS** — §15.14–15.16의 기존 기록.
+- Debug·Release **BUILD SUCCEEDED** — 이전 실행 기록. 이번 문서 검토에서 빌드하지 않았다.
+- OpenFlow **13/15**, 두 역사적 실패 유지(변경 전 HEAD에서도 같은 실패 기록). 전부 PASS로 합산하지 않는다.
+
+이번 실행 검증은 Git 상태/기준 SHA, 전체 변경 내용 정적 검토, launcher `zsh -n`, 문서 로컬 링크, `git diff --check`에 한정한다. 고비용 앱/엔진 검사·GUI·빌드를 실행하지 않았다.
+
+#### 남은 한계·역사적 기록
+
+- Play → Pause 직후에는 다음 확인된 seek/한 프레임 이동까지 spectrum을 표시하지 않는다. 기존 Pause 한 프레임 차이도 유지한다.
+- 연속 재생 애니메이션은 Stage 3C(미착수), 실제 spectrum export는 Stage 4, 모양 UI는 Stage 2C-3이다.
+- OpenFlow 13/15의 역사적 두 실패, 이전 Debug crash 이력과 미규명 알림 원인을 계속 추적한다. 이전 CUA timeout은 도구 실패이며 앱 crash의 증거가 아니다.
+- 수동 media relink·전체 4K interactive 성능·물리적 display timing·장시간/대규모 항목 검증은 미확인이다.
+- CLI 생성 D-S8 fixture의 sandbox 접근 실패와 앱 생성 fixture 성공을 함께 보존한다. owner 프로젝트·미디어·generated evidence·DerivedData·logs·local backup refs는 변경하지 않았다.
+
+#### 제안 체크포인트(실행 안 함)
+
+기준은 `feature/subtitles`, HEAD = 로컬 `origin/feature/subtitles` = `5a09bc670c1143f622eb774d16e38d734e33a160`, main `44943ea`다(fetch 없음). 새 커밋 SHA는 아직 없다. staging 제안은 아래 **13개 파일만**이다.
+
+```text
+app/OnTheFrame/ContentView.swift
+app/OnTheFrame/OnTheFrameApp.swift
+app/OnTheFrame/ProjectStore.swift
+app/OnTheFrame/PausedSpectrumOverlay.swift
+app/OnTheFrame/SpectrumPreviewSession.swift
+app/OnTheFrame/SpectrumLifecycleSelfTest.swift
+app/OnTheFrame/SpectrumOverlaySelfTest.swift
+app/scripts/spectrum-lifecycle-test.sh
+app/scripts/spectrum-overlay-test.sh
+docs/DECISIONS.md
+docs/HANDOFF.md
+docs/ROADMAP.md
+docs/SPECTRUM-DESIGN.md
+```
+
+제안 제목: `feat(preview): add validated paused spectrum overlay (SP-1A 3B-1)`
+
+제안 요약: transactional media handoff와 epoch/revision/seek/view 보호로 확인된 정지 spectrum을 영상 위·자막 아래 표시한다. 복수 항목·overlay-only 갱신 및 Debug 수명/overlay 검사를 포함하고, 소유자 수동 PASS·기존 자동 증거·미해결 한계를 구분해 기록한다.
+
+커밋 전: 브랜치/HEAD·상태와 위 13개 path를 다시 대조하고, `git diff --check`, 두 launcher 문법, 문서 링크를 확인한다. 명시적 별도 commit 지시 뒤에만 경로를 지정해 stage하고 `git diff --cached --name-status`·`git diff --cached --check`·실제 staged diff로 정확한 포함 내용을 확인한다. `.claude/`, 모든 `.DS_Store`, `app/selftest-work/`, Desktop 프로젝트, media/generated artifacts, DerivedData/logs, backup refs는 제외한다. push 전에는 별도 게시 지시·대상 브랜치·upstream 상태·최종 commit 내용을 확인하고, 변경이 생겼거나 기존 증거 적용성이 달라진 경우에만 관련 검사를 다시 실행한다. 이번에는 stage/commit/push·Stage 3C 작업을 하지 않았다.
+
+이번 최종 정적 확인 결과: `git diff --check` exit 0, 두 launcher `zsh -n` exit 0, 수정 문서 세 개의 로컬 링크 103개 누락 0. `git diff --stat`는 tracked 수정 7개(새 파일 제외), 최종 index는 비어 있다. Stage 대상 새 파일은 6개이며 제외 대상 `.claude/`·루트/app/design의 `.DS_Store`는 그대로 untracked다.

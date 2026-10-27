@@ -282,6 +282,7 @@ struct PlayerLayerView: NSViewRepresentable {
     func makeNSView(context: Context) -> PlayerNSView {
         let v = PlayerNSView(); v.playerLayer.player = store.player; store.previewHost = v; store.refreshPreviewSubtitles(); return v
     }
+    static func dismantleNSView(_ v: PlayerNSView, coordinator: ()) { v.spectrumOverlay.detach() }
     func updateNSView(_ v: PlayerNSView, context: Context) {
         if v.playerLayer.player !== store.player { v.playerLayer.player = store.player }
         if store.previewHost !== v { store.previewHost = v; store.refreshPreviewSubtitles() }
@@ -297,11 +298,14 @@ struct PlayerLayerView: NSViewRepresentable {
 ///   → 캔버스(왼쪽 아래 원점). 암시적 애니메이션은 끈다.
 final class PlayerNSView: NSView {
     let playerLayer = AVPlayerLayer()
+    let spectrumCanvas = CALayer()
+    lazy var spectrumOverlay = PausedSpectrumOverlay(view: self)
     let stageLayer = CALayer()
     let canvas = CALayer()
     private var clipLayers: [UUID: CALayer] = [:]
     var renderSize = CGSize(width: 1920, height: 1080)
     private var readyKVO: NSKeyValueObservation?
+    private var spectrumWindowObserver: SpectrumWindowObservation?
     /// 이 항목이 표시될 준비가 되면 무대를 내린다
     private var releaseItem: AVPlayerItem?
     var isShowingStill: Bool { !stageLayer.isHidden }
@@ -326,6 +330,10 @@ final class PlayerNSView: NSView {
         canvas.actions = Self.noActions
         stageLayer.addSublayer(canvas)
         layer?.addSublayer(stageLayer)
+        spectrumCanvas.anchorPoint = .zero
+        spectrumCanvas.masksToBounds = true
+        spectrumCanvas.actions = Self.noActions
+        layer?.addSublayer(spectrumCanvas)
         subtitleHost.actions = Self.noActions
         layer?.addSublayer(subtitleHost)
         readyKVO = playerLayer.observe(\.isReadyForDisplay, options: [.new]) { [weak self] _, _ in
@@ -341,9 +349,24 @@ final class PlayerNSView: NSView {
         canvas.bounds = CGRect(origin: .zero, size: renderSize)
         canvas.position = CGPoint(x: (bounds.width - renderSize.width * k) / 2, y: (bounds.height - renderSize.height * k) / 2)
         canvas.setAffineTransform(CGAffineTransform(scaleX: k, y: k))
+        fit(spectrumCanvas, in: bounds.size)
         subtitleHost.frame = bounds
         if let sync = subtitleSync { sync.frame = subtitleHost.bounds; fit(subtitleCanvas, in: sync.bounds.size) }
         CATransaction.commit()
+    }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        spectrumWindowObserver = nil
+        if let window {
+            spectrumWindowObserver = SpectrumWindowObservation(NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.spectrumOverlay.invalidate(forgetFrame: true) }
+            })
+        }
+        if window == nil { spectrumOverlay.invalidate(forgetFrame: true) }
+        else if let store = spectrumOverlay.store, !store.isPlaying,
+                store.player.currentItem != nil, store.appliedGeneration == store.generation {
+            store.seek(to: store.playhead) // reacquire through the existing exact-seek completion contract
+        }
     }
     /// 출력 화면(1920×1080) 캔버스를 보기 안 resizeAspect 사각형에 맞춘다(무대 캔버스와 같은 식)
     private func fit(_ c: CALayer, in size: CGSize) {
@@ -440,11 +463,15 @@ final class PlayerNSView: NSView {
         return Set(subtitleEntries.filter { s in resident.contains(s.id) && frames.contains { s.start <= $0 && shown(s, $0) } }.map(\.id))
     }
     /// 저장소가 탐색을 시작한다(재생 헤드를 바꾸기 전)
-    func subtitleSeekRequested(token: Int, frame: Int) { pendingSeeks.append((token, frame)) }
+    func subtitleSeekRequested(token: Int, frame: Int) {
+        spectrumOverlay.invalidate(forgetFrame: true)
+        pendingSeeks.append((token, frame))
+    }
     /// 플레이어 탐색이 끝났다(저장소가 주 스레드에서 알림, 완료 또는 취소).
     /// 완료: 그 프레임이 화면에 나왔고, 그보다 앞서 요청한 탐색은 이제 화면에 나올 수 없다. 취소: 그 탐색만 화면에 나오지 않는다.
     /// 남은 탐색이 없으면 유지를 풀고 창을 다시 맞추고, 있으면 아직 화면에 나올 수 있는 프레임의 자막만 남긴다.
     func subtitleSeekFinished(token: Int, frame: Int, finished: Bool) {
+        spectrumOverlay.seekFinished(token: token, frame: frame, finished: finished)
         if finished { displayedFrame = frame; pendingSeeks.removeAll { $0.token <= token } }
         else { pendingSeeks.removeAll { $0.token == token } }
         guard seekHeld != nil else { return }
@@ -595,6 +622,7 @@ final class PlayerNSView: NSView {
     }
     /// 레이어 목록을 무대에 보인다(아래 먼저). 같은 클립의 레이어는 다시 쓰고 내용은 바뀐 때만 넣는다.
     func showStage(_ items: [InteractivePreview.DrawItem]) {
+        spectrumOverlay.invalidate(forgetFrame: true)
         releaseItem = nil
         CATransaction.begin(); CATransaction.setDisableActions(true)
         let h = renderSize.height
@@ -632,6 +660,7 @@ final class PlayerNSView: NSView {
         #if DEBUG
         stillReleases += 1
         #endif
+        spectrumOverlay.refresh()
     }
     /// 이 항목이 현재 항목이고 표시될 준비가 되면 내린다(이미 준비됐으면 바로)
     func releaseStill(when item: AVPlayerItem) {

@@ -263,6 +263,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await LaneSelfTest.run(folder: folder) }
             return
         }
+        if args.contains("-OTFSpectrumOverlayTest") || args.contains("-OTFSpectrumOverlayManual"),
+           let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await SpectrumOverlaySelfTest.run(folder: folder, manual: args.contains("-OTFSpectrumOverlayManual")) }
+            return
+        }
+        if args.contains("-OTFSpectrumLifecycleTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await SpectrumLifecycleSelfTest.run(folder: folder) }
+            return
+        }
         if args.contains("-OTFSpectrumLaneTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {   // SP-1A 2A(2026-10-25)
             Task { await SpectrumLaneSelfTest.run(folder: folder) }
             return

@@ -14,6 +14,14 @@
 
 **기준:** 자막 작업은 브랜치 `feature/subtitles`(첫 자막 기능 로컬 커밋 `04d4b58`(엔진)·`c36923e`(앱)·`81fda71`(조사 시험)·문서 커밋, 푸시하지 않음). 이전 기준 `backup/2026-10-11-editor-work`(`51cef3c`), `main`은 `44943ea` 그대로. 프로젝트 형식: `main`·이전 브랜치 5(형식 1–4 읽기, D-023), `feature/subtitles` 6(자막, 자막이 없으면 5로 씀, D-035). 검증 경계: 자동 검사는 이 Mac 한 대·짧은 생성 fixture, 소유자 확인은 소유자가 보고한 정성 관찰이며 둘을 섞지 않는다.
 
+**2026-10-27 최종 owner 검증·체크포인트:** **READY WITH DOCUMENTED LIMITATIONS**(3B-1 한정). 소유자 실제 Mac 보고로 19/20/30/99/100/119/120, Delete/Undo/Redo, 빠른 seek, 고유 Desktop Save As 후 앱 재실행·정확한 파일 재열기, 프로젝트 전환·복귀, 앱 생성 D-S8 fixture의 46/47/62/63 PASS를 기록했다. 자동 증거는 기존 overlay 58/58·수명 25/25·레인 98/98·자막 56/56·preview 5+16·엔진 39·Debug/Release 성공을 재사용했으며 이번 재실행은 없다. CLI D-S8 sandbox 접근 실패·앱 생성 성공을 함께 보존한다. 수동 relink 미확인, Play→Pause/한 프레임 차이·OpenFlow 13/15·Debug crash/CUA 도구 실패 이력·4K 성능 한계 유지. [SPECTRUM-DESIGN.md](SPECTRUM-DESIGN.md) §15.17. 3C 미착수, Stage 3 통합·소유자 검증 뒤 독립 Codex 리뷰 계획 유지. 아래는 이전 시점 기록이다.
+
+**2026-10-27 소유자 확인·안전 검증 최신:** 소유자 보고로 19/20 출현 경계, 30의 영상/spectrum/자막 층 순서, high 변경 후 low 유지가 부분 확인됨(특정 Delete/Undo로 확대하지 않음). 실제 TA 샘플 120개·video [0,120)/project 180 → frame 120은 정상 검정 tail, 큰 적·녹 무늬는 source 내장 질감으로 확인. 추가 overlay 58/58·수명 25/25 및 Debug/Release 성공. 이전 98/56/preview·OpenFlow 증거는 이번 재실행 아님. 3B-1 정지 프레임 구현 체크포인트 후보, 나머지 owner 전환/relink/rapid seek/Save As·D-S8 수동 확인 대기. [SPECTRUM-DESIGN.md](SPECTRUM-DESIGN.md) §15.16. 3B 전체/Stage 3 완료 아님, 3C 미착수.
+
+**직전 정지 overlay continuation 기록(2026-10-27):** ⏳ 3B-1 정지 spectrum 층 연결·확정 seek identity·stale/teardown 보호 구현(미커밋). focused 54/54, 수명 25/25·레인 98/98·영상 프리뷰(내부 5+프레임 16)·자막 시간 창 56/56, Debug·Release 빌드 성공. 일반 Play→Pause 뒤에는 확인 frame이 없어 숨기고 다음 명시적 seek에서 표시한다. 기존 one-frame pause 한계는 그대로, 소유자 수동 PASS 대기. 실화면 읽기 CUA timeout으로 에이전트 화면 정성 확인도 미완료(앱 충돌 증거 없음), 고유 수동 프로젝트 준비됨. 현재 구조·검증·한계·수동 절차는 [SPECTRUM-DESIGN.md](SPECTRUM-DESIGN.md) §15.15. 3B 전체·3단계 전체 완료 아님.
+
+**직전 수명 부분 기록(2026-10-27):** HEAD·로컬 upstream `5a09bc6`, main `44943ea`. ⏳ 3B-1 중 coordinator 수명 관리만 부분 구현(커밋 안 함). 후보 검증 중 기존 접근/분석 유지 → 교체 확정 때 분석 무효화 후 옛 접근 해제 → 후보 접근 인계 → 현재 media update. 수명 검사 25/25·관련 엔진 39/39 PASS. 실제 정지 spectrum 화면·프레임/seek/view identity 연결은 남아 있으며 3B-1 완료가 아니다. Debug·Release 빌드 성공, 기존 스펙트럼 레인 검사 98/98 PASS. 기존 OpenFlow의 두 실패는 변경 전 HEAD에서도 동일 재현(원인 미확정). 기존 앱 회귀 실패와 빌드 결과·증거는 [SPECTRUM-DESIGN.md](SPECTRUM-DESIGN.md) §15.14. 아래 과거 기록은 당시 상태다.
+
 ### S.1 기획·정책 결정
 
 - ✅ 제품 정의·결정 기록·로드맵·환경 문서 작성(0단계 문서). [D] 제품 방향 D-011~D-017.

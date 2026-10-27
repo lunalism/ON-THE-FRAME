@@ -14,6 +14,8 @@ final class ProjectStore {
     static let shared = ProjectStore()
     static let log = Logger(subsystem: "dev.ontheframe.app", category: "store")
 
+    @ObservationIgnored let spectrumPreview: SpectrumPreviewSession
+
     let settings = RenderSettings.m1
     /// 쓸 수 있는(찾은) 원본 미디어. 프로젝트의 미디어 목록(timeline.media)과 검사 결과 캐시에서 만든다(refreshAssets).
     var assets: [MediaAsset] = []
@@ -154,6 +156,9 @@ final class ProjectStore {
     @ObservationIgnored var exportPanelOverrideForTest: (() -> Void)?
     /// 자체 검사 전용: 원본 확인 전에 기다릴 시간(취소 검사가 빨리 끝나는 확인 사이에 끼어들 수 있게. 일반 실행에서는 0)
     @ObservationIgnored var probeDelayForTest: UInt64 = 0
+    /// Deterministic gate after candidate validation, before cancellation/conflict checks.
+    @ObservationIgnored var candidatePreparedForTest: ((Int) async -> Void)?
+    @ObservationIgnored var spectrumLifecycleEventForTest: ((String, Int) -> Void)?
     /// 수동 확인 전용(`-OTFManualRelinkDelay <초>`로만 켬): 재연결 확인만 늦춘다(열기·가져오기는 늦추지 않음). 기본 0.
     @ObservationIgnored var relinkDelayForTest: UInt64 = 0
     /// 자체 검사 전용: 실제 저장·열기 패널을 runModal 하기 직전에 넘긴다(패널이 실제로 보이는지 관찰·조작, OpenFlowSelfTest)
@@ -219,7 +224,8 @@ final class ProjectStore {
     /// 이동 드래그 중 끼워 넣을 자리(표시용)
     private(set) var moveInsertionIndex: Int?
 
-    init() {
+    init(spectrumPreview: SpectrumPreviewSession? = nil) {
+        self.spectrumPreview = spectrumPreview ?? SpectrumPreviewSession()
         player.actionAtItemEnd = .pause
         loadRecents()
         timeObserver = player.addPeriodicTimeObserver(forInterval: settings.frameDuration, queue: .main) { [weak self] t in
@@ -980,6 +986,7 @@ final class ProjectStore {
         commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         interruptGesture()   // D-031
         pauseForEdit()
+        previewHost?.spectrumOverlay.invalidate()
         history.beginGesture()
         gestureBase = timeline
         #if DEBUG
@@ -1075,7 +1082,13 @@ final class ProjectStore {
 
     let interactive = InteractivePreview()
     /// 프리뷰 화면 호스트(PlayerNSView, 약한 참조). 정지 화면 표시·해제를 맡는다.
-    @ObservationIgnored weak var previewHost: PlayerNSView?
+    @ObservationIgnored weak var previewHost: PlayerNSView? {
+        didSet {
+            guard oldValue !== previewHost else { return }
+            oldValue?.spectrumOverlay.detach()
+            previewHost?.spectrumOverlay.attach(self)
+        }
+    }
     /// 정지 화면을 내릴 세대(이 세대 이상의 재구성이 적용되고 표시 준비가 되면 내린다)
     @ObservationIgnored private var stillReleaseGeneration: Int?
     #if DEBUG
@@ -1168,6 +1181,7 @@ final class ProjectStore {
         commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         interruptGesture()   // D-031
         pauseForEdit()
+        previewHost?.spectrumOverlay.invalidate()
         history.beginGesture()
         gestureBase = timeline
         transformGesture = true
@@ -1189,6 +1203,7 @@ final class ProjectStore {
         interruptGesture()   // 끝나지 않은 끌기가 남아 있으면 먼저 취소(새 끌기에 섞어 확정하지 않음, D-031)
         pauseForEdit()
         selection = id
+        previewHost?.spectrumOverlay.invalidate()
         history.beginGesture()
         gestureBase = timeline
         #if DEBUG
@@ -1337,7 +1352,7 @@ final class ProjectStore {
         #if DEBUG
         if legacyTransformPreviewForTest && wasTransform { pendingPreviewRebuild = false; timelineChanged(); return }
         #endif
-        guard timeline != base else { if wasTransform { dropStill() }; updateWindowDocumentState(); return }
+        guard timeline != base else { if wasTransform { dropStill() }; updateWindowDocumentState(); previewHost?.spectrumOverlay.refresh(); return }
         if wasTransform, previewHost?.isShowingStill == true || interactive.isActive {
             stillReleaseGeneration = generation + 1
             interactive.request(timeline.excludingMedia(missingUsedMedia))   // 마지막 위치의 정지 화면(이미 그렸으면 같은 그림)
@@ -1415,19 +1430,21 @@ final class ProjectStore {
         #endif
         if wasTransform { dropStill() }
         updateWindowDocumentState()
+        previewHost?.spectrumOverlay.refresh()
     }
 
     // MARK: 프리뷰
 
     /// 타임라인이 바뀌면: 재생 헤드를 새 길이 안으로, composition을 비동기로 다시 만들고 오래된 결과는 버린다.
     func timelineChanged() {
-        refreshAssets()
+        refreshAssets(refreshSpectrum: false)
         updateWindowDocumentState()
         playhead = min(playhead, timeline.durationFrames)
         generation += 1
         // 찾을 수 없는 원본의 클립은 프리뷰에서 빼고(검정·무음) 화면에 따로 표시한다. 편집 상태는 그대로다.
         let g = generation, snap = timeline.excludingMedia(missingUsedMedia), media = mediaByID, s = settings
         guard !snap.isEmpty else {
+            previewHost?.spectrumOverlay.invalidate(forgetFrame: true)
             currentPlan = nil
             player.replaceCurrentItem(with: nil)
             appliedVideoSnap = nil
@@ -1436,18 +1453,21 @@ final class ProjectStore {
             dropStill()
             return
         }
-        // 자막만 바뀐 편집(글·모양·자막 위치, 2026-10-22): 영상 항목은 그대로 두고 자막 층만 바꾼다(항목 교체의 검정 깜박임 없음).
-        // 진행 중인 재구성·정지 화면이 없고, 자막을 뺀 타임라인(길이 포함)이 지금 항목과 같을 때만.
+        // Overlay-only edits: preserve the player item when ALL video/audio inputs and full duration match.
+        // Spectrum items/lane metadata do not feed the video composition; subtitles retain their existing refresh path.
+        // An in-flight rebuild or drag still must settle through the existing rebuild path.
         if let prev = appliedVideoSnap, appliedGeneration == g - 1, stillReleaseGeneration == nil, let item = player.currentItem,
-           prev == snap.withoutSubtitleItems {
+           prev == Self.previewVideoInputs(snap) {
             currentPlan?.subtitles = snap.renderedSubtitles
             previewHost?.setSubtitles(snap.renderedSubtitles, durationFrames: snap.durationFrames, fps: Double(s.fps), item: item)
             appliedGeneration = g
+            previewHost?.spectrumOverlay.refresh()
             #if DEBUG
             subtitleOnlyRefreshes += 1
             #endif
             return
         }
+        previewHost?.spectrumOverlay.invalidate(forgetFrame: true)
         Task {
             do {
                 let plan = try await CompositionPlanner.plan(snap, media: media, settings: s)
@@ -1469,16 +1489,23 @@ final class ProjectStore {
                 self.itemCreatedHookForTest?(item, g)   // 진단 전용: 새 항목에 비디오 출력을 붙인다(일반 실행에서는 nil)
                 #endif
                 self.player.replaceCurrentItem(with: item)
-                self.appliedVideoSnap = snap.withoutSubtitleItems
+                self.appliedVideoSnap = Self.previewVideoInputs(snap)
                 self.previewHost?.setSubtitles(snap.renderedSubtitles, durationFrames: snap.durationFrames, fps: Double(s.fps), item: item)
                 #if DEBUG
                 self.itemReplacements += 1
                 #endif
                 self.observeEnd(item)
-                await self.player.seek(to: s.time(self.playhead), toleranceBefore: .zero, toleranceAfter: .zero)
+                self.seekToken &+= 1
+                let seekToken = self.seekToken, frame = self.playhead
+                let finishSeek: @MainActor (Bool) -> Void = { [weak host = self.previewHost] finished in
+                    host?.subtitleSeekFinished(token: seekToken, frame: frame, finished: finished)
+                }
+                self.previewHost?.subtitleSeekRequested(token: seekToken, frame: frame)
+                let finished = await self.player.seek(to: s.time(frame), toleranceBefore: .zero, toleranceAfter: .zero)
                 if g == self.generation {
                     self.appliedGeneration = g
                     self.releaseStillIfDue(g, item: item)   // 정지 화면은 새 항목이 표시될 준비가 된 뒤에 내린다
+                    finishSeek(finished)
                     #if DEBUG
                     if self.pendingPreviewRebuild { self.pendingPreviewRebuild = false; self.timelineChanged() }   // 이전 경로 재현용
                     #endif
@@ -1523,10 +1550,11 @@ final class ProjectStore {
         // 그 프레임과 아직 끝나지 않은 탐색의 프레임에 보이는 자막 그림을 놓지 않는다. 재생 헤드를 바꾸기 전에 알린다(재생 헤드 didSet이 창을 맞춘다).
         seekToken &+= 1
         let token = seekToken
+        let host = previewHost
         previewHost?.subtitleSeekRequested(token: token, frame: f)
         playhead = f
-        nonisolated(unsafe) let seekDone: (Bool) -> Void = { [weak self] finished in
-            MainActor.assumeIsolated { self?.previewHost?.subtitleSeekFinished(token: token, frame: f, finished: finished) }
+        nonisolated(unsafe) let seekDone: (Bool) -> Void = { [weak host] finished in
+            MainActor.assumeIsolated { host?.subtitleSeekFinished(token: token, frame: f, finished: finished) }
         }
         player.seek(to: settings.time(f), toleranceBefore: .zero, toleranceAfter: .zero) { finished in
             DispatchQueue.main.async { seekDone(finished) }
@@ -1535,6 +1563,7 @@ final class ProjectStore {
 
     /// 재생 중에만 디스플레이 유휴 절전을 막는다(E3-1: 디스플레이가 꺼지면 화면 표시가 멈춤).
     private func setPlaying(_ p: Bool) {
+        if p { previewHost?.spectrumOverlay.invalidate(forgetFrame: true) }
         isPlaying = p
         if p, sleepAssertion == 0 {
             IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn),
@@ -1838,13 +1867,16 @@ extension ProjectStore {
     // MARK: 상태
 
     /// 프로젝트 미디어 목록에서 쓸 수 있는 원본(검사 결과)과 찾을 수 없는 원본을 다시 만든다
-    func refreshAssets() {
+    func refreshAssets(refreshSpectrum: Bool = true) {
         var list: [MediaAsset] = [], missing: [UUID: String] = [:]
         for r in timeline.media {
             if let a = assetCache[r.path] { list.append(a.withID(r.id)) } else { missing[r.id] = missingMedia[r.id] ?? "원본 파일을 찾을 수 없습니다." }
         }
         if list != assets { assets = list }
         if missing != missingMedia { missingMedia = missing }
+        previewHost?.spectrumOverlay.invalidate()
+        spectrumPreview.update(timeline: timeline, media: assets)
+        if refreshSpectrum { previewHost?.spectrumOverlay.refresh() }
     }
     /// 타임라인 클립이 쓰는 찾을 수 없는 원본
     var missingUsedMedia: Set<UUID> {
@@ -1887,8 +1919,18 @@ extension ProjectStore {
         return true
     }
     func stopAllScopes() {
+        // Commit/termination only. Candidate validation must keep the old session alive.
+        // Fence callbacks synchronously BEFORE old access ends; engine reset is queued.
+        previewHost?.spectrumOverlay.invalidate(forgetFrame: true)
+        spectrumPreview.resetProject()
+        #if DEBUG
+        spectrumLifecycleEventForTest?("oldInvalidated", scopedURLs.count)
+        #endif
         for u in scopedURLs { u.stopAccessingSecurityScopedResource() }
         scopedURLs.removeAll()
+        #if DEBUG
+        spectrumLifecycleEventForTest?("oldScopesReleased", 0)
+        #endif
     }
 
     // MARK: 새 프로젝트
@@ -1921,6 +1963,9 @@ extension ProjectStore {
         selection = nil; linkCandidate = nil; selectedLane = nil; statusMessage = nil
         seek(to: 0)
         timelineChanged()
+        #if DEBUG
+        spectrumLifecycleEventForTest?("projectInstalled", assets.count)
+        #endif
     }
 
     // MARK: 저장
@@ -2128,6 +2173,9 @@ extension ProjectStore {
         func cancelled() -> Bool { epoch != openEpoch || Task.isCancelled }
         func abandon(_ scopes: [URL]) -> Bool {
             for u in scopes { u.stopAccessingSecurityScopedResource() }
+            #if DEBUG
+            spectrumLifecycleEventForTest?("candidateScopesReleased", scopes.count)
+            #endif
             statusMessage = "프로젝트 열기를 취소했습니다. 현재 프로젝트는 그대로입니다."
             Self.trace.info("open abandoned (cancelled) after \(self.monoSeconds() - t0, format: .fixed(precision: 3), privacy: .public)s")
             return false
@@ -2199,16 +2247,25 @@ extension ProjectStore {
             if !found { missing[e.ref.id] = reason }
             Self.trace.info("open media#\(i + 1, privacy: .public) \(found ? "found" : "missing", privacy: .public) in \(self.monoSeconds() - m0, format: .fixed(precision: 3), privacy: .public)s")
         }
+        #if DEBUG
+        await candidatePreparedForTest?(scopes.count)
+        #endif
         if cancelled() { return abandon(scopes) }
         // 여는 동안 현재 프로젝트를 편집했으면 바꾸지 않는다(확인 없이 그 편집을 버리지 않게, 2026-10-11 리뷰)
         if gestureBase != nil || timeline != before {
             for u in scopes { u.stopAccessingSecurityScopedResource() }
+            #if DEBUG
+            spectrumLifecycleEventForTest?("candidateScopesReleased", scopes.count)
+            #endif
             Self.trace.info("open abandoned (edited during open)")
             presentAlert(AlertInfo(title: "프로젝트를 열지 않았습니다", message: "여는 동안 현재 프로젝트가 바뀌었습니다. 변경 사항을 지키려고 \(url.lastPathComponent)을(를) 열지 않았습니다.\n\n현재 프로젝트는 그대로입니다. 다시 열어 주세요."))
             return false
         }
         stopAllScopes()
         scopedURLs = scopes
+        #if DEBUG
+        spectrumLifecycleEventForTest?("candidateScopesTransferred", scopes.count)
+        #endif
         replaceProject(timeline: t, url: url.standardizedFileURL, id: decoded.document.projectID, cache: cache, bookmarks: bm, missing: missing)
         addRecent(url.standardizedFileURL)
         Self.trace.info("open applied missing=\(missing.count, privacy: .public) total \(self.monoSeconds() - t0, format: .fixed(precision: 3), privacy: .public)s")
