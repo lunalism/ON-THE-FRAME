@@ -862,3 +862,18 @@
 - 기존 세션 epoch/revision을 재사용하며 별도 coordinator/프로젝트 회차는 추가하지 않는다. 새 seek와 teardown은 옛 그림을 즉시 지우고, 취소뿐 아니라 완료 identity도 검사한다. 프레임이 불확실하면 빈 층을 우선한다.
 - 구현 선택(소유자에게 별도 정책 승인으로 돌리지 않음): exact-seek 성공만 확인 프레임으로 사용하므로 일반 Play→Pause 뒤에는 다음 명시적 seek/한 프레임 이동 전까지 숨긴다. 기존 Pause 시간축/한 프레임 한계를 고쳤다고 주장하지 않는다. UI/검증·수동 절차·남은 범위는 [SPECTRUM-DESIGN.md](SPECTRUM-DESIGN.md) §15.15.
 - continuous animation·display link·spectrum export·style UI·형식 변경은 범위 밖이다. Stage 3B 전체 완료로 표시하지 않는다.
+
+
+### 2026-10-27 SP-1A Stage 3C-1 재생 identity·bounded scheduling(소유자 작업 지시)
+
+- 게시된 3B-1 위에서 실제 available video-output media timing을 조사하고 30fps frame 선택과 유한한 분석 요청 관리를 구현한다. periodic playhead observer는 정확한 표시 frame의 증거가 아니다.
+- 기존 session/coordinator/cache·paused preview·transactional open·scope 수명을 재사용한다. current 우선/짧은 선행 요청·obsolete 취소·stale 거부·이미지 보관 상한과 결정적 검사를 추가한다.
+- 상한(8 pending, 8 retained/16 MiB, +2 frame)과 strict same-cell output 확인은 이번의 구현 선택이며 지원 성능 보장이나 별도 제품 정책 승인이 아니다. audio-only/tail의 독립 clock 지원은 이번에 추가하지 않는다.
+- 자동 display link·연속 표시(3C-2), export/style UI/image import·새 fps/저장 형식·commit/push는 이번 범위 밖이다. 구현·검증·남은 통합 범위는 [SPECTRUM-DESIGN.md](SPECTRUM-DESIGN.md) §15.18. Stage 3C 전체 완료나 독립 통합 리뷰 완료로 표시하지 않는다.
+
+
+### 2026-10-27 Stage 3C-1 퇴출 이미지 복구(소유자 수정 지시)
+
+- read-only 검토의 source-proven completed/eviction blocker를 먼저 결정적으로 재현한 뒤 최소 수정한다. 완료 상태와 이미지 availability를 구분하고 current 승격에서 bounded recovery를 허용한다. 정상 nil·실패와 취소·stale 처리, 기존 8 pending/8 retained/16 MiB/+2 상한을 유지한다.
+- 구현 선택: 퇴출/미보관은 current 활성 구간당 1회 새 ticket으로 복구한다. 정상 무음은 image-budget eviction 대상이 아니다. 예산에 넣을 수 없는 current 결과는 빈 성공 대신 기존 outcome의 명시적 retention failure로 반환한다. 메모리 상한·product canvas를 올리지 않는다.
+- source/test와 관련 문서만 수정한다. paused rendering·composition·scope·transactional open·source lineage/분석·format 8·Undo/Redo·subtitle·export/style/image import는 범위 밖이며, 연속 표시/3C-2·commit/push도 하지 않는다. 재현·negative control·최종 검증은 [SPECTRUM-DESIGN.md](SPECTRUM-DESIGN.md) §15.18.1.

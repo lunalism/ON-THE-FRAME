@@ -268,6 +268,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await SpectrumOverlaySelfTest.run(folder: folder, manual: args.contains("-OTFSpectrumOverlayManual")) }
             return
         }
+        if args.contains("-OTFSpectrumPlaybackTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await SpectrumPlaybackSelfTest.run(folder: folder) }
+            return
+        }
         if args.contains("-OTFSpectrumLifecycleTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await SpectrumLifecycleSelfTest.run(folder: folder) }
             return

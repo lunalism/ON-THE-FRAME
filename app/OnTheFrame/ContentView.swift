@@ -282,7 +282,7 @@ struct PlayerLayerView: NSViewRepresentable {
     func makeNSView(context: Context) -> PlayerNSView {
         let v = PlayerNSView(); v.playerLayer.player = store.player; store.previewHost = v; store.refreshPreviewSubtitles(); return v
     }
-    static func dismantleNSView(_ v: PlayerNSView, coordinator: ()) { v.spectrumOverlay.detach() }
+    static func dismantleNSView(_ v: PlayerNSView, coordinator: ()) { v.spectrumOverlay.store?.spectrumPreview.playback.stop(); v.spectrumOverlay.detach() }
     func updateNSView(_ v: PlayerNSView, context: Context) {
         if v.playerLayer.player !== store.player { v.playerLayer.player = store.player }
         if store.previewHost !== v { store.previewHost = v; store.refreshPreviewSubtitles() }
@@ -359,10 +359,10 @@ final class PlayerNSView: NSView {
         spectrumWindowObserver = nil
         if let window {
             spectrumWindowObserver = SpectrumWindowObservation(NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.spectrumOverlay.invalidate(forgetFrame: true) }
+                MainActor.assumeIsolated { self?.spectrumOverlay.store?.spectrumPreview.playback.stop(); self?.spectrumOverlay.invalidate(forgetFrame: true) }
             })
         }
-        if window == nil { spectrumOverlay.invalidate(forgetFrame: true) }
+        if window == nil { spectrumOverlay.store?.spectrumPreview.playback.stop(); spectrumOverlay.invalidate(forgetFrame: true) }
         else if let store = spectrumOverlay.store, !store.isPlaying,
                 store.player.currentItem != nil, store.appliedGeneration == store.generation {
             store.seek(to: store.playhead) // reacquire through the existing exact-seek completion contract
@@ -462,6 +462,7 @@ final class PlayerNSView: NSView {
         let frames = [displayedFrame] + pendingSeeks.map(\.frame) + (extra.map { [$0] } ?? [])
         return Set(subtitleEntries.filter { s in resident.contains(s.id) && frames.contains { s.start <= $0 && shown(s, $0) } }.map(\.id))
     }
+    var hasPendingSpectrumSeek: Bool { !pendingSeeks.isEmpty }
     /// 저장소가 탐색을 시작한다(재생 헤드를 바꾸기 전)
     func subtitleSeekRequested(token: Int, frame: Int) {
         spectrumOverlay.invalidate(forgetFrame: true)
@@ -487,7 +488,7 @@ final class PlayerNSView: NSView {
     var seekHeldCount: Int { seekHeld?.count ?? 0 }
     /// 스펙트럼 프리뷰 실험 전용(SP-0, SpectrumPreviewExperiment): 화면에 나온 것으로 아는 프레임, 완료·취소를 처리하지 않은 탐색이 있는가
     var displayedFrameForExperiment: Int { displayedFrame }
-    var hasPendingSeeksForExperiment: Bool { !pendingSeeks.isEmpty }
+    var hasPendingSeeksForExperiment: Bool { hasPendingSpectrumSeek }
     #endif
     private func shown(_ s: SubtitleItem, _ f: Int) -> Bool { (s.start <= f && f < s.end) || (s.end == subtitleDuration && f == s.end) }
     private var subtitleDuration = 0

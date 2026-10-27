@@ -1710,3 +1710,96 @@ docs/SPECTRUM-DESIGN.md
 커밋 전: 브랜치/HEAD·상태와 위 13개 path를 다시 대조하고, `git diff --check`, 두 launcher 문법, 문서 링크를 확인한다. 명시적 별도 commit 지시 뒤에만 경로를 지정해 stage하고 `git diff --cached --name-status`·`git diff --cached --check`·실제 staged diff로 정확한 포함 내용을 확인한다. `.claude/`, 모든 `.DS_Store`, `app/selftest-work/`, Desktop 프로젝트, media/generated artifacts, DerivedData/logs, backup refs는 제외한다. push 전에는 별도 게시 지시·대상 브랜치·upstream 상태·최종 commit 내용을 확인하고, 변경이 생겼거나 기존 증거 적용성이 달라진 경우에만 관련 검사를 다시 실행한다. 이번에는 stage/commit/push·Stage 3C 작업을 하지 않았다.
 
 이번 최종 정적 확인 결과: `git diff --check` exit 0, 두 launcher `zsh -n` exit 0, 수정 문서 세 개의 로컬 링크 103개 누락 0. `git diff --stat`는 tracked 수정 7개(새 파일 제외), 최종 index는 비어 있다. Stage 대상 새 파일은 6개이며 제외 대상 `.claude/`·루트/app/design의 `.DS_Store`는 그대로 untracked다.
+
+
+### 15.18 Stage 3C-1 재생 프레임 identity·bounded scheduling 기반(2026-10-27, 미커밋)
+
+**범위:** 게시된 3B-1 `8d33512d59ef850ab5ed1ce9c0abac1a8fb398c5` 위에서 `SpectrumPreviewSession`의 기존 coordinator를 재사용하는 비표시 요청 컨트롤러를 구현했다. 자동 display link·재생 spectrum CALayer 갱신은 추가하지 않았다. `sampleSpectrumPlayback(hostTime:)`는 3C-2용 명시적 입구이며 일반 재생/periodic observer에서는 호출하지 않는다. Stage 3C 전체 완료가 아니다. 아래 상한은 이 작은 단계의 구현 선택이며 제품 성능 기준이나 새로운 지원 정책의 승인이 아니다.
+
+#### timing 조사·프레임 계약
+
+- 기존 Debug SP-0 `SpectrumPreviewProbe`는 view display link의 targetTimestamp를 `AVPlayerItemVideoOutput.itemTime(forHostTime:)`로 변환했다. 재생 중 출력 버퍼는 대리 비교였고 실제 AVPlayerLayer scan-out 증거가 아니었다. periodic AVPlayer observer의 playhead나 일반 Pause의 displayedFrame을 정확한 재생 프레임으로 승격하지 않는다.
+- 새 `SpectrumPlaybackTiming`은 현재 AVPlayerItem에 **별도의** video output을 명시적 sample 호출 때만 붙인다. [Apple itemTime(forHostTime:)](https://developer.apple.com/documentation/avfoundation/avplayeritemoutput/itemtime(forhosttime:))로 목표 host time을 item time으로 변환하고, [copyPixelBuffer(forItemTime:itemTimeForDisplay:)](https://developer.apple.com/documentation/avfoundation/avplayeritemvideooutput/copypixelbuffer(foritemtime:itemtimefordisplay:))의 실제 반환 버퍼 시각을 얻는다. 버퍼를 readback/복사·보관하지 않는다. 현 배포 대상 macOS 15와 설치 SDK에 있는 API를 사용한다(웹 최신 SDK의 대체 API로 배포 범위를 늘리지 않음).
+- `CMTimeConvertScale(..., 30, .roundTowardNegativeInfinity)`로 유리수 내림을 사용한다. invalid/indefinite/음수/다른 epoch/프로젝트 끝 이후는 nil이다. 요청 시각과 실제 버퍼 표시 시각이 **같은 30fps timeline cell**이고 그 프레임에 영상 클립이 있을 때만 선택한다. 직전 프레임 버퍼나 gap/tail을 현재 프레임으로 clamp하지 않는다. 같은 item·같은 30fps cell 안에서는 이미 확인한 버퍼 identity를 재사용하며 새 cell에서 새 버퍼가 없으면 nil이다. 물리적 디스플레이 표시·매 refresh의 영상/overlay 일치를 증명하지 않는다.
+- sample 입구는 playing/rate, 현재 host/window, pending seek 없음, 적용 generation, gesture/still 없음, 현재 item을 검사한다. 출력은 item 교체 때 분리·재부착한다. nil timing은 요청·보관 결과를 비우되 output은 유지해 다음 새 버퍼를 기다린다. Pause/seek 시작·프로젝트 reset/update·view/window teardown은 output도 분리한다. seek 완료가 playback frame을 새로 만들지 않는다. 다음 유효 video-output sample을 기다리고 기존 paused overlay는 기존 confirmed seekToken 완료 계약을 쓴다.
+- **Audio-only:** video-output 기반 identity를 만들지 않는다. 영상 종료 후 오디오가 계속되는 fixture에서도 video 범위 밖은 unknown/nil이다. 향후 audio clock을 명시적인 별도 provenance로 사용할지, black composition frame을 authoritative timing으로 삼을지는 3C-2 설계/승인 대상이다. 이번에는 오디오 전용 새 지원·새 합성 트랙·재생 composition 변경을 하지 않았다.
+
+#### 요청·취소·보관 수명
+
+- `PlaybackSpectrumController`는 session을 약하게 참조하며 같은 coordinator에 요청한다. 현재 프레임 항목을 먼저, 그 뒤 최대 +1/+2 프레임을 요청한다. 우선순위는 current 0/future 1로 기존 scheduler에 전달한다. 이전에 선행 요청한 항목이 current가 되면 같은 요청/결과를 재사용하고 불필요하게 다시 렌더하지 않는다. 기존 engine chunk/band cache 상한·키·취소 정책은 그대로다.
+- desired key·pending은 **최대 8**, retained 결과는 **최대 8 및 image bytes 16 MiB**다. 동시 current 항목이 8개를 넘으면 timeline의 위 레인부터 8개만 admission한다. 이는 완전한 대규모 playback 표시 지원이 아니며 3C-2에서 정책을 확인해야 한다. 메모리가 부족하면 더 먼 future 그림부터 비우고 current를 우선한다. 보관 상한은 이 컨트롤러 소유 image bytes이며 coordinator/decoder/이미 전달 대기 중인 버퍼를 포함한 앱 전체 RSS 상한이 아니다.
+- obsolete 요청은 즉시 cancel하고 **terminal callback을 받을 때까지 슬롯을 유지**한다. 빠른 jump가 취소 요청/완료 대기 수를 무한히 늘리지 않는다. terminal을 기다리는 동안은 새 current 요청도 backpressure를 받을 수 있다. worker가 즉시 종료된다고 주장하지 않는다.
+- completion은 controller serial, ticket의 취소 여부, 앱 epoch/revision, 현재 desired key를 다시 검사한다. future 결과는 보관 가능하지만 `currentOutcome(spectrum:frame:)`는 정확한 현재 프레임·세션에 대해서만 반환한다. callback에서 layer를 갱신하지 않는다. 다음 프레임을 기다릴 때 이전 프레임 그림을 fallback으로 쓰지 않는다.
+- nil/overlap/unavailable/error/cancelled/superseded/drop은 terminal이다. 같은 desired window 안에서는 매 tick 재시도하지 않는다. window 밖으로 나갔다 돌아오면 새로 요청할 수 있다. byte budget 때문에 보관하지 못한 결과도 매 tick 재렌더하지 않는다.
+- 같은 프레임의 반복 advance는 새 desired array/요청/Task/image를 만들지 않는 빠른 경로다. frame 변경 때만 최대 8 key를 유지한다. FFT·파일 디코딩·spectrum renderer는 기존 engine 큐에서 수행한다. 새 메인 actor 작업은 작은 상태/완료 관리이고, output 샘플링 비용·실제 display-link budget은 아직 미측정이다.
+- session update/reset은 playback 결과도 동기적으로 무효화한다. 기존 transactional candidate open 중에는 session update/reset을 하지 않으므로 기존 프로젝트가 유지된다. 실패/취소·편집 충돌 보호, scope 해제 전 reset과 candidate access handoff, paused overlay의 frame/token/layer 계약은 그대로다. 형식 8·export refusal·spectrum-only composition 비교와 engine 소스도 바꾸지 않았다.
+
+#### 검증 방식과 경계
+
+새 Debug `SpectrumPlaybackSelfTest`는 독립 고유 fixture의 실제 session/coordinator를 사용한다. DEBUG-only 결과 변환 gate로 특정 key의 terminal 전달 순서·값을 제어하고, 별도 real-file 구간에서는 hook 없이 생성 6초 WAV를 실제 coordinator/FFT/renderer로 요청한다. gate 조합은 재현 가능한 ordering 시험이며 화면 표시 시험이 아니다. 새 launcher는 자체 생성 WAV와 고유 RUN만 사용한다. 기존 regression은 공유 fixture를 재생성하지 않고 복사본으로만 실행한다. 모든 실패·중간 성공 로그를 보존한다.
+
+- 새 playback 검사 **48/48 PASS**: 30fps 직전/정확/직후 경계, invalid/epoch/end, output attach/detach, audio-only/video gap/tail unknown, current+2·동일 frame dedup·prefetch 재사용, 역순 완료·rapid jumps, 취소 ack 상한, dropped retry 억제, revision/project/seek/pause/view 무효화, 실제 큰 이미지 byte 상한·current 우선, nil/error/overlap 제거, real analysis/render와 반복 요청 비용.
+- 최종 Debug/Release **BUILD SUCCEEDED**. 첫 기본 sandbox 빌드는 Xcode cache/manifest 쓰기 접근 거부로 실패했다(`debug-build-first.log`). 권한 확장 뒤 빌드가 성공했다. 첫 새 gate의 actor 경고는 `Delivery`를 main actor로 명시해 고쳤고 최종 신규 코드 관련 경고는 없었다. 기존 프로젝트 경고는 그대로다. 기존 build script의 exit 0만 보지 않고 BUILD SUCCEEDED를 확인했다.
+- 고유 종합 evidence: `app/selftest-work/sp3c1-2x94u0pz/`. 최종 `debug-build-verified.log`, `release-build-verified.log`, `playback-test-verified.log`; 최초/중간 로그도 보존. 상세 RUN JSON 경로는 각 launcher 로그에 있다.
+- 한 번의 Debug 혼합(결정적 gate + real WAV) 관찰: pending peak **8**, retained image accounting peak **16,588,800 bytes**(16 MiB 아래), request **92**, cancellation **13**, stale 거부 **13**, prefetch-current cache hit **60**, 같은 frame 반복 skip **11,100**. 결과 지연 평균 **15.691 ms**, 최대 **122.707 ms**(의도적 gate 지연 포함). main `advance` 평균 **0.393 µs**, 최대 **78.167 µs**(10,000회 no-op 호출이 평균에 포함됨). real 구간 앱 footprint **53.235 → 73.407 MiB**. 애니메이션/scan-out/AV output sample/전체 main thread frame cost 측정이 아니고 제품 보장값도 아니다. teardown 뒤 retained count/bytes 0을 단언했다.
+
+#### 3C-2에 남기는 범위
+
+view display link targetTimestamp를 이 entry point에 연결하되, pending seek/불확실 timing에서는 빈 spectrum을 유지해야 한다. 매 presentation 시점의 item·frame·세션·view와 media 가용성을 다시 확인하고 해당 프레임 결과만 layer에 넣는다. 진짜 displayed video와의 동기·latency/누락·빠른 재생/seek·Pause 전환·다중 항목 admission·output 샘플링 비용·display-link teardown과 4K 성능은 실제 UI 통합에서 검증한다. 기존 한 프레임 Pause 한계를 이 기반 작업으로 해결했다고 표시하지 않는다. export/style UI/image import·새 fps/format은 여전히 범위 밖이며 독립 Codex 리뷰는 Stage 3 통합·Mac owner 검증 뒤 계획대로 남는다.
+
+
+#### 최종 회귀·안전 확인 및 후보 판정
+
+- 이번에 실제 실행한 회귀: paused overlay **58/58 PASS**(`overlay-test.log`), lifecycle **25/25 PASS**(`lifecycle-test.log`), spectrum lane **98/98 PASS**(`lane-test.log`), subtitle window **56/56 PASS**(`subtitle-test.log`), preview **내부 5 + frame 14 PASS/OVERALL PASS**(`preview-test.log`), engine coordinator/renderer/model/ProjectFile **39 tests, 0 failures**(`engine-tests.log`). 기존 단언을 약화시키지 않았다. GUI 자체 검사는 순차로 실행했고 고유 결과 파일 뒤 자체 종료했다. launcher exit 0과 앱 child 숫자 exit status는 구분한다. OpenFlow의 역사적 **13/15**는 이번 재실행하지 않았고 해결로 표시하지 않는다.
+- 관찰 구간 사용자/시스템 DiagnosticReports의 새 OnTheFrame crash report **0**(`reports-before.json`, `reports-after.json`). 이번 GUI 실행에 timeout/예상 밖 종료는 관찰하지 않았다. 최초 sandbox 빌드 실패와 수정한 Debug gate 경고는 빌드/시험 준비 이슈이며 앱 crash로 세지 않는다. 이전 Debug crash history·CUA tool timeout과 미규명 알림 원인은 유지한다. 전역 crash-free 보장은 아니다.
+- `git diff --check` 및 새 launcher `zsh -n` 통과, 관련 문서 로컬 링크 **222개 누락 0**. 기존 Git refs 전부 변화 없음(`refs-before.txt`, `refs-after.txt`), HEAD = 로컬 upstream `8d33512d59ef850ab5ed1ce9c0abac1a8fb398c5`, main `44943ea` 유지. index 비어 있음. 8 tracked 수정 + 3 새 파일이며 `.claude/`·세 `.DS_Store`와 기존 증거는 보존했다. owner media/project는 수정하지 않았다.
+- **Stage 3C-1 구현 완료 후보(문서화된 한계 포함).** 정의된 proxy timing 계약·bounded 요청·stale 거부·paused 회귀·관련 회귀 및 Debug/Release 빌드 조건을 충족했다. 실제 playback display link와 연속 visible spectrum 통합은 아직 없으며 **Stage 3C 전체 완료가 아니다**. manual relink·실제 4K interactive 성능·queued reset의 모든 I/O 즉시 종료 보장도 미확인/미보장 그대로다. 새 blocker나 더 넓은 저장/재생 구조 변경 의존성은 발견하지 않았다. commit/push/staging·정리·merge/rebase/reset 없이 여기서 멈춘다.
+
+
+### 15.18.1 3C-1 이미지 퇴출 복구 blocker 재현·최소 수정(2026-10-27, 미커밋)
+
+**이전 판정 정정:** §15.18의 48/48 및 당시 구현 완료 후보 기록은 역사적 결과다. 그 뒤 read-only 최종 검토에서 `completed`와 실제 image availability가 섞여 있다는 source-proven blocker로 **BLOCKED** 판정을 받았다. 당시에는 실행 재현이 없었다. 이번 소유자 지시로 처음 실행 재현하고 아래 수정을 했다. 연속 표시나 3C-2 통합은 시작하지 않았다.
+
+#### 재현과 원인
+
+- 실제 owned 1080p 큰 이미지 네 개를 서로 다른 색/별도 CGImage로 만들었다(동일 객체를 세 결과에 재사용하지 않음). current 60 → future 62 완료 → 61 완료 → 60 완료로 budget eviction을 강제하고, current를 61 → 62로 옮긴다.
+- **수정 전 원본 controller + 새 검사 실행: 57개 중 4 FAIL.** `recovery.promoted62RequestsFreshTicket`, `recovery.promoted62Available`, 그 결과에 의존하는 `recovery.availableNoRetryStorm`·`recovery.measurement`가 실패했다. 62가 completed에 남아 재요청되지 않았고 새 이미지 identity가 없었다. 예상한 검사 실패이며 앱 crash/GUI timeout이 아니다. 기존 48개 검사는 그대로 통과했다. `pre-fix-negative-control.log`와 그 고유 RUN JSON, 원본 source 사본·변경 전 hash를 보존했다. 실패 출력의 기다린 시간은 성능 측정으로 쓰지 않는다.
+- root cause: ready를 받으면 보관 성공 여부와 무관하게 completed key가 생겼고, eviction은 retained image만 지웠다. advance의 completed intersection이 future key를 유지하고 pump의 completed 제외가 current 승격 이후에도 요청을 막았다.
+
+#### 상태·복구 정책(상한 그대로)
+
+- completed 상태를 `settled` / `needsCurrentImage` / `budgetFailure`로 구분한다. retained image는 실제 retained dictionary에 있을 때만 재사용 가능하다. successful nil/empty/silence는 정상 settled 결과이며 0 bytes로 보관한다. source unavailable/unset/overlap, analysis/render failure, dropped는 해당 desired window에서 terminal이며 매 tick 재시도하지 않는다.
+- **이미지 퇴출 또는 future image 미보관**은 needsCurrentImage로 남긴다. future 상태에서는 재렌더하지 않고, 그 key가 current가 되었을 때 새 coordinator ticket으로 복구 요청을 **현재 프레임 활성 구간당 최대 한 번** 보낸다. pending ticket이 있으면 중복 요청하지 않는다. 반복 advance는 요청을 늘리지 않는다. 실제 프레임 변경/새 세션 이후에는 정상 새 작업이 가능하다.
+- 직접 cancelled/superseded terminal도 current에서 한 번만 새 ticket으로 회복할 수 있다. 반복 취소는 같은 활성 구간에서 루프를 만들지 않고 다음 활성 구간을 기다린다. obsolete ticket의 callback은 기존 취소/serial/epoch/revision/desired 검사로 거부하며 완료 상태로 잘못 굳히지 않는다. coordinator의 정확히 한 번 terminal 계약·scheduler/cache·분석 알고리즘은 수정하지 않았다.
+- pending **8**, retained results **8**, retained image bytes **16 MiB**, prefetch **+2**, current 우선순위는 유지한다. eviction은 양수 image bytes를 가진 더 먼 future 항목만 대상으로 한다. 0-byte 정상 silence는 image-budget eviction 때문에 재요청되지 않는다. cancelled ticket의 슬롯은 terminal delivery까지 유지하며 I/O가 즉시 종료된다고 주장하지 않는다.
+
+#### 예산 초과의 명시적 실패 정책
+
+- current product 경로는 여전히 **1920×1080**이고 단일 owned image 상한은 8,294,400 bytes다. 단일 16 MiB 초과는 정상 product 결과에서 발생하지 않는다. 이 상한을 올리거나 4K product 지원을 추가하지 않았다.
+- 여러 current image의 합계가 16 MiB를 넘고 더 먼 future를 퇴출해도 공간이 없으면, 이미 보관한 같은-frame 결과를 유지하고 새 current 결과를 `budgetFailure`로 처리한다. `currentOutcome`은 **명시적 `.failed(.render(.invalidCanvas("playback retained-image budget unavailable ...")))`**를 반환한다. 이는 앱의 retention 실패를 기존 outcome 타입으로 표현한 것으로, 실제 renderer가 invalidCanvas를 던졌다는 뜻이 아니다. 빈 성공이나 이전 frame fallback으로 보고하지 않는다. 이 실패는 같은 desired window에서 재계산하지 않는다.
+- 단일 image가 예산보다 큰 방어적 입력도 같은 명시적 failure로 처리하고, 불가능한 fit을 위해 유용한 future 이미지를 먼저 퇴출하지 않는다. 테스트에서만 기존 engine renderer의 3200×1800 결과를 주입해 이 분기를 확인한다. product request canvas·재생 composition은 바꾸지 않는다.
+- 3C-2에서는 budget failure·unknown timing·late result를 화면에서 어떻게 비우고 진단할지, 동시 항목 admission 및 표시 품질 정책을 검토해야 한다. 16 MiB는 retained image accounting 상한이며 앱 RSS·decoder·완료 전달 중 이미지·테스트가 따로 쥔 fixture image의 합계 상한이 아니다.
+
+#### 증거 경계와 보존
+
+이번 고유 evidence root는 `app/selftest-work/sp3c1-recovery-mju_sft3/`다. 원본 blocker, 최초 실패, 중간 73/73·76/76 성공, 빌드·negative control·최종 검증을 각각 별도 로그로 남긴다. 고유 fixture와 검사 앱의 자체 종료만 사용하고 owner 프로젝트/미디어는 수정하지 않았다. 이전 3C-1/3B-1 증거·OpenFlow 13/15·Debug crash history·CUA timeout은 보존한다.
+
+
+#### 최종 실행 결과·측정(이번 수정 작업)
+
+- **Focused playback 77/77 PASS**, `playback-restored-final.log`. 기존 48개를 유지하고 distinct-image 재현, retained 재사용, 미보관 후 승격 복구, current 복구 중 rapid seek, pressure 속 nil 보존, 8 empty 결과, 여러 current의 명시적 budget 실패, 단일 oversize 방어, cancelled/superseded의 유한 재시도와 이후 정상 작업, failed/drop/unavailable 안정성, source revision/project reset stale 거부를 추가했다.
+- **Mutation negative control: 77개 중 6개 예상 FAIL**, `mutation-negative-control.log`. eviction·미보관 상태를 다시 settled로 만드는 임시 바이너리에서 promoted62 fresh ticket/availability, available-no-retry, measurement, exactly-one-fresh-request, rejected-retention-promotes 검사가 실패했다. 이 구간의 실패는 의도적으로 제거한 복구에 대한 감지이며 제품 crash/GUI timeout이 아니다. source는 mutation 빌드 직후 정상 내용으로 복원하고 hash 일치를 확인했다(`PlaybackSpectrumController.fixed.swift`, `.negative-control.swift`). 복원 뒤 최종 Debug/Release 빌드와 77/77 실행을 다시 완료했으므로 최종 Debug 앱은 mutant가 아니다.
+- **기존 회귀 실제 재실행:** paused overlay **58/58**, lifecycle **25/25**(정상 소스 복원 후 `overlay-restored-final.log`, `lifecycle-restored-final.log`); lane **98/98**, subtitle window **56/56**, preview **내부 5 + frame 14/OVERALL PASS**(`lane-test.log`, `subtitle-test.log`, `preview-test.log`); 관련 engine **39 tests, 0 failures**(`engine-tests.log`). GUI 검사는 순차 실행했고 공유 fixture 재생성/기존 결과 덮어쓰기를 하지 않았다.
+- **최종 Debug·Release BUILD SUCCEEDED**(`debug-build-restored-final.log`, `release-build-restored-final.log`), 새 controller/test 파일 warning/error 없음. 기존 프로젝트 warning은 유지한다. 이번에는 새 compiler error·sandbox permission failure·GUI/tool timeout·예상 밖 종료를 관찰하지 않았다. 원본 실패와 mutation 실패는 정상 결과 JSON을 기록한 의도된 assertion 실패다. 관찰 구간 새 OnTheFrame crash report **0**(`reports-after.json`); 전역 crash-free나 이전 crash 이력 해결의 증거는 아니다.
+- **핵심 60→61→62 재현/복구 관찰:** pending peak **3**, retained peak **2**, retained image bytes peak **16,588,800**, eviction **1**, recovery request **1**. frame 62는 원래 prefetch + 새 recovery **정확히 두 요청**이고, pending 중 1,000회·복구 뒤 1,000회 동일 frame advance에서 추가 요청 **0**. held recovery ready를 release한 뒤 결과 관찰까지 **21.067 ms** — 조건 폴링 간격이 포함된 gate-release-to-observed 시간이며 실제 decode/FFT/화면 표시 latency가 아니다. engine cache 정책은 바꾸지 않았고 FFT 재계산 횟수 자체를 새로 계측하지 않았다.
+- **전체 mixed focused 관찰:** pending peak **8**. 별도 8-empty case에서 retained entry peak **8**, bytes 0 확인. 기존 mixed real-WAV 컨트롤러의 image accounting peak **16,588,800 bytes**, result delay 평균 **16.179 ms**/최대 **135.572 ms**, advance 평균 **0.422 µs**/최대 **97.375 µs**. 의도된 gate 지연·10,000회 no-op advance를 포함한다. real 구간 whole-app footprint **110.189 → 128.845 MiB**는 앞선 큰/oversized fixture 생성과 할당기를 포함한 한 번의 관찰이다. controller retained bytes나 장기 메모리 상한과 혼동하지 않는다. retained 결과/image와 pending 상한은 관련 단언으로 확인했고 실제 visual smoothness·display-link overhead는 측정하지 않았다.
+
+#### 체크포인트 재평가
+
+**권고: READY WITH DOCUMENTED LIMITATIONS — Stage 3C-1 구현 완료 후보.** 원본 결함을 실행 재현했고 복구가 제거된 negative control도 검출했으며, 정상 소스의 current 승격 복구·nil 안정성·유한 재시도·stale 거부·기존 상한·필수 회귀·Debug/Release 조건을 충족했다. 초과 current image에 대한 명시적 budget failure, 동시 항목 admission, cancelled worker의 wall-clock 종료 미보장, audio-only/tail unknown, 실제 display-link/scan-out/4K interactive 성능 미검증은 유지한다. 독립 전체 통합 리뷰와 owner 실화면 검증은 Stage 3 통합 뒤 계획대로 남는다. 3C-2/continuous animation·export/style/image import·프로젝트 형식·source lineage·Undo/Redo·scope 소유권·transactional open·paused rendering은 이번에 넓히지 않았다.
+
+이번 수정 경로는 `PlaybackSpectrumController.swift`, `SpectrumPlaybackSelfTest.swift`, 이 문서와 ROADMAP/DECISIONS/HANDOFF **여섯 개**다. 이전 3C-1의 나머지 코드·launcher 변경은 시작 시 hash와 같음을 확인했다. 전체 작업 트리는 기존 **8 modified + 3 new** 범위 그대로이고 기존 refs도 모두 유지됐다. staging/commit/push·branch switch/fetch/pull/merge/rebase/reset/cleanup·owner 데이터 수정 없음.
+
+최종 정적 확인: `git diff --check`·새 launcher `zsh -n` 통과, 네 문서 로컬 링크 225개 누락 0, index 비어 있음. app·experiments·전용 DerivedData의 할당 합계 약 **7.30 GiB**(소스 포함 보수 합계)로 20 GiB 아래이며 cleanup하지 않았다. 정상 복구 source hash는 negative-control 직전 저장한 fixed source와 일치한다.
+
+Preview 증거 수 정정: §15.18·§15.18.1의 기존 “내부 5 + frame 16”은 수량 오기였으며, 각각 보존된 manifest의 내부 검사 5개·steps 14개와 verify-preview 로그의 14개 frame PASS/OVERALL PASS에 맞춰 **5 + 14**로 정정했다. 이번에는 문서 수량만 바로잡았고 테스트·빌드를 새로 실행하지 않았다. 앞선 Stage 3B의 당시 보고와 실패·mutation·리뷰 이력은 그대로 보존한다.

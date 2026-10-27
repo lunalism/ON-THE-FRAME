@@ -4,6 +4,10 @@
 
 ## 기준
 
+- **2026-10-27 퇴출 복구 최신:** HEAD/upstream `8d33512`, main `44943ea`. 원본 blocker 실행 재현(57개 중 4 FAIL), mutation negative control 77개 중 6 FAIL, 정상 복원 뒤 **77/77·필수 회귀·Debug/Release PASS**. current 활성 구간당 1회 복구, nil 안정성, 8/8/16 MiB 유지와 명시적 budget failure. **READY WITH DOCUMENTED LIMITATIONS**, 구현 완료 후보 — 3C-2/연속 animation 미착수. 상세 정책·최초 실패·증거·제약은 [SPECTRUM-DESIGN.md](SPECTRUM-DESIGN.md) §15.18.1. 기존 변경/증거/refs 보존, staging/commit/push 없음. 아래는 이전 기록이다.
+
+- **2026-10-27 Stage 3C-1:** HEAD/upstream `8d33512`, main `44943ea`. 비표시 video-output timing·bounded scheduling 기반 미커밋 구현, 새 검사 48/48·관련 회귀/Debug/Release 성공, 3C-1 구현 완료 후보(한계 포함). current/+2, pending 8·image 8/16 MiB, 취소 ack·stale 보호·전환 무효화. display link/연속 spectrum 표시는 3C-2에 남음. audio-only/tail unknown·실제 표시/4K 성능 미검증·기존 역사적 문제 유지. 자세한 정책·증거·다음 범위: [SPECTRUM-DESIGN.md](SPECTRUM-DESIGN.md) §15.18. Stage 3C 전체 완료 아님, commit/push 없음. 아래는 이전 기록이다.
+
 - **2026-10-27 최종 owner 검증·체크포인트:** `feature/subtitles`, HEAD/로컬 upstream `5a09bc6`, main `44943ea` 유지. **READY WITH DOCUMENTED LIMITATIONS**(3B-1 한정). owner 보고: 경계 19/20/30/99/100/119/120·층 순서, Delete/Undo/Redo·rapid seek·고유 Desktop Save As 후 재실행/정확한 재열기·프로젝트 전환/복귀·앱 생성 D-S8 46/47/62/63 PASS. CLI fixture sandbox 실패도 보존. 기존 자동 증거 재사용만 했고 이번 검사/빌드 재실행 없음. 한계·코드 검토·13개 staging 제안은 [SPECTRUM-DESIGN.md](SPECTRUM-DESIGN.md) §15.17. manual relink 미확인·기존 실패 유지, 3C 미착수, Stage 3 통합/owner 검증 뒤 독립 Codex 리뷰 계획 유지. 이번 문서만 수정, stage/commit/push 없음. 아래는 이전 시점 기록이다.
 
 - **2026-10-27 소유자 확인 정리 최신:** `feature/subtitles`, HEAD/로컬 upstream `5a09bc6`, main `44943ea` 유지. 소유자 보고로 19/20/30 표시·층 순서와 high/low 비교 부분 확인(Undo 추정 없음). 실제 TA 120 samples·video [0,120)/project 180이므로 120 검정은 정상 tail, 큰 질감은 source 내장. 새 overlay 58/58·수명 25/25·Debug/Release 성공, 제품 코드 수정 없음(추가 Debug 검사 4개). 남은 owner 전환/relink/rapid seek/Save As/D-S8 확인과 체크포인트 후보 판단: [SPECTRUM-DESIGN.md](SPECTRUM-DESIGN.md) §15.16. 전체 Stage 3 완료 아님·3C 미구현. 이전 CUA/실패/성능 기록 유지.

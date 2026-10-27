@@ -1085,6 +1085,7 @@ final class ProjectStore {
     @ObservationIgnored weak var previewHost: PlayerNSView? {
         didSet {
             guard oldValue !== previewHost else { return }
+            spectrumPreview.playback.stop()
             oldValue?.spectrumOverlay.detach()
             previewHost?.spectrumOverlay.attach(self)
         }
@@ -1550,6 +1551,7 @@ final class ProjectStore {
         // 그 프레임과 아직 끝나지 않은 탐색의 프레임에 보이는 자막 그림을 놓지 않는다. 재생 헤드를 바꾸기 전에 알린다(재생 헤드 didSet이 창을 맞춘다).
         seekToken &+= 1
         let token = seekToken
+        spectrumPreview.playback.stop()
         let host = previewHost
         previewHost?.subtitleSeekRequested(token: token, frame: f)
         playhead = f
@@ -1563,6 +1565,7 @@ final class ProjectStore {
 
     /// 재생 중에만 디스플레이 유휴 절전을 막는다(E3-1: 디스플레이가 꺼지면 화면 표시가 멈춤).
     private func setPlaying(_ p: Bool) {
+        spectrumPreview.playback.stop()
         if p { previewHost?.spectrumOverlay.invalidate(forgetFrame: true) }
         isPlaying = p
         if p, sleepAssertion == 0 {
