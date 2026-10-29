@@ -4,6 +4,15 @@
 
 ## 기준
 
+**2026-10-29 이미지 실험 최신 — IMG-B-OPT-01까지:** HEAD/upstream `8475ca7`, main `44943ea` 기준의 격리 실험이며 제품 채택 승인이 아니다.
+
+- 범용 ProRes general-alpha cache는 **REJECT**([최종 alpha 조사](diagnostics/IMG1A-4-ALPHA-DECISION.md)). [sampling 계약](diagnostics/IMG1A-3-SAMPLING-PROPOSAL.md)은 미승인 제안이다. Candidate C는 **구조적 불확실성 / INCONCLUSIVE**([구조 gate](diagnostics/IMG-C-POC-1-HYBRID-STRUCTURAL-GATE.md)).
+- Candidate B는 최초 admission/scheduler 제한과 수정 이력을 거쳐 **제한된 Reader Gate 1 PASS**([POC1R](diagnostics/IMG-B-POC-1R-BOUNDED-ADMISSION.md)). **AVPlayer 여섯 프레임 delivery PASS**는 제한된 관찰이다. 역사적 Gate 2 export **QUALITY FAIL**은 유지한다([POC2](diagnostics/IMG-B-POC-2-PLAYER-EXPORT-GATE.md)). [QA-02 canonical 재측정 PASS](diagnostics/IMG-B-QA-02-CANONICAL-REASSESSMENT.md)는 측정 경로를 바로잡은 결과이며 과거 FAIL을 전체 PASS로 바꾸지 않는다.
+- [PERF-02 Debug 계측](diagnostics/IMG-B-PERF-02-CONTROLLED-INSTRUMENTATION.md)과 [PERF-03 최적화 Release 측정](diagnostics/IMG-B-PERF-03-RELEASE-ACCURACY-PERFORMANCE.md)을 구분한다. [PERF-04 DEADLINE FAIL](diagnostics/IMG-B-PERF-04-SUSTAINED-DEADLINE.md), [PERF-05 calibrated A/B 각각 3/90 deadline misses](diagnostics/IMG-B-PERF-05-DRIVER-TIMING-ATTRIBUTION.md)를 유지한다. [OPT-01](diagnostics/IMG-B-OPT-01-CPU-VECTORIZATION.md)은 정확도 유지·**의미 있는 성능 개선 없음**(image-active paired wall 개선 중앙값 0.53%, CPU 0.59%, 사전 5% gate 미달), 조건부 90-frame 시험 미실행이다.
+- 이미지 import는 구현되지 않았고 Candidate B는 제품 승인·실시간 30fps 검증 완료 상태가 아니다. GPU 성능·실시간 합성·제품 통합은 미검증이다. 이미지 media model·기본 지속시간·프로젝트 형식 9는 소유자 결정 대기다. Stage 3C-2와 spectrum export 상태는 아래 기존 기록 그대로이며 이번 이미지 실험으로 변경하지 않는다. 격리 소스·문서는 미커밋이고 아래 IMG-1A 초기 요약은 당시 기록이다.
+
+- **2026-10-27 IMG-1A 초기 기록:** HEAD/upstream `8475ca7`, main `44943ea`. 격리 이미지 캐시 실험은 **REVISE**, 제품 채택/이미지 import 완료 아님. ProRes alpha·출력 시간 검사는 통과했지만 색 품질·portrait 경계 관문 실패, 실제 AVPlayer 미검증. 생산 코드는 그대로이며 격리 테스트·문서만 미커밋. [증거와 최초 실패](diagnostics/IMG1A-STATIC-IMAGE-CACHE.md). 후속 소유자 결정 전 IMG-1·형식 9·3C-2 진행 없음. 아래는 이전 시점 기록이다.
+
 - **2026-10-27 퇴출 복구 최신:** HEAD/upstream `8d33512`, main `44943ea`. 원본 blocker 실행 재현(57개 중 4 FAIL), mutation negative control 77개 중 6 FAIL, 정상 복원 뒤 **77/77·필수 회귀·Debug/Release PASS**. current 활성 구간당 1회 복구, nil 안정성, 8/8/16 MiB 유지와 명시적 budget failure. **READY WITH DOCUMENTED LIMITATIONS**, 구현 완료 후보 — 3C-2/연속 animation 미착수. 상세 정책·최초 실패·증거·제약은 [SPECTRUM-DESIGN.md](SPECTRUM-DESIGN.md) §15.18.1. 기존 변경/증거/refs 보존, staging/commit/push 없음. 아래는 이전 기록이다.
 
 - **2026-10-27 Stage 3C-1:** HEAD/upstream `8d33512`, main `44943ea`. 비표시 video-output timing·bounded scheduling 기반 미커밋 구현, 새 검사 48/48·관련 회귀/Debug/Release 성공, 3C-1 구현 완료 후보(한계 포함). current/+2, pending 8·image 8/16 MiB, 취소 ack·stale 보호·전환 무효화. display link/연속 spectrum 표시는 3C-2에 남음. audio-only/tail unknown·실제 표시/4K 성능 미검증·기존 역사적 문제 유지. 자세한 정책·증거·다음 범위: [SPECTRUM-DESIGN.md](SPECTRUM-DESIGN.md) §15.18. Stage 3C 전체 완료 아님, commit/push 없음. 아래는 이전 기록이다.
