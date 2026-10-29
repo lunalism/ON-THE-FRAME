@@ -14,12 +14,18 @@
 
 **기준:** 자막 작업은 브랜치 `feature/subtitles`(첫 자막 기능 로컬 커밋 `04d4b58`(엔진)·`c36923e`(앱)·`81fda71`(조사 시험)·문서 커밋, 푸시하지 않음). 이전 기준 `backup/2026-10-11-editor-work`(`51cef3c`), `main`은 `44943ea` 그대로. 프로젝트 형식: `main`·이전 브랜치 5(형식 1–4 읽기, D-023), `feature/subtitles` 6(자막, 자막이 없으면 5로 씀, D-035). 검증 경계: 자동 검사는 이 Mac 한 대·짧은 생성 fixture, 소유자 확인은 소유자가 보고한 정성 관찰이며 둘을 섞지 않는다.
 
-**2026-10-29 이미지 실험 최신 — IMG-B-OPT-01까지:** HEAD/upstream `8475ca7`, main `44943ea` 기준의 격리 실험이며 제품 채택 승인이 아니다.
+**2026-10-30 GPU·image probe 체크포인트 준비 — IMG-GPU-02E / IMG-PROBE-05까지:** HEAD/upstream `e89534d`, main `44943ea`. 격리 실험·probe foundation은 미커밋이며 제품 채택 승인이 아니다. [공개 준비와 정확한 manifest](diagnostics/IMG-CP-04-PUBLICATION-PREPARATION.md).
+
+- [Metal feasibility](diagnostics/IMG-GPU-01-METAL-FEASIBILITY.md), accounting·lease 보정 후 [GPU-02D](diagnostics/IMG-GPU-02D-SUSTAINED-VALIDATION.md)의 제한된 offline 90/90·496.343fps, paced 90/90·deadline miss0/90을 기록했다. GPU-02D의 신세대 제출 누락은 [GPU-02E GENERATION RECOVERY PASS](diagnostics/IMG-GPU-02E-GENERATION-RECOVERY.md)로 보완했다. 한 Mac·고정 FHD SDR fixture·직접 buffer 시험이며 실제 제품 AVPlayer playback/export·장기 메모리 안정성은 미검증이다. 이전 BLOCKED/INCONCLUSIVE 기록은 보존한다.
+- StillImageProbe는 정상 import와 분리된 내부 기반이다. [PROBE-02](diagnostics/IMG-PROBE-02-SCOPE-LIFECYCLE.md)의 손상 IDAT 수용은 [PROBE-03](diagnostics/IMG-PROBE-03-PNG-VALIDATION.md)에서 보정했고, [PROBE-04](diagnostics/IMG-PROBE-04-SAFETY-SANDBOX.md)의 trailing-byte 결함은 [PROBE-05](diagnostics/IMG-PROBE-05-EXACT-ZLIB-BOUNDARY.md)의 플랫폼 zlib 종료·잔여입력 검사로 보정했다. PROBE-04 실제 sandbox UI 회귀와 PROBE-05 자동 회귀는 별도 증거다. 과거 FAIL은 삭제하지 않는다.
+- JPEG/단일 PNG·SDR sRGB·encoded8MiB·dimension2048·pixels4,194,304·추정decode128MiB는 **잠정 제한**이다. 전체 PNG 변형·JPEG 무결성·제품 준비 완료를 주장하지 않는다. 이미지 media model·기본 지속시간·형식9는 소유자 결정 대기이며 normal image import·제품 GPU 통합·형식9는 구현하지 않았다. Stage 3C-2와 spectrum export 상태는 기존 기록 그대로다.
+
+**2026-10-29 이미지 CPU 실험 당시 요약 — IMG-B-OPT-01까지:** HEAD/upstream `8475ca7`, main `44943ea` 기준의 격리 실험이며 제품 채택 승인이 아니다.
 
 - 범용 ProRes general-alpha cache는 **REJECT**([최종 alpha 조사](diagnostics/IMG1A-4-ALPHA-DECISION.md)). [sampling 계약](diagnostics/IMG1A-3-SAMPLING-PROPOSAL.md)은 미승인 제안이다. Candidate C는 **구조적 불확실성 / INCONCLUSIVE**([구조 gate](diagnostics/IMG-C-POC-1-HYBRID-STRUCTURAL-GATE.md)).
 - Candidate B는 최초 admission/scheduler 제한과 수정 이력을 거쳐 **제한된 Reader Gate 1 PASS**([POC1R](diagnostics/IMG-B-POC-1R-BOUNDED-ADMISSION.md)). **AVPlayer 여섯 프레임 delivery PASS**는 제한된 관찰이다. 역사적 Gate 2 export **QUALITY FAIL**은 유지한다([POC2](diagnostics/IMG-B-POC-2-PLAYER-EXPORT-GATE.md)). [QA-02 canonical 재측정 PASS](diagnostics/IMG-B-QA-02-CANONICAL-REASSESSMENT.md)는 측정 경로를 바로잡은 결과이며 과거 FAIL을 전체 PASS로 바꾸지 않는다.
 - [PERF-02 Debug 계측](diagnostics/IMG-B-PERF-02-CONTROLLED-INSTRUMENTATION.md)과 [PERF-03 최적화 Release 측정](diagnostics/IMG-B-PERF-03-RELEASE-ACCURACY-PERFORMANCE.md)을 구분한다. [PERF-04 DEADLINE FAIL](diagnostics/IMG-B-PERF-04-SUSTAINED-DEADLINE.md), [PERF-05 calibrated A/B 각각 3/90 deadline misses](diagnostics/IMG-B-PERF-05-DRIVER-TIMING-ATTRIBUTION.md)를 유지한다. [OPT-01](diagnostics/IMG-B-OPT-01-CPU-VECTORIZATION.md)은 정확도 유지·**의미 있는 성능 개선 없음**(image-active paired wall 개선 중앙값 0.53%, CPU 0.59%, 사전 5% gate 미달), 조건부 90-frame 시험 미실행이다.
-- 이미지 import는 구현되지 않았고 Candidate B는 제품 승인·실시간 30fps 검증 완료 상태가 아니다. GPU 성능·실시간 합성·제품 통합은 미검증이다. 이미지 media model·기본 지속시간·프로젝트 형식 9는 소유자 결정 대기다. Stage 3C-2와 spectrum export 상태는 아래 기존 기록 그대로이며 이번 이미지 실험으로 변경하지 않는다. 격리 소스·문서는 미커밋이고 아래 IMG-1A 초기 요약은 당시 기록이다.
+- 이미지 import는 구현되지 않았고 Candidate B는 제품 승인·실시간 30fps 검증 완료 상태가 아니다. 당시 GPU 성능·실시간 합성·제품 통합은 미검증이었다. 후속 GPU 한정 결과는 위 최신 기록과 구별한다. 이미지 media model·기본 지속시간·프로젝트 형식 9는 소유자 결정 대기다. Stage 3C-2와 spectrum export 상태는 아래 기존 기록 그대로이며 이번 이미지 실험으로 변경하지 않는다. 격리 소스·문서는 미커밋이고 아래 IMG-1A 초기 요약은 당시 기록이다.
 
 **2026-10-27 IMG-1A 격리 실험:** 실행·측정 종료, **REVISE / 제품 채택 불가**. 1초 ProRes 4444 캐시의 alpha 보존·30fps/3분 출력 시간은 확인했지만 공통 sRGB 품질 기준 미달, portrait 오른쪽 경계 1픽셀 assertion 실패, 생산 visibility culler는 투명 상단 아래 레인을 제거함. 기존 export 회귀 3/3 PASS. [실험 증거](diagnostics/IMG1A-STATIC-IMAGE-CACHE.md). 이미지 import·모델·형식 9·생산 렌더링 변경 없음, IMG-1·3C-2 미착수. 소유자 후속 결정 대기.
 
