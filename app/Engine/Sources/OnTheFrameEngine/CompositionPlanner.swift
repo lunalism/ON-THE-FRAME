@@ -52,7 +52,18 @@ public enum PlanError: Error, CustomStringConvertible {
 /// M1에는 자막·스펙트럼이 없으므로 AVFoundation 기본 합성기와 레이어 지시(회전 반영, 비율 유지, 검은 여백)를 쓴다.
 /// 사용자 정의 합성기(E2Compositor)는 자막·스펙트럼이 들어오는 M2에서 다시 쓴다.
 public enum CompositionPlanner {
+    // Content overloads guard before culling, media lookup or AVFoundation allocation.
+    public static func plan(_ content: ProductionContent, media: [UUID: MediaAsset], settings: RenderSettings = .m1) async throws -> PlannedComposition {
+        try await plan(content.supportedTimeline(), media: media, settings: settings)
+    }
+    public static func layeredSegments(_ content: ProductionContent, media: [UUID: MediaAsset], render: CGSize) throws -> [LayeredSegment] {
+        try layeredSegments(content.supportedTimeline(), media: media, render: render)
+    }
+    public static func layerStack(_ content: ProductionContent, lanes: [Lane]? = nil, from lo: Int, to hi: Int, media: [UUID: MediaAsset], render: CGSize) throws -> [Clip] {
+        try layerStack(content.supportedTimeline(), lanes: lanes, from: lo, to: hi, media: media, render: render)
+    }
     public static func plan(_ t: Timeline, media: [UUID: MediaAsset], settings: RenderSettings = .m1) async throws -> PlannedComposition {
+        _ = try ProductionContent(t).supportedTimeline()
         guard !t.isEmpty else { throw PlanError.emptyTimeline }
         let comp = AVMutableComposition()
         guard let vt = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
@@ -303,6 +314,7 @@ public enum CompositionPlanner {
     /// 화면 전체를 덮는 클립에서 멈춘다. 같은 쌓음이 이어지면 한 구간으로 합친다. 아무 레인에도 없으면 구간을 만들지 않는다(빈틈).
     public struct LayeredSegment: Sendable, Equatable { public let start: Int; public let end: Int; public let layers: [Clip] }
     public static func layeredSegments(_ t: Timeline, media: [UUID: MediaAsset], render: CGSize) throws -> [LayeredSegment] {
+        _ = try ProductionContent(t).supportedTimeline()
         var bounds = Set<Int>()
         for c in t.clips { bounds.insert(c.start); bounds.insert(c.end) }
         let b = bounds.sorted()
@@ -324,6 +336,7 @@ public enum CompositionPlanner {
     /// 시각 구간 [lo, hi)를 모두 덮는 영상 클립의 쌓음(위 레인부터, 화면 전체를 덮는 클립에서 멈춤, 클립은 자르지 않은 원래 값).
     /// layeredSegments와 프리뷰 끌기 화면(재생 헤드 한 프레임)이 같은 규칙을 쓴다.
     public static func layerStack(_ t: Timeline, lanes: [Lane]? = nil, from lo: Int, to hi: Int, media: [UUID: MediaAsset], render: CGSize) throws -> [Clip] {
+        _ = try ProductionContent(t).supportedTimeline()
         var stack: [Clip] = []
         for l in lanes ?? t.lanes(.video) {
             guard let c = t.clips(inLane: l.id).first(where: { $0.start <= lo && hi <= $0.end }) else { continue }

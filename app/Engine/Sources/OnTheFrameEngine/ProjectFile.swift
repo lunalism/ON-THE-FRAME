@@ -91,7 +91,12 @@ public enum ProjectFile {
     /// 타임라인 → 파일 내용. bookmarks: 미디어 id → 북마크, projectURL: 상대 경로 기준(저장할 위치).
     /// 저장할 수 없는 타임라인(프레임 값 상한을 넘음 — 다시 열 수 없는 파일을 쓰지 않게)
     public struct SaveError: Error, Equatable, CustomStringConvertible { public var description: String { "타임라인이 너무 깁니다(프레임 값 상한을 넘어 저장하면 다시 열 수 없습니다)." } }
+    /// Check the full catalog before producing any legacy bytes or touching a destination.
+    public static func encode(_ content: ProductionContent, projectID: UUID, settings: RenderSettings, bookmarks: [UUID: Data], projectURL: URL?) throws -> Data {
+        try encode(content.supportedTimeline(), projectID: projectID, settings: settings, bookmarks: bookmarks, projectURL: projectURL)
+    }
     public static func encode(_ t: Timeline, projectID: UUID, settings: RenderSettings, bookmarks: [UUID: Data], projectURL: URL?) throws -> Data {
+        _ = try ProductionContent(t).supportedTimeline()
         guard t.withinFrameLimit else { throw SaveError() }
         let dir = projectURL?.deletingLastPathComponent().standardizedFileURL
         let doc = Document(format: format, version: version(for: t), projectID: projectID,

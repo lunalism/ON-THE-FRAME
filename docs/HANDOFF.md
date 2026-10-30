@@ -4,11 +4,18 @@
 
 ## 기준
 
-**2026-10-30 GPU·image probe 체크포인트 준비 — IMG-GPU-02E / IMG-PROBE-05까지:** HEAD/upstream `e89534d`, main `44943ea`. 격리 실험·probe foundation은 미커밋이며 제품 채택 승인이 아니다. [공개 준비와 정확한 manifest](diagnostics/IMG-CP-04-PUBLICATION-PREPARATION.md).
+**2026-10-30 운영 이미지 모델 체크포인트 감사 — IMG-MODEL-05R / IMG-CP-06:** HEAD/upstream `faca371`, main `44943ea`. 아래 모델·안전 게이트·격리 codec/adapter 변경은 미커밋이다. [감사·검증 결과](diagnostics/IMG-CP-06-CHECKPOINT-AUDIT.md), [정확한 공개 후보 manifest](diagnostics/IMG-CP-06-MANIFEST.txt).
+
+- **엔진 still-image 편집 구현:** 원본 source duration/frame count 없이 명시적 stillImage 카탈로그와 visual Clip을 사용한다. 소유자 승인 범위의 기본 150프레임·최소 1프레임·sourceIn 0, trim/split/move/copy/ripple/undo를 지원한다. [04U 범위와 증거](diagnostics/IMG-MODEL-04U-OPERATIONAL-TIMELINE.md).
+- **격리 format-9 adapter round-trip PASS:** used/unused·missing 이미지 참조, UUID·clip timing·transform·자막 효과·audio origin/lineage·spectrum·상대 경로/북마크를 보존한다. 저장된 참조와 runtime probe 검증을 분리하며 복원은 unverified 상태다. [05 BLOCKED](diagnostics/IMG-MODEL-05-ADAPTER-BLOCKER.md) 뒤 [05R 복원·호환성 보정](diagnostics/IMG-MODEL-05R-LOSSLESS-ADAPTER.md)을 기록한다.
+- **정상 format-9 open/save는 비활성**, normal image import UI는 미구현이다. 이미지가 포함된 정상 저장·제품 preview/export는 전체 카탈로그 검사로 거부한다. [04S BLOCKED](diagnostics/IMG-MODEL-04S-OPERATIONAL-TIMELINE.md), [04T PARTIAL/Debug host crash](diagnostics/IMG-MODEL-04T-SAFETY-GATES.md), [04T-R host recovery PASS](diagnostics/IMG-MODEL-04T-R-DEBUG-HOST-RECOVERY.md)를 구별한다.
+- **실제 Mac end-to-end 이미지 workflow는 미검증**이며 제품 이미지 지원 완료가 아니다. 제품 GPU preview/export 통합 없음. 이번 감사에서 Debug/Release 각각 엔진 86 PASS·앱 안전 검사 5 PASS(FAIL/SKIP 0, exit 0)를 새로 실행했다. 이전 GPU/sandbox 증거는 재실행하지 않은 별도 기록이다. 잠정 probe 제한은 확대하지 않았고 Stage 3C-2·spectrum export 상태도 변경하지 않았다.
+
+**2026-10-30 GPU·image probe 체크포인트 준비 당시 기록 — IMG-GPU-02E / IMG-PROBE-05까지:** 당시 HEAD/upstream `e89534d`, main `44943ea`. 아래 격리 실험·probe foundation은 이후 `faca371`로 게시됐으며 제품 채택 승인은 아니다. [공개 준비와 정확한 manifest](diagnostics/IMG-CP-04-PUBLICATION-PREPARATION.md).
 
 - [Metal feasibility](diagnostics/IMG-GPU-01-METAL-FEASIBILITY.md), accounting·lease 보정 후 [GPU-02D](diagnostics/IMG-GPU-02D-SUSTAINED-VALIDATION.md)의 제한된 offline 90/90·496.343fps, paced 90/90·deadline miss0/90을 기록했다. GPU-02D의 신세대 제출 누락은 [GPU-02E GENERATION RECOVERY PASS](diagnostics/IMG-GPU-02E-GENERATION-RECOVERY.md)로 보완했다. 한 Mac·고정 FHD SDR fixture·직접 buffer 시험이며 실제 제품 AVPlayer playback/export·장기 메모리 안정성은 미검증이다. 이전 BLOCKED/INCONCLUSIVE 기록은 보존한다.
 - StillImageProbe는 정상 import와 분리된 내부 기반이다. [PROBE-02](diagnostics/IMG-PROBE-02-SCOPE-LIFECYCLE.md)의 손상 IDAT 수용은 [PROBE-03](diagnostics/IMG-PROBE-03-PNG-VALIDATION.md)에서 보정했고, [PROBE-04](diagnostics/IMG-PROBE-04-SAFETY-SANDBOX.md)의 trailing-byte 결함은 [PROBE-05](diagnostics/IMG-PROBE-05-EXACT-ZLIB-BOUNDARY.md)의 플랫폼 zlib 종료·잔여입력 검사로 보정했다. PROBE-04 실제 sandbox UI 회귀와 PROBE-05 자동 회귀는 별도 증거다. 과거 FAIL은 삭제하지 않는다.
-- JPEG/단일 PNG·SDR sRGB·encoded8MiB·dimension2048·pixels4,194,304·추정decode128MiB는 **잠정 제한**이다. 전체 PNG 변형·JPEG 무결성·제품 준비 완료를 주장하지 않는다. 이미지 media model·기본 지속시간·형식9는 소유자 결정 대기이며 normal image import·제품 GPU 통합·형식9는 구현하지 않았다. Stage 3C-2와 spectrum export 상태는 기존 기록 그대로다.
+- JPEG/단일 PNG·SDR sRGB·encoded8MiB·dimension2048·pixels4,194,304·추정decode128MiB는 **잠정 제한**이다. 전체 PNG 변형·JPEG 무결성·제품 준비 완료를 주장하지 않는다. 당시 이미지 media model·기본 지속시간·형식9는 소유자 결정 대기였다. 후속 엔진 구현은 위 최신 기록을 따르며 normal image import·제품 GPU 통합·정상 형식9 open/save는 여전히 미구현이다. Stage 3C-2와 spectrum export 상태는 기존 기록 그대로다.
 
 **2026-10-29 이미지 CPU 실험 당시 요약 — IMG-B-OPT-01까지:** HEAD/upstream `8475ca7`, main `44943ea` 기준의 격리 실험이며 제품 채택 승인이 아니다.
 

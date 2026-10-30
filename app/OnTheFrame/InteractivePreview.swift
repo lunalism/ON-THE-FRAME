@@ -18,6 +18,11 @@ final class InteractivePreview {
     struct DrawItem { let clipID: UUID; let image: CGImage; let transform: CGAffineTransform; let size: CGSize }
 
     private var cache: [Key: CGImage] = [:]
+    #if OTF_SAFETY_TESTS
+    // Standalone deterministic tests only; never compiled into the normal app.
+    var safetyCacheCount: Int { cache.count }
+    func seedSafetyCache(_ image: CGImage) { cache[Key(media: UUID(), frame: 0)] = image }
+    #endif
     private var media: [UUID: MediaAsset] = [:]
     private var settings = RenderSettings.m1
     private var frame = 0
@@ -27,6 +32,7 @@ final class InteractivePreview {
     /// 회차: begin·end마다 1 늘고, 이전 회차의 결과는 버린다
     private(set) var token = 0
     /// 새 레이어 목록을 보일 때(주 스레드, 동기)
+    var onUnsupported: ((ProductionContent.Unsupported) -> Void)?
     var onItems: (([DrawItem]) -> Void)?
     private(set) var isActive = false
     #if DEBUG
@@ -37,7 +43,16 @@ final class InteractivePreview {
     #endif
 
     /// 끌기 시작: 재생 헤드 프레임 f에서 보일 수 있는 원본 프레임을 미리 디코딩한다(이미 있는 것은 다시 하지 않음)
+    @discardableResult
+    func begin(_ content: ProductionContent, frame f: Int, media m: [UUID: MediaAsset], settings s: RenderSettings) -> Bool {
+        do { beginSupported(try content.supportedTimeline(), frame: f, media: m, settings: s); return true }
+        catch let error as ProductionContent.Unsupported { rejectUnsupported(error); return false }
+        catch { return false }
+    }
     func begin(_ base: Timeline, frame f: Int, media m: [UUID: MediaAsset], settings s: RenderSettings) {
+        begin(ProductionContent(base), frame: f, media: m, settings: s)
+    }
+    private func beginSupported(_ base: Timeline, frame f: Int, media m: [UUID: MediaAsset], settings s: RenderSettings) {
         token += 1
         finishWanted(false)
         if f != frame || m != media { cache.removeAll() }
@@ -60,7 +75,15 @@ final class InteractivePreview {
         }
     }
     /// 타임라인 t의 겹친 화면을 보인다(프레임이 준비됐으면 바로). done(true)는 보였을 때, done(false)는 보이지 못했거나 더 새 요청·end()로 버렸을 때.
+    func request(_ content: ProductionContent, done: ((Bool) -> Void)? = nil) {
+        do { requestSupported(try content.supportedTimeline(), done: done) }
+        catch let error as ProductionContent.Unsupported { rejectUnsupported(error); done?(false) }
+        catch { done?(false) }
+    }
     func request(_ t: Timeline, done: ((Bool) -> Void)? = nil) {
+        request(ProductionContent(t), done: done)
+    }
+    private func requestSupported(_ t: Timeline, done: ((Bool) -> Void)?) {
         guard isActive else { done?(false); return }
         finishWanted(false)
         if ready { let ok = show(t); done?(ok) } else { wanted = (t, done) }   // done이 없어도 보인다(선택적 호출 인자는 계산되지 않음)
@@ -70,6 +93,16 @@ final class InteractivePreview {
         token += 1
         isActive = false
         finishWanted(false)
+    }
+    /// Invalidate async publication and cached output before reporting unsupported content.
+    func invalidateUnsupportedContent() {
+        prefetch?.cancel(); prefetch = nil
+        end()
+        cache.removeAll(); media.removeAll(); ready = false
+    }
+    func rejectUnsupported(_ error: ProductionContent.Unsupported) {
+        invalidateUnsupportedContent()
+        onUnsupported?(error)
     }
     private func finishWanted(_ ok: Bool) { let d = wanted?.done; wanted = nil; d?(ok) }
 
@@ -92,9 +125,17 @@ final class InteractivePreview {
 
     /// 재생 헤드 프레임의 레이어(아래 먼저). 필요한 원본 프레임이 없으면 nil. 영상이 없는 시각이면 빈 목록(검정).
     func drawList(_ t: Timeline) -> [DrawItem]? {
+        do { return try drawList(ProductionContent(t)) }
+        catch is ProductionContent.Unsupported { return nil } // Content overload already reported/inactivated once.
+        catch { return nil } // Preserve existing handling for unrelated missing-frame errors.
+    }
+    func drawList(_ content: ProductionContent) throws -> [DrawItem]? {
+        let t: Timeline
+        do { t = try content.supportedTimeline() }
+        catch let error as ProductionContent.Unsupported { rejectUnsupported(error); throw error }
         let size = settings.renderSize
         // 재생 헤드 한 프레임의 쌓음(layeredSegments와 같은 규칙, 전체 타임라인을 나누지 않음)
-        guard let stack = try? CompositionPlanner.layerStack(t, from: frame, to: frame + 1, media: media, render: size) else { return nil }
+        let stack = try CompositionPlanner.layerStack(t, from: frame, to: frame + 1, media: media, render: size)
         var items: [DrawItem] = []
         for c in stack.reversed() {
             guard let m = media[c.mediaID], let img = cache[Key(media: c.mediaID, frame: c.sourceIn + frame - c.start)] else { return nil }

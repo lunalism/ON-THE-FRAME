@@ -226,6 +226,7 @@ final class ProjectStore {
 
     init(spectrumPreview: SpectrumPreviewSession? = nil) {
         self.spectrumPreview = spectrumPreview ?? SpectrumPreviewSession()
+        interactive.onUnsupported = { [weak self] error in self?.rejectUnsupportedContent(error) }
         player.actionAtItemEnd = .pause
         loadRecents()
         timeObserver = player.addPeriodicTimeObserver(forInterval: settings.frameDuration, queue: .main) { [weak self] t in
@@ -522,6 +523,7 @@ final class ProjectStore {
         pauseForEdit()
         do {
             let t = try make(timeline)
+            guard supportedProductionTimeline(ProductionContent(t)) != nil else { return }
             history.apply(t, focus: focus)
             selection = select ?? focus
             linkCandidate = nil
@@ -659,6 +661,7 @@ final class ProjectStore {
         pauseForEdit()
         do {
             let t = try make(timeline)
+            guard supportedProductionTimeline(ProductionContent(t)) != nil else { return }
             guard t != timeline else { return }
             history.apply(t, focus: selection)
             if let lane { selectedLane = lane }
@@ -1102,6 +1105,7 @@ final class ProjectStore {
 
     /// 정지 화면 경로를 쓸 수 있으면 시작한다(재생 헤드 아래 영상 원본 프레임을 미리 디코딩)
     private func beginStill(_ base: Timeline) {
+        guard supportedProductionTimeline(ProductionContent(base)) != nil else { return }
         interactive.onItems = { [weak self] items in
             self?.previewHost?.showStage(items)
             #if DEBUG
@@ -1434,10 +1438,27 @@ final class ProjectStore {
         previewHost?.spectrumOverlay.refresh()
     }
 
+    /// Check complete content before filtering missing media or reusing cached preview inputs.
+    /// The isolated adapter is never installed as project state.
+    func supportedProductionTimeline(_ content: ProductionContent) -> Timeline? {
+        do { return try content.supportedTimeline() }
+        catch let error as ProductionContent.Unsupported { rejectUnsupportedContent(error); return nil }
+        catch { statusMessage = "지원 여부를 확인하지 못했습니다: \(error)"; return nil }
+    }
+    private func rejectUnsupportedContent(_ error: ProductionContent.Unsupported) {
+        generation += 1 // Pending planner/seek results cannot publish into this diagnostic state.
+        appliedVideoSnap = nil
+        interactive.invalidateUnsupportedContent()
+        dropStill()
+        pauseForEdit()
+        statusMessage = error.description
+    }
+
     // MARK: 프리뷰
 
     /// 타임라인이 바뀌면: 재생 헤드를 새 길이 안으로, composition을 비동기로 다시 만들고 오래된 결과는 버린다.
     func timelineChanged() {
+        guard supportedProductionTimeline(ProductionContent(timeline)) != nil else { return }
         refreshAssets(refreshSpectrum: false)
         updateWindowDocumentState()
         playhead = min(playhead, timeline.durationFrames)
@@ -1609,6 +1630,7 @@ final class ProjectStore {
     /// 실제 내보내기 작업 시작. 경과 시간은 여기서(저장 패널을 닫은 뒤) 재기 시작해 준비·인코딩·검증·승격을 모두 포함하고,
     /// 성공·실패·취소가 끝난 시점에 멈춘다. 내보내기마다 추정을 새로 시작한다.
     private func beginExport(_ d: ExportDestination) {
+        guard supportedProductionTimeline(ProductionContent(timeline)) != nil else { runNextOp(); return }
         let snap = timeline, media = mediaByID, s = settings, sources = assets, options = exportOptions
         exportEstimator.reset(at: monoSeconds())
         exportCancelling = false
@@ -1979,6 +2001,7 @@ extension ProjectStore {
     /// 사용자가 시작한 저장(메뉴·⌘S·⇧⌘S, done 없음)은 시트·알림·패널 중이면 하지 않는다(CP-03). done이 있는 호출은 확인 시트가 사라진 뒤 잇는
     /// 내부 흐름(저장 → 새 프로젝트·열기·닫기·종료)이라 막지 않는다.
     func saveProject(saveAs: Bool = false, done: (@MainActor (Bool) -> Void)? = nil) {
+        guard supportedProductionTimeline(ProductionContent(timeline)) != nil else { done?(false); return }
         commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         if done == nil, fileCommandBlocked() { return }
         SaveTrace.note("saveProject saveAs=\(saveAs) hasURL=\(projectURL != nil) dirty=\(isDirty)")
@@ -2035,6 +2058,7 @@ extension ProjectStore {
     /// 프로젝트 파일 쓰기: 원본 미디어 보호 → 북마크 → 임시 위치에 쓰기 → 원자적으로 옮기기. 실패하면 이전 파일·상태 그대로.
     @discardableResult
     func writeProject(to url: URL) -> Bool {
+        guard supportedProductionTimeline(ProductionContent(timeline)) != nil else { return false }
         let dest = url.standardizedFileURL
         SaveTrace.note("writeProject dest=\(dest.path)")
         if let reason = protectedProjectDestination(dest) {
@@ -2046,7 +2070,7 @@ extension ProjectStore {
         }
         let fm = FileManager.default
         do {
-            let data = try ProjectFile.encode(timeline, projectID: projectID, settings: settings, bookmarks: bookmarks, projectURL: dest)
+            let data = try ProjectFile.encode(ProductionContent(timeline), projectID: projectID, settings: settings, bookmarks: bookmarks, projectURL: dest)
             SaveTrace.note("encoded bytes=\(data.count)")
             let tmpDir = try fm.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: dest, create: true)
             SaveTrace.note("tmpDir=\(tmpDir.path)")

@@ -323,3 +323,43 @@ public enum MediaProbe {
                             minInterval: iv.min() ?? secs, maxInterval: iv.max() ?? secs)
     }
 }
+
+/// Engine-only catalog payload. Still sources have no temporal payload or video track.
+enum OperationalMedia: Equatable, Sendable {
+    enum Kind { case video, audio, stillImage }
+    struct StillSource: Equatable, Sendable {
+        let reference: StillImageProjectModel.ImageReference
+        enum ValidationState { case unverified, probeValidated }
+        /// A portable snapshot never manufactures a runtime validation or file identity.
+        let validated: StillImageProjectModel.ValidatedImage?
+        var descriptor: StillImageDescriptor? { validated?.descriptor }
+        var validationState: ValidationState { validated == nil ? .unverified : .probeValidated }
+        init(_ source: StillImageProjectModel.ValidatedImage, id: UUID) {
+            reference = .init(id:id,validated:source); validated = source
+        }
+        init(persisted reference: StillImageProjectModel.ImageReference,
+             validated source: StillImageProjectModel.ValidatedImage? = nil) throws {
+            try reference.validate()
+            if let source {
+                try StillImageProjectModel.require(reference.path == source.url.standardizedFileURL.path &&
+                    reference.image == .init(source.descriptor) && reference.size == source.descriptor.identity.size &&
+                    reference.modifiedNs == source.descriptor.identity.modifiedNs, "validation does not match persisted image")
+                guard FileIdentity.of(source.url) == source.descriptor.identity else { throw StillImageProbeError.changed }
+            }
+            self.reference = reference; validated = source
+        }
+        static func == (a: Self, b: Self) -> Bool {
+            a.reference == b.reference && a.descriptor == b.descriptor && a.validated?.url == b.validated?.url
+        }
+    }
+    case temporal(MediaRef)
+    case stillImage(StillSource)
+    var temporal: MediaRef? { if case .temporal(let r)=self { return r }; return nil }
+    var still: StillSource? { if case .stillImage(let r)=self { return r }; return nil }
+    var id: UUID { switch self { case .temporal(let r): return r.id; case .stillImage(let r): return r.reference.id } }
+    var kind: Kind { switch self { case .temporal(let r): return r.hasVideo ? .video : .audio; case .stillImage: return .stillImage } }
+    var hasVideoTrack: Bool { kind == .video }
+    var hasVisualContent: Bool { kind != .audio }
+    var hasAudio: Bool { temporal?.hasAudio ?? false }
+    var sourceFrames: Int? { temporal?.frameCount }
+}

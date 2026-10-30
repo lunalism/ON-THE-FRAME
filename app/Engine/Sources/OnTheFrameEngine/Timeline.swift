@@ -3,6 +3,7 @@ import Foundation
 /// 타임라인의 클립. 타임라인 구간 [start, start + length) 타임라인 프레임(30 fps), 원본 구간 [sourceIn, sourceIn + length)는
 /// 원본 트랙 시작에서 잰 시각을 같은 1/30 s 단위로 나타낸다(A-010: 원본 프레임레이트와 무관, 29.97·25·가변 원본 포함).
 /// 타임라인 프레임 k의 원본 시각은 정확히 (sourceIn + k − start)/30 s이고, 그 시각에 표시 중인 원본 프레임(영상)·소리(소리 레인)가 나온다.
+/// 정지 이미지: sourceIn은 0이며 length는 타임라인 표시 길이일 뿐 원본 구간·프레임 수가 아니다.
 /// A-012: 클립은 영상 레인 또는 소리(오디오) 레인에 있다(A-014부터 각 종류 여러 레인). 같은 link 값을 가진 영상·소리 클립 한 쌍이 "연결된 쌍"이다.
 public struct Clip: Sendable, Equatable, Identifiable, Codable {
     public let id: UUID
@@ -369,8 +370,12 @@ public struct Timeline: Sendable, Equatable {
     /// 스펙트럼 클립(2026-10-25, SP-1A, 형식 8): 스펙트럼 레인의 독립 항목(레인 순서, 같은 레인 안에서는 시작 순). Spectrum.swift 참고.
     public let spectra: [SpectrumItem]
     public let lanes: [Lane]
-    /// 프로젝트의 원본 미디어 목록(가져온 순서). 타임라인에 쓰지 않은 미디어도 포함한다(A-013).
-    public let media: [MediaRef]
+    /// Legacy temporal source list (including unused temporal references).
+    /// Legacy temporal projection. Capability checks must inspect mediaCatalog first.
+    public var media: [MediaRef] { mediaCatalog.compactMap(\.temporal) }
+    private(set) var mediaCatalog: [OperationalMedia]
+    var stillImageIDs: Set<UUID> { Set(mediaCatalog.filter { $0.kind == .stillImage }.map(\.id)) }
+    func isStillImage(_ id: UUID) -> Bool { mediaCatalog.contains { $0.id == id && $0.kind == .stillImage } }
     /// 미디어 id → 원본 프레임 수(범위 검사용)
     public let mediaFrames: [UUID: Int]
     /// 미디어 id → 소리 트랙이 있는가(삽입 때 연결된 소리 클립을 만들지)
@@ -394,7 +399,7 @@ public struct Timeline: Sendable, Equatable {
         let v = normalize(clips, .video), a = normalize(audioClips, .audio)
         let s = subtitles.sorted { (order[$0.lane] ?? Int.max, $0.start) < (order[$1.lane] ?? Int.max, $1.start) }
         let sp = spectra.sorted { (order[$0.lane] ?? Int.max, $0.start) < (order[$1.lane] ?? Int.max, $1.start) }
-        self.clips = v; self.audioClips = a; self.subtitles = s; self.spectra = sp; self.lanes = lanes; self.media = media
+        self.clips = v; self.audioClips = a; self.subtitles = s; self.spectra = sp; self.lanes = lanes; self.mediaCatalog = media.map(OperationalMedia.temporal)
         // 미디어 목록에 있는데 영상 유무 표가 비어 있으면 목록 값으로 채운다(같은 뜻의 두 표현을 같게)
         var hv = mediaHasVideo
         for r in media where hv[r.id] == nil { hv[r.id] = r.hasVideo }
@@ -403,8 +408,59 @@ public struct Timeline: Sendable, Equatable {
     }
     func rebuilt(video: [Clip]? = nil, audio: [Clip]? = nil, subtitles subs: [SubtitleItem]? = nil, spectra sps: [SpectrumItem]? = nil, lanes: [Lane]? = nil, media: [MediaRef]? = nil,
                  mediaFrames: [UUID: Int]? = nil, mediaHasAudio: [UUID: Bool]? = nil, mediaHasVideo: [UUID: Bool]? = nil, duration: Int? = nil) -> Timeline {
-        Timeline(clips: video ?? clips, audioClips: audio ?? audioClips, subtitles: subs ?? subtitles, spectra: sps ?? spectra, lanes: lanes ?? self.lanes, media: media ?? self.media, mediaFrames: mediaFrames ?? self.mediaFrames,
+        var result = Timeline(clips: video ?? clips, audioClips: audio ?? audioClips, subtitles: subs ?? subtitles, spectra: sps ?? spectra, lanes: lanes ?? self.lanes, media: media ?? self.media, mediaFrames: mediaFrames ?? self.mediaFrames,
                  mediaHasAudio: mediaHasAudio ?? self.mediaHasAudio, mediaHasVideo: mediaHasVideo ?? self.mediaHasVideo, durationFrames: duration ?? durationFrames)
+        // Preserve the complete catalog through every immutable edit, including unused images.
+        var remaining = result.mediaCatalog
+        result.mediaCatalog = self.mediaCatalog.compactMap { old in
+            if old.kind == .stillImage { return old }
+            guard let i = remaining.firstIndex(where: { $0.id == old.id }) else { return nil }
+            return remaining.remove(at:i)
+        } + remaining
+        return result
+    }
+
+    /// Atomic internal restoration, not an import, access grant, or production format-9 reader.
+    static func restoring(_ project: StillImageProjectModel.Project,
+                          validatedImages: [UUID: StillImageProjectModel.ValidatedImage] = [:]) throws -> Timeline {
+        try project.validate() // Validate before Dictionary/init arithmetic or normalization.
+        let imageIDs = Set(project.media.compactMap { $0.ref.still?.id })
+        try StillImageProjectModel.require(Set(validatedImages.keys).isSubset(of:imageIDs), "unknown image validation")
+        let catalog: [OperationalMedia] = try project.media.map { entry in
+            if let r = entry.ref.temporal { return .temporal(r) }
+            guard let r = entry.ref.still else { throw StillImageProjectModel.Failure.invalid("media payload") }
+            return .stillImage(try .init(persisted:r,validated:validatedImages[r.id]))
+        }
+        let temporal = catalog.compactMap(\.temporal)
+        var result = Timeline(clips:project.videoClips,audioClips:project.audioClips,
+            subtitles:project.subtitles ?? [],spectra:project.spectra ?? [],lanes:project.lanes,media:temporal,
+            mediaFrames:Dictionary(uniqueKeysWithValues:temporal.map { ($0.id,$0.frameCount) }),
+            mediaHasAudio:Dictionary(uniqueKeysWithValues:catalog.map { ($0.id,$0.hasAudio) }),
+            mediaHasVideo:Dictionary(uniqueKeysWithValues:catalog.map { ($0.id,$0.hasVideoTrack) }),durationFrames:project.durationFrames)
+        result.mediaCatalog = catalog
+        try StillImageProjectModel.require(result.isValid && result.durationFrames == project.durationFrames, "restored timeline invariants")
+        return result
+    }
+
+    /// Full probe validation precedes engine-only registration; no normal import entry point.
+    func registeringImage(_ source: StillImageProjectModel.ValidatedImage, id: UUID = UUID()) throws -> Timeline {
+        try Task.checkCancellation()
+        guard FileIdentity.of(source.url) == source.descriptor.identity else { throw StillImageProbeError.changed }
+        guard !mediaCatalog.contains(where: { $0.id == id }), mediaFrames[id] == nil else { throw EditError.unknownMedia }
+        var audio = mediaHasAudio, video = mediaHasVideo
+        audio[id] = false; video[id] = false
+        var result = rebuilt(mediaHasAudio:audio,mediaHasVideo:video)
+        result.mediaCatalog.append(.stillImage(.init(source,id:id)))
+        return try checked(result)
+    }
+    static let defaultImageFrames = 150
+    func placingImage(media id: UUID, at start: Int, lane: UUID, length: Int = defaultImageFrames, clipID: UUID = UUID()) throws -> Timeline {
+        guard isStillImage(id) else { throw EditError.unknownMedia }
+        guard length >= 1 else { throw EditError.tooShort }
+        guard start >= 0, length <= Self.maxFrames, start <= Self.maxFrames - length else { throw EditError.frameLimit }
+        guard laneInfo(lane)?.kind == .video else { throw EditError.laneKindMismatch }
+        let clip = Clip(id:clipID,mediaID:id,start:start,sourceIn:0,length:length,lane:lane)
+        return try checked(rebuilt(video:clips+[clip],duration:max(durationFrames,start+length)))
     }
 
     // MARK: 레인
@@ -500,7 +556,12 @@ public struct Timeline: Sendable, Equatable {
         if let firstSpec = lanes.firstIndex(where: { $0.kind == .spectrum }), let lastSub = lanes.lastIndex(where: { $0.kind == .subtitle }), lastSub > firstSpec { return false }
         let allIDs = clips.map(\.id) + audioClips.map(\.id) + subtitles.map(\.id) + spectra.map(\.id)
         guard Set(allIDs).count == allIDs.count else { return false }
-        guard (clips + audioClips).allSatisfy({ mediaFrames[$0.mediaID] != nil }) else { return false }
+        guard Set(mediaCatalog.map(\.id)).count == mediaCatalog.count else { return false }
+        let images = stillImageIDs
+        guard images.allSatisfy({ mediaFrames[$0] == nil && mediaHasAudio[$0] != true && mediaHasVideo[$0] != true }) else { return false }
+        guard audioClips.allSatisfy({ !images.contains($0.mediaID) }) else { return false }
+        guard (clips + audioClips).allSatisfy({ mediaFrames[$0.mediaID] != nil || images.contains($0.mediaID) }) else { return false }
+        guard clips.filter({ images.contains($0.mediaID) }).allSatisfy({ $0.sourceIn == 0 && $0.link == nil && $0.audio == nil && $0.origin == nil && $0.start <= Self.maxFrames - $0.length }) else { return false }
         let kinds = Dictionary(uniqueKeysWithValues: lanes.map { ($0.id, $0.kind) })
         guard clips.allSatisfy({ $0.lane.flatMap { kinds[$0] } == .video }), audioClips.allSatisfy({ $0.lane.flatMap { kinds[$0] } == .audio }) else { return false }
         guard clips.allSatisfy({ $0.transform?.isValid ?? true }), audioClips.allSatisfy({ $0.transform == nil }) else { return false }
@@ -556,15 +617,17 @@ public struct Timeline: Sendable, Equatable {
     /// 첫 오디오 레인부터 찾은, 프레임 n을 덮는 소리 클립의 위치
     public func audioClipIndex(atFrame n: Int) -> Int? { audioClips.firstIndex { n >= $0.start && n < $0.end } }
     /// 타임라인 프레임 n → 보이는 영상의 (미디어, 원본 위치(1/30 s 단위 원본 시각)). 빈틈이면 nil.
+    /// Temporal-source query: still images have no source frame and return nil.
     public func source(atFrame n: Int) -> (mediaID: UUID, frame: Int)? {
-        guard let i = clipIndex(atFrame: n) else { return nil }
+        guard let i = clipIndex(atFrame: n), !isStillImage(clips[i].mediaID) else { return nil }
         return (clips[i].mediaID, clips[i].sourceIn + n - clips[i].start)
     }
     public func laneName(_ kind: LaneKind) -> String { primaryLane(kind)?.name ?? "" }
 
     /// 보이는 영상 조각(A-014): 각 시각에 클립이 있는 가장 위 영상 레인의 클립 부분만, 시간 순·겹침 없음.
     /// 프리뷰·내보내기의 영상 트랙은 이 조각으로 만든다(불투명 전체 화면 하드 컷이라 겹친 아래 레인은 보이지 않는다).
-    /// 조각은 원래 클립의 id·미디어·원본 위치를 이어받는다(원본 시각 = sourceIn + (t − start)).
+    /// 조각은 원래 클립의 id·미디어를 이어받는다. 영상은 sourceIn + (t − start), 정지 이미지는 항상 sourceIn 0.
+    /// 정상 렌더링 진입점은 이 유틸리티보다 먼저 전체 카탈로그의 capability를 검사한다.
     public func visibleVideoSegments() -> [Clip] {
         var bounds = Set<Int>()
         for c in clips { bounds.insert(c.start); bounds.insert(c.end) }
@@ -576,7 +639,7 @@ public struct Timeline: Sendable, Equatable {
             if let last = out.last, last.id == top.id, last.end == lo {
                 out[out.count - 1] = last.with(length: last.length + (hi - lo))
             } else {
-                out.append(top.with(start: lo, sourceIn: top.sourceIn + (lo - top.start), length: hi - lo))
+                out.append(top.with(start: lo, sourceIn: isStillImage(top.mediaID) ? 0 : top.sourceIn + (lo - top.start), length: hi - lo))
             }
         }
         return out
@@ -584,6 +647,8 @@ public struct Timeline: Sendable, Equatable {
 
     /// 미디어 등록(가져오기): 범위 검사 정보와 미디어 목록(MediaRef)에 넣는다. 이미 있으면 정보만 갱신한다.
     public func registering(_ asset: MediaAsset) -> Timeline {
+        // Nonthrowing legacy registration cannot replace an image with a temporal source.
+        guard !isStillImage(asset.id) else { return self }
         var m = mediaFrames; m[asset.id] = asset.frameCount
         var h = mediaHasAudio; h[asset.id] = asset.hasAudio
         var hv = mediaHasVideo; hv[asset.id] = asset.hasVideo
@@ -649,6 +714,17 @@ public struct Timeline: Sendable, Equatable {
     /// 위치는 그 레인 clips[index]의 시작, 또는 타임라인 끝. 그 지점에 다른 클립이 걸쳐 있으면 거부한다. 영상·소리는 첫 레인에 들어간다.
     /// 소리 파일(영상 없음)은 첫 오디오 레인에 소리 클립만 넣는다.
     public func inserting(media id: UUID, at index: Int? = nil, clipID: UUID = UUID(), audioClipID: UUID = UUID(), linkID: UUID = UUID()) throws -> Timeline {
+        if isStillImage(id) {
+            let pv = primaryLane(.video).map { clips(inLane:$0.id) } ?? []
+            let i = index ?? pv.count
+            guard (0...pv.count).contains(i) else { throw EditError.badIndex }
+            let p = i < pv.count ? pv[i].start : durationFrames, n = Self.defaultImageFrames
+            guard p <= Self.maxFrames - n, durationFrames <= Self.maxFrames - n else { throw EditError.frameLimit }
+            guard !crossing(at:p,excluding:[]) else { throw EditError.crossingContent }
+            guard let lane = primaryLane(.video)?.id else { throw EditError.unknownLane }
+            let shifted = rebuilt(video:shifted(clips,from:p,by:n),audio:shifted(audioClips,from:p,by:n),subtitles:shiftedSubtitles(from:p,by:n),spectra:shiftedSpectra(from:p,by:n),duration:durationFrames+n)
+            return try shifted.placingImage(media:id,at:p,lane:lane,length:n,clipID:clipID)
+        }
         guard let n = mediaFrames[id], n >= 1 else { throw EditError.unknownMedia }
         let pv = primaryLane(.video).map { clips(inLane: $0.id) } ?? []
         let i = index ?? pv.count
@@ -667,6 +743,10 @@ public struct Timeline: Sendable, Equatable {
     /// 소리 파일이면 소리만 audioLane에 놓는다. 어느 쪽이든 겹치면 아무것도 놓지 않고 거부한다. 끝을 넘으면 길이가 늘어난다.
     public func placing(media id: UUID, at start: Int, videoLane: UUID?, audioLane: UUID?, clipID: UUID = UUID(), audioClipID: UUID = UUID(),
                         linkID: UUID = UUID()) throws -> Timeline {
+        if isStillImage(id) {
+            guard let lane = videoLane, audioLane == nil else { throw EditError.laneKindMismatch }
+            return try placingImage(media:id,at:start,lane:lane,clipID:clipID)
+        }
         guard let n = mediaFrames[id], n >= 1 else { throw EditError.unknownMedia }
         guard start >= 0 else { throw EditError.badIndex }
         let video = mediaHasVideo[id] ?? true, audio = mediaHasAudio[id] ?? false
@@ -688,8 +768,8 @@ public struct Timeline: Sendable, Equatable {
     /// 시작은 고른 레인들의 마지막 끝 가운데 가장 늦은 값이라 어느 레인에서도 겹치지 않는다. 다른 레인과 기존 빈틈은 그대로다.
     public func appending(media id: UUID, videoLane: UUID?, audioLane: UUID?, clipID: UUID = UUID(), audioClipID: UUID = UUID(),
                           linkID: UUID = UUID()) throws -> Timeline {
-        guard mediaFrames[id] != nil else { throw EditError.unknownMedia }
-        let video = mediaHasVideo[id] ?? true, audio = mediaHasAudio[id] ?? false
+        guard mediaFrames[id] != nil || isStillImage(id) else { throw EditError.unknownMedia }
+        let video = isStillImage(id) || (mediaHasVideo[id] ?? true), audio = mediaHasAudio[id] ?? false
         var used: [UUID] = []
         if video { guard let v = videoLane else { throw EditError.laneKindMismatch }; used.append(v) }
         if audio { guard let a = audioLane else { throw EditError.laneKindMismatch }; used.append(a) }
@@ -727,6 +807,12 @@ public struct Timeline: Sendable, Equatable {
     public func splitting(clip id: UUID, atFrame at: Int, newIDs: (UUID, UUID) = (UUID(), UUID())) throws -> Timeline {
         guard let c = clip(id) else { throw EditError.unknownClip }
         guard at > c.start, at < c.end else { throw EditError.splitAtBoundary }
+        if isStillImage(c.mediaID) {
+            guard newIDs.0 != newIDs.1, newIDs.0 != id, newIDs.1 != id else { throw EditError.badIndex }
+            let left = c.with(sourceIn:0,length:at-c.start,id:newIDs.0)
+            let right = c.with(start:at,sourceIn:0,length:c.end-at,id:newIDs.1)
+            return try checked(rebuilt(video:clips.filter { $0.id != id } + [left,right]))
+        }
         let k = c.sourceIn + (at - c.start)   // 원본 위치
         let rightLink: UUID? = c.link == nil ? nil : UUID()
         var v = clips, a = audioClips
@@ -751,10 +837,15 @@ public struct Timeline: Sendable, Equatable {
     public func trimming(clip id: UUID, sourceIn: Int, length: Int) throws -> Timeline {
         guard let c = clip(id) else { throw EditError.unknownClip }
         guard length >= 1 else { throw EditError.tooShort }
+        if isStillImage(c.mediaID) {
+            guard sourceIn == 0 else { throw EditError.outOfSource }
+            guard length <= Self.maxFrames, c.start <= Self.maxFrames - length else { throw EditError.frameLimit }
+        }
         let dIn = sourceIn - c.sourceIn, dLen = length - c.length
         let g = group(of: id), ids = Set(g.map(\.id))
         var changed: [UUID: Clip] = [:]
         for m in g {
+            if isStillImage(m.mediaID) { changed[m.id] = m.with(length:length); continue }
             guard let n = mediaFrames[m.mediaID] else { throw EditError.unknownMedia }
             let si = m.sourceIn + dIn, len = m.length + dLen
             guard len >= 1 else { throw EditError.tooShort }
@@ -775,6 +866,10 @@ public struct Timeline: Sendable, Equatable {
     /// 왼쪽 가장자리를 delta 프레임 옮긴다(양수 = 안쪽으로). 묶음 모두의 원본 범위·최소 1프레임 안으로 제한한다.
     public func trimmingStart(clip id: UUID, by delta: Int) throws -> Timeline {
         guard let c = clip(id) else { throw EditError.unknownClip }
+        if isStillImage(c.mediaID) {
+            guard (-Self.maxFrames...Self.maxFrames).contains(delta) else { throw EditError.frameLimit }
+            return try trimming(clip:id,sourceIn:0,length:max(1,c.length-delta))
+        }
         let g = group(of: id)
         let d = max(g.map { -$0.sourceIn }.max()!, min(delta, g.map { $0.length - 1 }.min()!))
         return try trimming(clip: id, sourceIn: c.sourceIn + d, length: c.length - d)
@@ -782,6 +877,10 @@ public struct Timeline: Sendable, Equatable {
     /// 오른쪽 가장자리를 delta 프레임 옮긴다(양수 = 바깥쪽으로).
     public func trimmingEnd(clip id: UUID, by delta: Int) throws -> Timeline {
         guard let c = clip(id) else { throw EditError.unknownClip }
+        if isStillImage(c.mediaID) {
+            guard (-Self.maxFrames...Self.maxFrames).contains(delta) else { throw EditError.frameLimit }
+            return try trimming(clip:id,sourceIn:0,length:max(1,c.length+delta))
+        }
         let g = group(of: id)
         var hi = Int.max
         for m in g { guard let n = mediaFrames[m.mediaID] else { throw EditError.unknownMedia }; hi = min(hi, n - m.sourceOut) }
@@ -820,6 +919,9 @@ public struct Timeline: Sendable, Equatable {
     /// 원래 자리는 빈틈이 된다. 끝을 넘어가면 타임라인 길이가 늘어난다.
     public func relocating(clip id: UUID, toStart: Int? = nil, lane: UUID? = nil, partnerLane: UUID? = nil) throws -> Timeline {
         guard let c = clip(id) else { throw EditError.unknownClip }
+        if isStillImage(c.mediaID), let start = toStart {
+            guard start >= 0, start <= Self.maxFrames - c.length else { throw EditError.frameLimit }
+        }
         let d = (toStart ?? c.start) - c.start
         let g = group(of: id), ids = Set(g.map(\.id))
         var moved: [Clip] = []
@@ -1070,10 +1172,16 @@ extension Timeline {
     public func pasting(_ content: ClipboardContent, at: Int, newLaneName: (LaneKind) -> String) throws -> PasteResult {
         guard !content.isEmpty else { throw EditError.clipboardEmpty }
         guard at >= 0 else { throw EditError.badIndex }
+        guard at <= Self.maxFrames else { throw EditError.frameLimit }
         for c in content.all {
+            guard (0...Self.maxFrames).contains(c.start), (0...Self.maxFrames).contains(c.sourceIn), (1...Self.maxFrames).contains(c.length) else { throw EditError.frameLimit }
+            if isStillImage(c.mediaID) {
+                guard content.video.contains(where: { $0.id == c.id }), !content.audio.contains(where: { $0.id == c.id }), c.sourceIn == 0, c.link == nil, c.audio == nil, c.origin == nil else { throw EditError.clipboardMismatch }
+                continue
+            }
             guard let n = mediaFrames[c.mediaID], c.sourceIn >= 0, c.length >= 1, c.sourceOut <= n else { throw EditError.clipboardMismatch }
         }
-        for c in content.video { guard mediaHasVideo[c.mediaID] ?? true else { throw EditError.clipboardMismatch } }
+        for c in content.video { guard isStillImage(c.mediaID) || (mediaHasVideo[c.mediaID] ?? true) else { throw EditError.clipboardMismatch } }
         for c in content.audio { guard mediaHasAudio[c.mediaID] ?? false else { throw EditError.clipboardMismatch } }
         // 연결: 묶음 안에서 영상 1 + 소리 1인 연결만 새 ID로 잇는다(짝이 묶음에 없으면 연결 없이 — 복사는 늘 짝을 함께 담는다)
         var linkCount: [UUID: (v: Int, a: Int)] = [:]
