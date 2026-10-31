@@ -30,7 +30,7 @@ enum SubtitleExporter {
     struct Injected: Error {}
 
     /// 쓰기. 취소는 작업(Task) 취소, 결과는 성공 또는 오류(CancellationError·Injected·그 밖)다. tempFile만 만든다.
-    static func encode(_ p: PlannedComposition, to tempFile: URL, failAfterFraction: Double?, progress: @escaping @Sendable (Double) async -> Void) async throws {
+    static func encode(_ p: PlannedComposition, to tempFile: URL, failAfterFraction: Double?, progress: @escaping @Sendable (Double) async -> Void, strictFrameGrid: Bool = false) async throws {
         let n = p.durationFrames
         // 발자국은 자막 구간에 들어설 때 만들고 끝나면 버린다(2026-10-23 측정: 효과 자막 200개를 미리 만들면 내보내기 내내 약 118 MB를 붙잡았다)
         let footprints = FootprintWindow(p.subtitles)
@@ -60,7 +60,7 @@ enum SubtitleExporter {
         guard writer.startWriting() else { reader.cancelReading(); throw writer.error ?? NSError(domain: "SubtitleExporter", code: 2) }
         writer.startSession(atSourceTime: .zero)
 
-        let pump = Pump(n: n)
+        let pump = Pump(n: n, strictFrameGrid:strictFrameGrid)
         let io = IO(reader: reader, vOut: vOut, vIn: vIn, adaptor: adaptor, aOut: aOut, aIn: aIn)
         let watcher = Task {   // 진행률: 쓴 프레임 수 / 전체 × 0.99(줄어들지 않게)
             var last = -1
@@ -110,11 +110,12 @@ enum SubtitleExporter {
     /// 쓰기 상태(잠금으로 보호). 영상 단계는 영상 큐에서만, 소리 단계는 소리 큐에서만 부른다.
     final class Pump: @unchecked Sendable {
         let n: Int
+        let strictFrameGrid: Bool
         private let lock = NSLock()
         private var _error: Error?, _written = 0, _finished = false
         var readerSamples = 0
-        private var k = 0, current: CVPixelBuffer?, next: (CMTime, CVPixelBuffer)?, primed = false, videoDone = false, audioDone = false
-        init(n: Int) { self.n = n }
+        private var k = 0, current: CVPixelBuffer?, currentTime = CMTime.invalid, next: (CMTime, CVPixelBuffer)?, primed = false, videoDone = false, audioDone = false
+        init(n: Int, strictFrameGrid: Bool = false) { self.n = n; self.strictFrameGrid = strictFrameGrid }
         var error: Error? { lock.lock(); defer { lock.unlock() }; return _error }
         var written: Int { lock.lock(); defer { lock.unlock() }; return _written }
         var finished: Bool { lock.lock(); defer { lock.unlock() }; return _finished }
@@ -137,7 +138,10 @@ enum SubtitleExporter {
                 if error != nil { finish(); return }
                 if k >= n { finish(); return }
                 let t = CMTime(value: CMTimeValue(k), timescale: 30)
-                while let s = next, CMTimeCompare(s.0, t) <= 0 { current = s.1; next = nextSample(io) }
+                while let s = next, CMTimeCompare(s.0, t) <= 0 { current = s.1; currentTime = s.0; next = nextSample(io) }
+                if strictFrameGrid && CMTimeCompare(currentTime,t) != 0 {
+                    fail(ExportFailure.export("이미지 합성 프레임 PTS가 다릅니다(\(k)).")); finish(); return
+                }
                 guard let src = current else { fail(ExportFailure.export("영상 프레임 \(k)을 만들지 못했습니다(합성 출력 없음).")); finish(); return }
                 guard CVPixelBufferGetPixelFormatType(src) == SubtitleExporter.pixelFormat, CVPixelBufferGetWidth(src) == 1920, CVPixelBufferGetHeight(src) == 1080 else {
                     fail(ExportFailure.export("합성 출력 형식이 예상과 다릅니다(프레임 \(k)).")); finish(); return

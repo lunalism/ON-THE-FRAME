@@ -101,7 +101,55 @@ public enum ExportService {
     public static func export(_ p: PlannedComposition, to d: ExportDestination, sources: [MediaAsset],
                               options: Options = Options(), stage: @escaping @Sendable (ExportStage) async -> Void = { _ in },
                               progress: @escaping @Sendable (Double) async -> Void) async -> ExportOutcome {
-        guard !p.imagePreviewOnly else { return .failed(.export("내부 이미지 프리뷰 구성은 내보낼 수 없습니다.")) }
+        await exportPrepared(p, to:d, sources:sources, options:options, stage:stage, progress:progress)
+    }
+
+    /// Explicit internal capability. The app supplies its compile + runtime gate;
+    /// ordinary plans and direct preview-plan exports retain their original fence.
+    public static func exportImages(_ timeline: Timeline, media: [UUID:MediaAsset], enabled: Bool,
+                                    resolvedImages: [UUID:URL] = [:], to destination: ExportDestination,
+                                    settings: RenderSettings = .m1, options: Options = Options(),
+                                    stage: @escaping @Sendable (ExportStage) async -> Void = { _ in },
+                                    progress: @escaping @Sendable (Double) async -> Void) async -> ExportOutcome {
+        guard enabled else { return .failed(.export("내부 이미지 내보내기가 꺼져 있습니다.")) }
+        guard timeline.isValid, InternalImagePreview.containsImages(timeline), timeline.durationFrames > 0 else {
+            return .failed(.export("이미지 타임라인이 필요합니다."))
+        }
+        guard timeline.spectra.isEmpty else { return .failed(.export("스펙트럼 내보내기는 아직 지원하지 않습니다.")) }
+        var scopes = [URL](), identities = [URL:FileIdentity]()
+        defer { for url in scopes { url.stopAccessingSecurityScopedResource() } }
+        do {
+            for entry in timeline.mediaCatalog {
+                guard let image = entry.still else { continue }
+                guard let url = resolvedImages[entry.id] ?? image.validated?.url, url.isFileURL else {
+                    throw InternalImagePreview.error("이미지 원본 접근·검증이 필요합니다.")
+                }
+                if url.startAccessingSecurityScopedResource() { scopes.append(url) }
+                guard let identity = FileIdentity.of(url) else { throw StillImageProbeError.changed }
+                identities[url] = identity
+            }
+            let plan = try await InternalImagePreview.plan(timeline,media:media,enabled:true,settings:settings,resolvedImages:resolvedImages)
+            return await exportPrepared(plan,to:destination,sources:Array(media.values),options:options,
+                                        stage:stage,progress:progress,imageIdentities:identities)
+        } catch { return Task.isCancelled ? .cancelled : .failed(.export(String(describing:error))) }
+    }
+
+    private static func exportPrepared(_ p: PlannedComposition, to d: ExportDestination, sources: [MediaAsset],
+                                       options: Options, stage: @escaping @Sendable (ExportStage) async -> Void,
+                                       progress: @escaping @Sendable (Double) async -> Void,
+                                       imageIdentities: [URL:FileIdentity] = [:]) async -> ExportOutcome {
+        let imageExport = !imageIdentities.isEmpty
+        if p.imagePreviewOnly && !imageExport { return .failed(.export("내부 이미지 프리뷰 구성은 내보낼 수 없습니다.")) }
+        func imageSafety() -> ExportFailure? {
+            let dest = d.url.standardizedFileURL.resolvingSymlinksInPath(), destID = FileIdentity.of(dest)
+            for (url, identity) in imageIdentities {
+                if url.standardizedFileURL.resolvingSymlinksInPath() == dest || destID?.sameFile(as:identity) == true { return .destinationIsSource }
+                if FileIdentity.of(url) != identity { return .export("내보내는 동안 이미지 원본이 바뀌었습니다.") }
+            }
+            return nil
+        }
+        if Task.isCancelled { return .cancelled }
+        if let f = imageSafety() { return .failed(f) }
         if let f = validate(d, sources: sources) { return .failed(f) }
         // 스펙트럼(2026-10-25, SP-1A 1단계): 내보내기 그리기가 아직 없다 — 스펙트럼을 조용히 빼고 내보내지 않도록 대상 파일·임시 폴더 전에 거부한다.
         if !p.spectra.isEmpty {
@@ -124,14 +172,14 @@ public enum ExportService {
 
         await stage(.encoding)
         let result: Result<Void, Error>
-        if p.subtitles.isEmpty {
+        if p.subtitles.isEmpty && !imageExport {
             // 자막이 없는 프로젝트: 지금까지의 내보내기 세션 경로 그대로
             let (r, injected) = await encodeWithSession(p, to: tempFile, options: options, progress: progress)
             if injected { return .failed(.injected) }
             result = r
         } else {
             // 자막이 있는 프로젝트: 구조 R(기본 합성기 리더 → 4:2:0 자막 → 쓰기, SubtitleExporter)
-            do { try await SubtitleExporter.encode(p, to: tempFile, failAfterFraction: options.failAfterFraction, progress: progress); result = .success(()) }
+            do { try await SubtitleExporter.encode(p, to: tempFile, failAfterFraction: options.failAfterFraction, progress: progress, strictFrameGrid:imageExport); result = .success(()) }
             catch is SubtitleExporter.Injected { return .failed(.injected) }
             catch let e as ExportFailure { return .failed(e) }
             catch { result = .failure(error) }
@@ -160,6 +208,7 @@ public enum ExportService {
         options.beforePromotion?()
         // 마무리(검증) 중 취소(CP-13): 승격 직전에 다시 본다. 취소했으면 결과를 옮기지 않고 임시 파일만 지운다.
         if Task.isCancelled { return .cancelled }
+        if let f = imageSafety() { return .failed(f) }
         let outcome = promote(tempFile, to: d, sources: sources)
         if case .completed = outcome { await progress(1) }   // 검증·승격 성공 뒤에만 1.0
         return outcome

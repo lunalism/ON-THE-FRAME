@@ -532,7 +532,7 @@ final class ProjectStore {
         panel.allowedContentTypes = [.jpeg, .png]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.message = "내부 시험용 JPEG/PNG: 최대 8 MiB·2048 px. 이미지 프리뷰·내보내기는 지원하지 않습니다."
+        panel.message = "내부 시험용 JPEG/PNG: 최대 8 MiB·2048 px. 공개 이미지 기능이 아닙니다."
         guard runPanel(panel) == .OK, let url = panel.url else { return }
         requestStillImageImport(url)
     }
@@ -604,7 +604,7 @@ final class ProjectStore {
             selection = cid; linkCandidate = nil
             Self.trace.info("internal image import committed media=\(mid.uuidString, privacy: .public) clip=\(cid.uuidString, privacy: .public) sourceIn=0 length=150 scopeTransferred=\(acquired, privacy: .public) sessionScopes=\(self.scopedURLs.count, privacy: .public) bookmarks=\(self.bookmarks.count, privacy: .public)")
             timelineChanged()
-            statusMessage = "내부 시험 이미지 추가 완료. 이미지 프리뷰·내보내기는 아직 지원하지 않습니다."
+            statusMessage = "내부 시험 이미지 추가 완료."
             return true
         } catch {
             Self.trace.info("internal image import rejected before commit")
@@ -1819,6 +1819,9 @@ final class ProjectStore {
     /// 내보내기 시작. 가져오는 중이면 끝난 뒤 시작한다(대기열, 일반 화면에서는 가져오는 동안 내보내기 단추가 꺼져 있다).
     func startExport(_ d: ExportDestination) {
         guard !discardConfirmed, !editorClosedByUser else { return }
+        if InternalImagePreview.containsImages(timeline), let reason = exportBlockReason {
+            presentAlert(AlertInfo(title:"내보낼 수 없습니다",message:reason)); return
+        }
         pendingOps.append(.export(d))
         runNextOp()
     }
@@ -1826,8 +1829,10 @@ final class ProjectStore {
     /// 실제 내보내기 작업 시작. 경과 시간은 여기서(저장 패널을 닫은 뒤) 재기 시작해 준비·인코딩·검증·승격을 모두 포함하고,
     /// 성공·실패·취소가 끝난 시점에 멈춘다. 내보내기마다 추정을 새로 시작한다.
     private func beginExport(_ d: ExportDestination) {
-        guard supportedProductionTimeline(ProductionContent(timeline)) != nil else { runNextOp(); return }
+        let imageExport = Self.imageImportEnabled && InternalImagePreview.containsImages(timeline)
+        guard imageExport || supportedProductionTimeline(ProductionContent(timeline)) != nil else { runNextOp(); return }
         let snap = timeline, media = mediaByID, s = settings, sources = assets, options = exportOptions
+        let imageURLs = imageSourceURLs
         exportEstimator.reset(at: monoSeconds())
         exportCancelling = false
         lastExportElapsed = nil
@@ -1839,11 +1844,19 @@ final class ProjectStore {
         exportTask = Task {
             let outcome: ExportOutcome
             do {
-                let plan = try await CompositionPlanner.plan(snap, media: media, settings: s)   // 시작 시점 스냅샷
-                if Task.isCancelled { outcome = .cancelled } else {
-                    outcome = await ExportService.export(plan, to: d, sources: sources, options: options,
-                                                         stage: { st in await MainActor.run { ProjectStore.shared.reportExportStage(st) } }) { p in
-                        await MainActor.run { ProjectStore.shared.reportExportProgress(p) }   // 순서대로 전달
+                if imageExport {
+                    outcome = await ExportService.exportImages(snap,media:media,enabled:Self.imageImportEnabled,
+                        resolvedImages:imageURLs,to:d,settings:s,options:options,
+                        stage:{ st in await MainActor.run { ProjectStore.shared.reportExportStage(st) } }) { p in
+                            await MainActor.run { ProjectStore.shared.reportExportProgress(p) }
+                        }
+                } else {
+                    let plan = try await CompositionPlanner.plan(snap, media: media, settings: s)   // 시작 시점 스냅샷
+                    if Task.isCancelled { outcome = .cancelled } else {
+                        outcome = await ExportService.export(plan, to: d, sources: sources, options: options,
+                                                             stage: { st in await MainActor.run { ProjectStore.shared.reportExportStage(st) } }) { p in
+                            await MainActor.run { ProjectStore.shared.reportExportProgress(p) }   // 순서대로 전달
+                        }
                     }
                 }
             } catch { outcome = Task.isCancelled ? .cancelled : .failed(.export("\(error)")) }
@@ -2113,11 +2126,17 @@ extension ProjectStore {
     }
     /// 내보내기를 할 수 없는 이유(찾을 수 없는 원본, 또는 영상 원본이 하나도 없음)
     var exportBlockReason: String? {
-        do { _ = try ProductionContent(timeline).supportedTimeline() }
-        catch { return String(describing:error) }
+        let internalImages = Self.imageImportEnabled && InternalImagePreview.containsImages(timeline)
+        if !internalImages {
+            do { _ = try ProductionContent(timeline).supportedTimeline() }
+            catch { return String(describing:error) }
+        } else {
+            if !timeline.spectra.isEmpty { return "스펙트럼 내보내기는 아직 지원하지 않습니다." }
+            if !missingMedia.isEmpty { return "원본 접근·검증이 필요해 이미지 프로젝트를 내보낼 수 없습니다." }
+        }
         let names = timeline.media.filter { missingUsedMedia.contains($0.id) }.map(\.name)
         if !names.isEmpty { return "찾을 수 없는 원본 미디어(\(names.joined(separator: ", ")))가 있어 내보낼 수 없습니다. 파일 > 미디어 재연결…로 다시 연결하세요." }
-        if !timeline.isEmpty, !timeline.media.contains(where: { $0.hasVideo && missingMedia[$0.id] == nil }) {
+        if !internalImages, !timeline.isEmpty, !timeline.media.contains(where: { $0.hasVideo && missingMedia[$0.id] == nil }) {
             return "영상 원본이 없어 내보낼 수 없습니다(소리 파일만 있음). 출력 영상(1920×1080)의 바탕을 만들 영상 파일을 하나 이상 가져오세요."
         }
         // 그리지 못하는 자막(2026-10-23): 내보내기 서비스도 같은 판정으로 대상 파일을 건드리기 전에 거부한다

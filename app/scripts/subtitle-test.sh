@@ -4,9 +4,10 @@
 set -euo pipefail
 source "${0:A:h}/derived-data.sh"   # cd 앞에서(상대 경로로 부를 때 ${0:A}가 cd 뒤 위치로 풀리지 않게)
 cd "${0:A:h}/.."
-APP=${APP:-$OTF_DERIVED_DATA/Build/Products/Debug/OnTheFrame.app}
+APP=${APP:-$OTF_DERIVED_DATA/Build/Products/Debug/OnTheFrameSubtitleDiagnostics.app}
 APP=${APP:A}   # 절대 경로(APP를 상대 경로로 줘도 됨)
-[[ -d $APP ]] || { echo "build first: scripts/build.sh"; exit 2 }
+SUBTITLE_TEST_EXECUTABLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist" 2>/dev/null || true)
+[[ -n $SUBTITLE_TEST_EXECUTABLE && -f "$APP/Contents/MacOS/$SUBTITLE_TEST_EXECUTABLE" && -x "$APP/Contents/MacOS/$SUBTITLE_TEST_EXECUTABLE" ]] || { echo "build first: scripts/build-subtitle-diagnostics.sh"; exit 2 }
 swift build --package-path Engine --product otf-dev 2>&1 | grep -E "error|warning:" || true
 Engine/.build/debug/otf-dev fixtures .build/test-work/fixtures > /dev/null
 RUN=selftest-work/subtitle-$(date -u +%Y%m%dT%H%M%SZ)

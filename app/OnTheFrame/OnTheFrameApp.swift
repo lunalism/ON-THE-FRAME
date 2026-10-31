@@ -163,6 +163,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
+        if args.contains("-OTFImageExportTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await ImageExportSelfTest.run(folder:folder) }
+            return
+        }
         if args.contains("-OTFForceDirect") { LaneSelfTest.direct = true }   // 자체 검사를 직접 경로로(앱이 앞에 오지 못할 때의 경로를 재현)
         if args.contains("-OTFSavePanelTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await SavePanelSelfTest.run(folder: folder) }
@@ -201,7 +205,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         if args.contains("-OTFSubtitleTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            #if OTF_SUBTITLE_DIAGNOSTICS
             Task { await SubtitleSelfTest.run(folder: folder) }
+            #else
+            NSLog("Subtitle diagnostics require the OnTheFrameSubtitleDiagnostics Debug target.")
+            NSApp.terminate(nil)
+            #endif
             return
         }
         if args.contains("-OTFToolTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {

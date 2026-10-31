@@ -1,4 +1,4 @@
-#if DEBUG
+#if DEBUG && OTF_SUBTITLE_DIAGNOSTICS
 import AppKit
 import AVFoundation
 import OnTheFrameEngine
