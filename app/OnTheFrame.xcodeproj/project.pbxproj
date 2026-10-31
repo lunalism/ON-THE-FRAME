@@ -8,12 +8,14 @@
 
 /* Begin PBXBuildFile section */
 		0A0000000000000000000001 /* OnTheFrameEngine in Frameworks */ = {isa = PBXBuildFile; productRef = 0A0000000000000000000002 /* OnTheFrameEngine */; };
+		0B0000000000000000000001 /* OnTheFrameEngine in Frameworks */ = {isa = PBXBuildFile; productRef = 0A0000000000000000000002 /* OnTheFrameEngine */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		0A0000000000000000000003 /* OnTheFrame.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OnTheFrame.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0A0000000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		0A0000000000000000000015 /* OnTheFrame.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OnTheFrame.entitlements; sourceTree = "<group>"; };
+		0B0000000000000000000003 /* OnTheFrameSpectrumDiagnostics.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OnTheFrameSpectrumDiagnostics.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -26,6 +28,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				0A0000000000000000000001 /* OnTheFrameEngine in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0B0000000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0B0000000000000000000001 /* OnTheFrameEngine in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -54,6 +64,7 @@
 			isa = PBXGroup;
 			children = (
 				0A0000000000000000000003 /* OnTheFrame.app */,
+				0B0000000000000000000003 /* OnTheFrameSpectrumDiagnostics.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -84,6 +95,29 @@
 			productReference = 0A0000000000000000000003 /* OnTheFrame.app */;
 			productType = "com.apple.product-type.application";
 		};
+		0B0000000000000000000008 /* OnTheFrameSpectrumDiagnostics */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0B000000000000000000000E /* Build configuration list for PBXNativeTarget "OnTheFrameSpectrumDiagnostics" */;
+			buildPhases = (
+				0B0000000000000000000009 /* Sources */,
+				0B0000000000000000000005 /* Frameworks */,
+				0B000000000000000000000A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				0A0000000000000000000004 /* OnTheFrame */,
+			);
+			name = OnTheFrameSpectrumDiagnostics;
+			packageProductDependencies = (
+				0A0000000000000000000002 /* OnTheFrameEngine */,
+			);
+			productName = OnTheFrameSpectrumDiagnostics;
+			productReference = 0B0000000000000000000003 /* OnTheFrameSpectrumDiagnostics.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -112,6 +146,7 @@
 			projectRoot = "";
 			targets = (
 				0A0000000000000000000008 /* OnTheFrame */,
+				0B0000000000000000000008 /* OnTheFrameSpectrumDiagnostics */,
 			);
 		};
 /* End PBXProject section */
@@ -124,10 +159,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		0B000000000000000000000A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		0A0000000000000000000009 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0B0000000000000000000009 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -209,6 +258,28 @@
 			};
 			name = Release;
 		};
+		0B0000000000000000000011 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Config/OnTheFrame.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_USER_SELECTED_FILES = readwrite;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Config/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.ontheframe.spectrumdiagnostics;
+				PRODUCT_NAME = OnTheFrameSpectrumDiagnostics;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) OTF_SPECTRUM_DIAGNOSTICS";
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -229,6 +300,12 @@
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
+		};
+		0B000000000000000000000E /* Build configuration list for PBXNativeTarget "OnTheFrameSpectrumDiagnostics" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (0B0000000000000000000011 /* Debug */,);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
 

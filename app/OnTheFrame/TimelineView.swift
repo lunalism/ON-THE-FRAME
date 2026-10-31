@@ -72,7 +72,7 @@ struct TimelineDrawState: Equatable {
         missing = Set(store.missingMedia.keys)
         tool = store.tool
         missingFonts = Set(store.missingSubtitleFonts)
-        names = Dictionary(uniqueKeysWithValues: store.timeline.media.map { ($0.id, $0.name) })
+        names = Dictionary(uniqueKeysWithValues: ProjectPersistence.references(store.timeline).map { ($0.id, $0.name) })
     }
 }
 

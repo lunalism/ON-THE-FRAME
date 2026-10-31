@@ -40,6 +40,16 @@ final class ProjectStore {
     @ObservationIgnored var assetCache: [String: MediaAsset] = [:]
     /// 미디어 id → 샌드박스 접근 북마크(저장 파일에 넣음)
     @ObservationIgnored var bookmarks: [UUID: Data] = [:]
+    @ObservationIgnored var relativePaths: [UUID: String] = [:]
+    @ObservationIgnored private var imageSourceURLs: [UUID: URL] = [:]
+    #if DEBUG || OTF_PERSIST_TESTS
+    @ObservationIgnored var persistenceBeforeCommitForTest: (() throws -> Void)?
+    @ObservationIgnored var persistenceCandidateForTest: ((Int) async throws -> Void)?
+    @ObservationIgnored var persistenceBookmarkForTest: ((Data) throws -> URL)?
+    @ObservationIgnored var persistenceScopeStartForTest: ((URL) -> Bool)?
+    @ObservationIgnored var persistenceScopeStopForTest: ((URL) -> Void)?
+    #endif
+
     /// 이 프로젝트가 시작한 보안 범위 접근(프로젝트를 바꾸거나 앱을 끝낼 때 모두 멈춘다)
     @ObservationIgnored var scopedURLs: [URL] = []
     var recentProjects: [RecentProject] = []
@@ -365,7 +375,7 @@ final class ProjectStore {
 
     /// 대기열에서 다음 작업을 시작한다(가져오기·내보내기 중 하나만 진행).
     private func runNextOp() {
-        guard openProgress == nil, !openRequested, importProgress == nil, importTask == nil, exportPhase == .idle, exportTask == nil, !pendingOps.isEmpty else { return }
+        guard openProgress == nil, !openRequested, importProgress == nil, importTask == nil, exportPhase == .idle, exportTask == nil, !imageImportBusy, !pendingOps.isEmpty else { return }
         clearImportDone()
         switch pendingOps.removeFirst() {
         case .importFiles(let urls): runImport(urls)
@@ -498,6 +508,111 @@ final class ProjectStore {
     /// 표시 중·대기 중 알림 사본(순서대로). 첫 항목이 화면에 떠 있는 알림이다.
     private var shownAlerts: [AlertInfo] = []
 
+    /// Internal import requires BOTH a custom build and an explicit launch argument.
+    static var imageImportEnabled: Bool {
+        #if OTF_IMAGE_IMPORT
+        return ProcessInfo.processInfo.arguments.contains("-OTFEnableImageImport")
+        #else
+        return false
+        #endif
+    }
+    private(set) var imageImportBusy = false
+    @ObservationIgnored private var imageImportEpoch = 0
+    @ObservationIgnored private var imageImportTask: Task<Void, Never>?
+    #if OTF_PERSIST_TESTS
+    @ObservationIgnored var imageImportBeforeProbeForTest: (() async throws -> Void)?
+    @ObservationIgnored var imageImportDidValidateForTest: (() async throws -> Void)?
+    @ObservationIgnored var imageImportBookmarkForTest: ((URL) throws -> Data)?
+    #endif
+
+    func presentStillImageImportPanel() {
+        guard Self.imageImportEnabled else { statusMessage = "내부 이미지 가져오기가 꺼져 있습니다."; return }
+        guard !fileCommandBlocked(), !imageImportBusy else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.jpeg, .png]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "내부 시험용 JPEG/PNG: 최대 8 MiB·2048 px. 이미지 프리뷰·내보내기는 지원하지 않습니다."
+        guard runPanel(panel) == .OK, let url = panel.url else { return }
+        requestStillImageImport(url)
+    }
+    /// Also used for a single JPEG/PNG Finder-open event in the explicitly gated build.
+    func requestStillImageImport(_ url: URL) {
+        guard Self.imageImportEnabled, !fileCommandBlocked(), !imageImportBusy, imageImportTask == nil else { return }
+        imageImportTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.imageImportTask = nil }
+            _ = await self.importStillImage(at:url)
+        }
+    }
+    func cancelImageImport() {
+        imageImportEpoch += 1
+        imageImportTask?.cancel()
+        if imageImportBusy { statusMessage = "이미지 가져오기를 취소하는 중입니다." }
+    }
+    @discardableResult
+    func importStillImage(at url: URL, atFrame: Int? = nil, lane: UUID? = nil) async -> Bool {
+        // The mutation boundary, not just the menu, enforces development gating.
+        guard Self.imageImportEnabled else { statusMessage = "내부 이미지 가져오기가 꺼져 있습니다."; return false }
+        guard !Task.isCancelled, !imageImportBusy, importTask == nil, exportTask == nil,
+              openProgress == nil, !openRequested, !discardConfirmed, !editorClosedByUser,
+              gestureBase == nil, fileCommandsAvailable else { return false }
+        let before = timeline, session = projectSession, epoch = imageImportEpoch
+        let start = atFrame ?? playhead
+        guard let target = lane ?? addDestination(hasVideo:true,hasAudio:false).video else { return false }
+        imageImportBusy = true
+        statusMessage = "내부 이미지 검증 중: \(url.lastPathComponent)"
+        let acquired = startPersistenceScope(url)
+        var transferred = false
+        defer {
+            if acquired && !transferred { stopPersistenceScope(url) }
+            Self.trace.info("internal image import access retired scopeReleased=\(acquired && !transferred, privacy: .public) scopeTransferred=\(transferred, privacy: .public)")
+            imageImportBusy = false; imageImportTask = nil
+            if session == projectSession, timeline == before, epoch != imageImportEpoch || Task.isCancelled {
+                statusMessage = "이미지 가져오기를 취소했습니다. 프로젝트는 그대로입니다."
+            }
+            runNextOp()
+        }
+        func current() -> Bool {
+            !Task.isCancelled && epoch == imageImportEpoch && session == projectSession && timeline == before
+                && !discardConfirmed && !editorClosedByUser && gestureBase == nil && openProgress == nil && !openRequested
+        }
+        do {
+            #if OTF_PERSIST_TESTS
+            try await imageImportBeforeProbeForTest?()
+            #endif
+            guard current() else { return false }
+            let prepared = try await StillImageImport.prepare(url)
+            #if OTF_PERSIST_TESTS
+            try await imageImportDidValidateForTest?()
+            #endif
+            guard current() else { return false }
+            let bookmark: Data
+            #if OTF_PERSIST_TESTS
+            if let hook = imageImportBookmarkForTest { bookmark = try hook(url) }
+            else { bookmark = try url.bookmarkData(options:[.withSecurityScope],includingResourceValuesForKeys:nil,relativeTo:nil) }
+            #else
+            bookmark = try url.bookmarkData(options:[.withSecurityScope],includingResourceValuesForKeys:nil,relativeTo:nil)
+            #endif
+            let mid = UUID(), cid = UUID()
+            let candidate = try StillImageImport.inserting(prepared,into:before,at:start,lane:target,mediaID:mid,clipID:cid)
+            guard current() else { return false }
+            pauseForEdit()
+            history.apply(candidate,focus:cid)
+            bookmarks[mid] = bookmark; imageSourceURLs[mid] = prepared.url
+            if acquired { scopedURLs.append(url); transferred = true }
+            selection = cid; linkCandidate = nil
+            Self.trace.info("internal image import committed media=\(mid.uuidString, privacy: .public) clip=\(cid.uuidString, privacy: .public) sourceIn=0 length=150 scopeTransferred=\(acquired, privacy: .public) sessionScopes=\(self.scopedURLs.count, privacy: .public) bookmarks=\(self.bookmarks.count, privacy: .public)")
+            timelineChanged()
+            statusMessage = "내부 시험 이미지 추가 완료. 이미지 프리뷰·내보내기는 아직 지원하지 않습니다."
+            return true
+        } catch {
+            Self.trace.info("internal image import rejected before commit")
+            if current() { statusMessage = "이미지를 추가하지 못했습니다: \(error). JPEG/PNG, 최대 8 MiB·2048 px 제한을 확인하세요." }
+            return false
+        }
+    }
+
     func presentImportPanel() {
         guard !fileCommandBlocked() else { return }
         let p = NSOpenPanel()
@@ -523,7 +638,7 @@ final class ProjectStore {
         pauseForEdit()
         do {
             let t = try make(timeline)
-            guard supportedProductionTimeline(ProductionContent(t)) != nil else { return }
+            guard Self.imageImportEnabled || supportedProductionTimeline(ProductionContent(t)) != nil else { return }
             history.apply(t, focus: focus)
             selection = select ?? focus
             linkCandidate = nil
@@ -661,7 +776,7 @@ final class ProjectStore {
         pauseForEdit()
         do {
             let t = try make(timeline)
-            guard supportedProductionTimeline(ProductionContent(t)) != nil else { return }
+            guard Self.imageImportEnabled || supportedProductionTimeline(ProductionContent(t)) != nil else { return }
             guard t != timeline else { return }
             history.apply(t, focus: selection)
             if let lane { selectedLane = lane }
@@ -1105,6 +1220,7 @@ final class ProjectStore {
 
     /// 정지 화면 경로를 쓸 수 있으면 시작한다(재생 헤드 아래 영상 원본 프레임을 미리 디코딩)
     private func beginStill(_ base: Timeline) {
+        if Self.imageImportEnabled && InternalImagePreview.containsImages(base) { return }
         guard supportedProductionTimeline(ProductionContent(base)) != nil else { return }
         interactive.onItems = { [weak self] items in
             self?.previewHost?.showStage(items)
@@ -1119,6 +1235,7 @@ final class ProjectStore {
     }
     /// 변형만 바뀐 편집: 새 상태의 정지 화면을 띄우고 그 뒤에 다시 만든다(정지 화면이 뜨기 전에는 항목을 바꾸지 않는다). 할 수 없으면 false.
     private func stillRebuild(from before: Timeline) -> Bool {
+        if Self.imageImportEnabled && InternalImagePreview.containsImages(timeline) { return false }
         guard previewHost != nil, player.currentItem != nil else { return false }
         beginStill(before)
         let target = timeline
@@ -1175,7 +1292,7 @@ final class ProjectStore {
         #endif
         gestureTimeline = next
         if liveTransform?.clip != id || liveTransform?.transform != t.clamped { liveTransform = (id, t.clamped) }
-        interactive.request(next.excludingMedia(missingUsedMedia))
+        if !(Self.imageImportEnabled && InternalImagePreview.containsImages(next)) { interactive.request(next.excludingMedia(missingUsedMedia)) }
     }
     /// 프리뷰 끌기 중 최신 상태(편집 기록에는 놓을 때 넣는다). 끌기가 아니면 nil.
     @ObservationIgnored private(set) var gestureTimeline: Timeline?
@@ -1448,6 +1565,11 @@ final class ProjectStore {
     private func rejectUnsupportedContent(_ error: ProductionContent.Unsupported) {
         generation += 1 // Pending planner/seek results cannot publish into this diagnostic state.
         appliedVideoSnap = nil
+        currentPlan = nil
+        player.replaceCurrentItem(with:nil)
+        previewHost?.setSubtitles([],durationFrames:0,fps:Double(settings.fps),item:nil)
+        previewHost?.spectrumOverlay.invalidate(forgetFrame:true)
+        updateWindowDocumentState()
         interactive.invalidateUnsupportedContent()
         dropStill()
         pauseForEdit()
@@ -1457,9 +1579,19 @@ final class ProjectStore {
     // MARK: 프리뷰
 
     /// 타임라인이 바뀌면: 재생 헤드를 새 길이 안으로, composition을 비동기로 다시 만들고 오래된 결과는 버린다.
+    @ObservationIgnored private var imagePreviewTask: Task<Void,Never>?
+    #if OTF_PREVIEW_COMPAT_TESTS
+    @ObservationIgnored var imagePreviewPreparedForTest: ((Int) async -> Void)?
+    @ObservationIgnored private(set) var imagePreviewStaleDropsForTest = 0
+    #endif
+
     func timelineChanged() {
+        if Self.imageImportEnabled && InternalImagePreview.containsImages(timeline) {
+            rebuildInternalImagePreview(); return
+        }
+        imagePreviewTask?.cancel()
+        refreshAssets(refreshSpectrum:false) // Metadata/cache refresh does not render or filter the Timeline.
         guard supportedProductionTimeline(ProductionContent(timeline)) != nil else { return }
-        refreshAssets(refreshSpectrum: false)
         updateWindowDocumentState()
         playhead = min(playhead, timeline.durationFrames)
         generation += 1
@@ -1540,6 +1672,54 @@ final class ProjectStore {
         }
     }
 
+    /// Separate opt-in preview capability. Never passes the export eligibility gate.
+    /// Serial task chaining keeps canceled decodes/plans from accumulating resources.
+    private func rebuildInternalImagePreview() {
+        refreshAssets(refreshSpectrum:false)
+        let previous=imagePreviewTask
+        previous?.cancel()
+        pauseForEdit();generation += 1;seekToken &+= 1
+        let g=generation,session=projectSession,snap=timeline,media=mediaByID,s=settings,resolved=imageSourceURLs
+        appliedVideoSnap=nil;currentPlan=nil
+        player.currentItem?.cancelPendingSeeks()
+        player.replaceCurrentItem(with:nil)
+        previewHost?.setSubtitles([],durationFrames:0,fps:Double(s.fps),item:nil)
+        previewHost?.spectrumOverlay.invalidate(forgetFrame:true)
+        dropStill();updateWindowDocumentState()
+        playhead=min(playhead,snap.durationFrames)
+        imagePreviewTask=Task { @MainActor [weak self] in
+            await previous?.value
+            guard let self,!Task.isCancelled,g==self.generation,session==self.projectSession else{return}
+            do {
+                let plan=try await InternalImagePreview.plan(snap,media:media,enabled:Self.imageImportEnabled,settings:s,resolvedImages:resolved)
+                #if OTF_PREVIEW_COMPAT_TESTS
+                await self.imagePreviewPreparedForTest?(g)
+                #endif
+                guard !Task.isCancelled,g==self.generation,session==self.projectSession else{
+                    #if OTF_PREVIEW_COMPAT_TESTS
+                    self.imagePreviewStaleDropsForTest += 1
+                    #endif
+                    return
+                }
+                let item=AVPlayerItem(asset:plan.composition);item.videoComposition=plan.videoComposition;item.audioMix=plan.audioMix
+                self.currentPlan=plan;self.player.replaceCurrentItem(with:item)
+                self.previewHost?.setSubtitles(snap.renderedSubtitles,durationFrames:snap.durationFrames,fps:Double(s.fps),item:item)
+                self.observeEnd(item)
+                self.seekToken &+= 1
+                let token=self.seekToken,frame=min(self.playhead,max(0,snap.durationFrames-1))
+                self.previewHost?.subtitleSeekRequested(token:token,frame:frame)
+                let finished=await self.player.seek(to:s.time(frame),toleranceBefore:.zero,toleranceAfter:.zero)
+                guard !Task.isCancelled,g==self.generation,session==self.projectSession,self.player.currentItem === item else{return}
+                self.appliedGeneration=g
+                self.previewHost?.subtitleSeekFinished(token:token,frame:frame,finished:finished)
+                self.previewHost?.spectrumOverlay.refresh()
+            } catch {
+                guard !Task.isCancelled,g==self.generation,session==self.projectSession else{return}
+                self.statusMessage="이미지 프리뷰를 표시할 수 없습니다: \(error). 프로젝트와 클립은 유지했습니다."
+            }
+        }
+    }
+
     private func observeEnd(_ item: AVPlayerItem) {
         if let o = endObserver { NotificationCenter.default.removeObserver(o) }
         endObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main) { [weak self] _ in
@@ -1596,6 +1776,22 @@ final class ProjectStore {
             IOPMAssertionRelease(sleepAssertion); sleepAssertion = 0
         }
     }
+
+    #if OTF_PREVIEW_COMPAT_TESTS
+    /// Isolated native clock experiment only. Not installed in normal or image-import builds.
+    func installClockCompatibilityForTest(timeline t: Timeline, media: [MediaAsset], item: AVPlayerItem) {
+        pauseForEdit()
+        generation += 1; seekToken &+= 1
+        previewHost?.spectrumOverlay.invalidate(forgetFrame:true)
+        history = EditHistory(t)
+        assetCache = Dictionary(uniqueKeysWithValues:media.map { ($0.url.standardizedFileURL.path,$0) })
+        refreshAssets(refreshSpectrum:false)
+        spectrumPreview.update(timeline:t,media:media)
+        player.replaceCurrentItem(with:item)
+        appliedGeneration = generation
+        previewHost?.setSubtitles(t.renderedSubtitles,durationFrames:t.durationFrames,fps:30,item:item)
+    }
+    #endif
 
     // MARK: 내보내기
 
@@ -1893,7 +2089,8 @@ extension ProjectStore {
 
     /// 프로젝트 미디어 목록에서 쓸 수 있는 원본(검사 결과)과 찾을 수 없는 원본을 다시 만든다
     func refreshAssets(refreshSpectrum: Bool = true) {
-        var list: [MediaAsset] = [], missing: [UUID: String] = [:]
+        let images = Set(ProjectPersistence.references(timeline).filter { $0.kind == .stillImage }.map(\.id))
+        var list: [MediaAsset] = [], missing = missingMedia.filter { images.contains($0.key) }
         for r in timeline.media {
             if let a = assetCache[r.path] { list.append(a.withID(r.id)) } else { missing[r.id] = missingMedia[r.id] ?? "원본 파일을 찾을 수 없습니다." }
         }
@@ -1912,10 +2109,12 @@ extension ProjectStore {
     var missingNameAtPlayhead: String? {
         guard !missingMedia.isEmpty else { return nil }
         let ids = (timeline.clips + timeline.audioClips).filter { playhead >= $0.start && playhead < $0.end }.map(\.mediaID)
-        return ids.first { missingMedia[$0] != nil }.flatMap { id in timeline.media.first { $0.id == id }?.name }
+        return ids.first { missingMedia[$0] != nil }.flatMap { id in ProjectPersistence.references(timeline).first { $0.id == id }?.name }
     }
     /// 내보내기를 할 수 없는 이유(찾을 수 없는 원본, 또는 영상 원본이 하나도 없음)
     var exportBlockReason: String? {
+        do { _ = try ProductionContent(timeline).supportedTimeline() }
+        catch { return String(describing:error) }
         let names = timeline.media.filter { missingUsedMedia.contains($0.id) }.map(\.name)
         if !names.isEmpty { return "찾을 수 없는 원본 미디어(\(names.joined(separator: ", ")))가 있어 내보낼 수 없습니다. 파일 > 미디어 재연결…로 다시 연결하세요." }
         if !timeline.isEmpty, !timeline.media.contains(where: { $0.hasVideo && missingMedia[$0.id] == nil }) {
@@ -1944,6 +2143,8 @@ extension ProjectStore {
         return true
     }
     func stopAllScopes() {
+        imagePreviewTask?.cancel()
+        generation += 1 // Fence image decode/plan publication before source access ends.
         // Commit/termination only. Candidate validation must keep the old session alive.
         // Fence callbacks synchronously BEFORE old access ends; engine reset is queued.
         previewHost?.spectrumOverlay.invalidate(forgetFrame: true)
@@ -1951,7 +2152,7 @@ extension ProjectStore {
         #if DEBUG
         spectrumLifecycleEventForTest?("oldInvalidated", scopedURLs.count)
         #endif
-        for u in scopedURLs { u.stopAccessingSecurityScopedResource() }
+        for u in scopedURLs { stopPersistenceScope(u) }
         scopedURLs.removeAll()
         #if DEBUG
         spectrumLifecycleEventForTest?("oldScopesReleased", 0)
@@ -1960,9 +2161,14 @@ extension ProjectStore {
 
     // MARK: 새 프로젝트
 
-    func requestNewProject() {
+    func requestNewProject(presentEditor: (() -> Void)? = nil) {
         commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         guard !fileCommandBlocked(), !projectReplaceBlocked() else { return }
+        // Present before discard confirmation so an existing minimized window can
+        // host its sheet. Scene creation is supplied by the SwiftUI command only
+        // when no editor window is attached; transaction guards remain unchanged.
+        ensureEditorVisible()
+        if editorWindow == nil { presentEditor?() }
         requestDiscard(.newProject, proceed: { [weak self] in self?.resetProject() }, cancel: {})
     }
     /// 빈 프로젝트로(창 배치·최근 목록은 그대로)
@@ -1970,7 +2176,8 @@ extension ProjectStore {
         stopAllScopes()
         replaceProject(timeline: Timeline(), url: nil, id: UUID(), cache: [:], bookmarks: [:], missing: [:])
     }
-    private func replaceProject(timeline t: Timeline, url: URL?, id: UUID, cache: [String: MediaAsset], bookmarks bm: [UUID: Data], missing: [UUID: String]) {
+    private func replaceProject(timeline t: Timeline, url: URL?, id: UUID, cache: [String: MediaAsset], bookmarks bm: [UUID: Data], missing: [UUID: String], relativePaths: [UUID: String] = [:], imageURLs: [UUID: URL] = [:]) {
+        cancelImageImport()
         pauseForEdit()
         interruptGesture(reason: "replaceProject", clearViewDrags: true)   // 끌기 중이면 취소하고 보기의 끌기 상태(옮기기 누름 대기 포함)도 지운다(D-031)
         inlineEdit = nil   // 남은 글 편집은 이 프로젝트에 넣지 않고 버린다(교체 요청 앞에서 이미 확정했다, §44)
@@ -1985,6 +2192,14 @@ extension ProjectStore {
         relinkOp = nil        // 진행 중이던 재연결은 늦은 결과가 된다(CP-04, 바쁨 표식은 새 프로젝트에 남기지 않음)
         clipClipboard = nil   // 복사한 클립은 그 프로젝트에만(다른 프로젝트 미디어·권한을 다루지 않는다)
         assetCache = cache; bookmarks = bm; missingMedia = missing
+        self.relativePaths = relativePaths; imageSourceURLs = imageURLs
+        refreshAssets(refreshSpectrum:false)
+        if (try? ProductionContent(t).supportedTimeline()) == nil {
+            currentPlan = nil; appliedVideoSnap = nil
+            player.replaceCurrentItem(with:nil)
+            previewHost?.setSubtitles([],durationFrames:0,fps:Double(settings.fps),item:nil)
+            previewHost?.spectrumOverlay.invalidate(forgetFrame:true)
+        }
         selection = nil; linkCandidate = nil; selectedLane = nil; statusMessage = nil
         seek(to: 0)
         timelineChanged()
@@ -2001,7 +2216,6 @@ extension ProjectStore {
     /// 사용자가 시작한 저장(메뉴·⌘S·⇧⌘S, done 없음)은 시트·알림·패널 중이면 하지 않는다(CP-03). done이 있는 호출은 확인 시트가 사라진 뒤 잇는
     /// 내부 흐름(저장 → 새 프로젝트·열기·닫기·종료)이라 막지 않는다.
     func saveProject(saveAs: Bool = false, done: (@MainActor (Bool) -> Void)? = nil) {
-        guard supportedProductionTimeline(ProductionContent(timeline)) != nil else { done?(false); return }
         commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         if done == nil, fileCommandBlocked() { return }
         SaveTrace.note("saveProject saveAs=\(saveAs) hasURL=\(projectURL != nil) dirty=\(isDirty)")
@@ -2058,67 +2272,84 @@ extension ProjectStore {
     /// 프로젝트 파일 쓰기: 원본 미디어 보호 → 북마크 → 임시 위치에 쓰기 → 원자적으로 옮기기. 실패하면 이전 파일·상태 그대로.
     @discardableResult
     func writeProject(to url: URL) -> Bool {
-        guard supportedProductionTimeline(ProductionContent(timeline)) != nil else { return false }
         let dest = url.standardizedFileURL
-        SaveTrace.note("writeProject dest=\(dest.path)")
+        let scoped = startPersistenceScope(dest)
+        defer { if scoped { stopPersistenceScope(dest) } }
         if let reason = protectedProjectDestination(dest) {
-            SaveTrace.note("protected: \(reason)")
-            presentAlert(AlertInfo(title: "프로젝트를 저장할 수 없습니다", message: reason)); return false
+            presentAlert(AlertInfo(title:"프로젝트를 저장할 수 없습니다",message:reason)); return false
+        }
+        // Candidate-only metadata: no bookmark/session mutation before a successful commit.
+        let activeIDs = Set(ProjectPersistence.references(timeline).map(\.id))
+        var candidateBookmarks = bookmarks.filter { activeIDs.contains($0.key) }
+        var resolved = imageSourceURLs.filter { activeIDs.contains($0.key) }
+        // Rebase even unavailable relative references from the old project location.
+        // These are path hints, not probe validation or file-access grants.
+        if let oldURL = projectURL {
+            for record in ProjectPersistence.references(timeline) {
+                if resolved[record.id] == nil, let hint = relativePaths[record.id] {
+                    resolved[record.id] = oldURL.deletingLastPathComponent().appendingPathComponent(hint).standardizedFileURL
+                }
+            }
         }
         for a in assets {
-            if let b = try? a.url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) { bookmarks[a.id] = b }
+            resolved[a.id] = a.url
+            if let b = try? a.url.bookmarkData(options:[.withSecurityScope],includingResourceValuesForKeys:nil,relativeTo:nil) { candidateBookmarks[a.id] = b }
         }
-        let fm = FileManager.default
+        for (id,url) in imageSourceURLs where activeIDs.contains(id) {
+            if let b = try? url.bookmarkData(options:[.withSecurityScope],includingResourceValuesForKeys:nil,relativeTo:nil) { candidateBookmarks[id] = b }
+        }
         do {
-            let data = try ProjectFile.encode(ProductionContent(timeline), projectID: projectID, settings: settings, bookmarks: bookmarks, projectURL: dest)
-            SaveTrace.note("encoded bytes=\(data.count)")
-            let tmpDir = try fm.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: dest, create: true)
-            SaveTrace.note("tmpDir=\(tmpDir.path)")
-            defer { try? fm.removeItem(at: tmpDir) }
-            let tmp = tmpDir.appendingPathComponent(dest.lastPathComponent)
-            try data.write(to: tmp, options: .withoutOverwriting)
-            SaveTrace.note("tmp written exists=\(fm.fileExists(atPath: tmp.path))")
-            // 확인: 옮기기 전에 임시 파일을 다시 읽어 같은 프로젝트인지 본다(잘못 쓴 파일이 이전 프로젝트 파일을 바꾸지 않게)
-            let (bt, bdoc) = try ProjectFile.decode(try Data(contentsOf: tmp), settings: settings)
-            guard bt == timeline, bdoc.projectID == projectID else {
-                throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "쓴 파일을 다시 읽었더니 내용이 다릅니다."])
+            let project = try ProjectPersistence.make(timeline:timeline,projectID:projectID,settings:settings,bookmarks:candidateBookmarks,relativePaths:relativePaths.filter { activeIDs.contains($0.key) })
+            let receipt = try ProjectPersistence.write(project,to:dest,resolvedURLs:resolved) {
+                if let reason = self.protectedProjectDestination(dest) { throw ProjectPersistence.Failure.invalid(reason) }
+                #if DEBUG
+                if self.saveFailureForTest { self.saveFailureForTest = false; throw CocoaError(.fileWriteUnknown) }
+                #endif
+                #if DEBUG || OTF_PERSIST_TESTS
+                try self.persistenceBeforeCommitForTest?()
+                #endif
             }
-            #if DEBUG
-            if saveFailureForTest { saveFailureForTest = false; throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "시험용 저장 실패"]) }
-            #endif
-            if fm.fileExists(atPath: dest.path) {
-                _ = try fm.replaceItemAt(dest, withItemAt: tmp, backupItemName: nil, options: [])
-            } else if renamex_np(tmp.path, dest.path, UInt32(RENAME_EXCL)) != 0 {
-                let e = errno
-                SaveTrace.note("renamex_np errno=\(e)")
-                if e == EXDEV { try fm.moveItem(at: tmp, to: dest) } else { throw POSIXError(POSIXErrorCode(rawValue: e) ?? .EIO) }
+            if let warning = receipt.postCommitWarning {
+                let message = "프로젝트 파일 교체는 완료됐지만 후속 확인에 실패했습니다: \(warning)"
+                statusMessage = message
+                presentAlert(AlertInfo(title:"저장 후 확인이 필요합니다",message:message))
+                return false // Do not proceed through a discard prompt as though verification succeeded.
             }
-            // 옮긴 뒤: 대상에 같은 크기의 파일이 있어야 저장된 것으로 한다
-            let size = (try? fm.attributesOfItem(atPath: dest.path)[.size] as? Int) ?? -1
-            SaveTrace.note("promoted destSize=\(size) expected=\(data.count)")
-            guard size == data.count else {
-                throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "저장 위치에서 파일을 확인할 수 없습니다."])
-            }
+            projectURL = dest; savedTimeline = timeline; bookmarks = candidateBookmarks
+            relativePaths = Dictionary(uniqueKeysWithValues:receipt.project.media.compactMap { r in r.relativePath.map { (r.id,$0) } })
+            addRecent(dest); updateWindowDocumentState()
+            statusMessage = "프로젝트를 저장했습니다: \(dest.lastPathComponent)"
+            return true
         } catch {
-            SaveTrace.note("error: \(error) — alert queued; presenter showing=\(alerts.isShowing) queued=\(alerts.queuedCount)")
-            let what = (error as? ProjectFile.LoadError)?.description ?? error.localizedDescription
-            presentAlert(AlertInfo(title: "프로젝트를 저장하지 못했습니다",
-                                   message: "\(dest.lastPathComponent): \(what)\n\n편집 내용은 저장하지 않은 상태로 그대로 있습니다. 다른 위치를 골라 다시 저장해 보세요."))
+            let what = String(describing:error)
+            presentAlert(AlertInfo(title:"프로젝트를 저장하지 못했습니다",message:"\(dest.lastPathComponent): \(what)\n\n교체 전 실패입니다. 이전 파일과 편집 상태를 유지했습니다."))
             statusMessage = "프로젝트를 저장하지 못했습니다: \(what)"
             return false
         }
-        projectURL = dest
-        savedTimeline = timeline
-        addRecent(dest)
-        updateWindowDocumentState()
-        statusMessage = "프로젝트를 저장했습니다: \(dest.lastPathComponent)"
-        return true
+    }
+    private func resolvePersistenceBookmark(_ data: Data, stale: inout Bool) throws -> URL {
+        #if DEBUG || OTF_PERSIST_TESTS
+        if let hook = persistenceBookmarkForTest { return try hook(data) }
+        #endif
+        return try URL(resolvingBookmarkData:data,options:[.withSecurityScope],relativeTo:nil,bookmarkDataIsStale:&stale)
+    }
+    private func startPersistenceScope(_ url: URL) -> Bool {
+        #if DEBUG || OTF_PERSIST_TESTS
+        if let hook = persistenceScopeStartForTest { return hook(url) }
+        #endif
+        return url.startAccessingSecurityScopedResource()
+    }
+    private func stopPersistenceScope(_ url: URL) {
+        #if DEBUG || OTF_PERSIST_TESTS
+        if let hook = persistenceScopeStopForTest { hook(url); return }
+        #endif
+        url.stopAccessingSecurityScopedResource()
     }
     /// 가져온 원본 미디어(같은 경로·심볼릭 링크·하드 링크)에는 프로젝트를 저장하지 않는다
     func protectedProjectDestination(_ dest: URL) -> String? {
         let d = dest.resolvingSymlinksInPath().path
         let did = FileIdentity.of(dest)
-        let paths = assets.map { $0.url.standardizedFileURL } + timeline.media.map { URL(fileURLWithPath: $0.path) }
+        let paths = assets.map { $0.url.standardizedFileURL } + Array(imageSourceURLs.values) + ProjectPersistence.references(timeline).map { URL(fileURLWithPath:$0.path) }
         for u in paths {
             if u.resolvingSymlinksInPath().path == d { return "‘\(u.lastPathComponent)’은(는) 프로젝트가 쓰는 원본 미디어입니다. 원본을 덮어쓰지 않도록 다른 이름을 고르세요." }
             if let did, let sid = FileIdentity.of(u), did.sameFile(as: sid) { return "고른 파일이 원본 미디어 ‘\(u.lastPathComponent)’와 같은 파일(링크)입니다. 다른 이름을 고르세요." }
@@ -2193,13 +2424,16 @@ extension ProjectStore {
     func openProject(at url: URL) async -> Bool {
         guard openProgress == nil else { return false }
         openEpoch += 1
-        let epoch = openEpoch, t0 = monoSeconds(), s = settings, before = timeline
+        let epoch = openEpoch, t0 = monoSeconds(), s = settings, before = timeline, beforeSession = projectSession, beforeID = projectID
+        let rootScoped = startPersistenceScope(url)
+        var rootTransferred = false
+        defer { if rootScoped && !rootTransferred { stopPersistenceScope(url) } }
         clearImportDone()
         openProgress = OpenProgress(stage: "프로젝트 파일 읽는 중", startedAt: t0)
         defer { openProgress = nil }   // 성공·실패·취소 모두(열기는 한 번에 하나: projectReplaceBlocked)
         func cancelled() -> Bool { epoch != openEpoch || Task.isCancelled }
         func abandon(_ scopes: [URL]) -> Bool {
-            for u in scopes { u.stopAccessingSecurityScopedResource() }
+            for u in scopes { stopPersistenceScope(u) }
             #if DEBUG
             spectrumLifecycleEventForTest?("candidateScopesReleased", scopes.count)
             #endif
@@ -2213,74 +2447,103 @@ extension ProjectStore {
             return false
         }
         Self.trace.info("open read start")
-        let data: Data, decoded: (timeline: Timeline, document: ProjectFile.Document)
+        let data: Data, decoded: ProjectPersistence.Project
         do { data = try await Task.detached { try Data(contentsOf: url) }.value } catch { return fail(error.localizedDescription, "read") }
         if cancelled() { return abandon([]) }
         Self.trace.info("open read bytes=\(data.count, privacy: .public) at \(self.monoSeconds() - t0, format: .fixed(precision: 3), privacy: .public)s")
-        do { decoded = try ProjectFile.decode(data, settings: s) } catch let e as ProjectFile.LoadError {
+        do { decoded = try ProjectPersistence.decode(data, settings:s) } catch let e as ProjectFile.LoadError {
             return fail(e.description, "decode")
-        } catch { return fail(error.localizedDescription, "decode") }
+        } catch { return fail(String(describing:error), "decode") }
         // 스펙트럼(형식 8): 2026-10-25 SP-1A 1단계의 임시 열기 거부는 2B-1(2026-10-26)에서 뺐다 — 타임라인이 스펙트럼 레인·항목을 제 종류로
-        // 읽기 전용 표시하고(2A), 엔진 편집·저장이 스펙트럼을 그대로 들고 간다. 검사는 decode 그대로(형식 9 이상·형식 7 이하의 형식 8 값·잘못된 값 거부).
+        // 읽기 전용 표시하고(2A), 엔진 편집·저장이 스펙트럼을 그대로 들고 간다. 검사는 decode 그대로(지원하지 않는 미래 형식·형식 7 이하의 형식 8 값·잘못된 값 거부).
         // 소스 키는 바꾸지 않는다(조각이 없으면 "소스 없음", 원본 파일이 없으면 missingMedia — 서로 다른 상태). 내보내기는 엔진이 계속 거부한다.
-        Self.trace.info("open decoded version=\(decoded.document.version, privacy: .public) media=\(decoded.document.media.count, privacy: .public) clips=\(decoded.document.videoClips.count + decoded.document.audioClips.count, privacy: .public) at \(self.monoSeconds() - t0, format: .fixed(precision: 3), privacy: .public)s")
-        openProgress?.total = decoded.document.media.count
+        Self.trace.info("open decoded version=\(decoded.version, privacy: .public) media=\(decoded.media.count, privacy: .public) clips=\(decoded.timeline.clips.count + decoded.timeline.audioClips.count, privacy: .public) at \(self.monoSeconds() - t0, format: .fixed(precision: 3), privacy: .public)s")
+        openProgress?.total = decoded.media.count
         openProgress?.stage = "원본 미디어 확인 중"
         // 원본 미디어 찾기(북마크 → 프로젝트 기준 상대 경로 → 절대 경로). 찾지 못해도 편집 구조는 연다.
         var t = decoded.timeline
         var cache: [String: MediaAsset] = [:], bm: [UUID: Data] = [:], missing: [UUID: String] = [:], scopes: [URL] = []
+        var imageURLs: [UUID: URL] = [:]
+        let relative = Dictionary(uniqueKeysWithValues:decoded.media.compactMap { r in r.relativePath.map { (r.id,$0) } })
         let dir = url.deletingLastPathComponent()
-        for (i, e) in decoded.document.media.enumerated() {
+        for (i, e) in decoded.media.enumerated() {
             if cancelled() { return abandon(scopes) }
-            openProgress?.completed = i; openProgress?.currentName = e.ref.name; openProgress?.stage = "원본 미디어 확인 중"
+            openProgress?.completed = i; openProgress?.currentName = e.name; openProgress?.stage = "원본 미디어 확인 중"
             let m0 = monoSeconds()
             #if DEBUG
             if probeDelayForTest > 0 { try? await Task.sleep(nanoseconds: probeDelayForTest) }
             #endif
-            if let b = e.bookmark { bm[e.ref.id] = b }
+            if let b = e.bookmark { bm[e.id] = b }
             var candidates: [(URL, Bool)] = []
             if let b = e.bookmark {
                 var stale = false
-                if let u = try? URL(resolvingBookmarkData: b, options: [.withSecurityScope], relativeTo: nil, bookmarkDataIsStale: &stale) {
-                    candidates.append((u, u.startAccessingSecurityScopedResource()))   // 오래된 북마크는 다음 저장 때 새로 만든다
+                do {
+                    let u = try resolvePersistenceBookmark(b,stale:&stale)
+                    candidates.append((u,startPersistenceScope(u)))
+                } catch let fatal as ProjectPersistence.Failure {
+                    for u in scopes { stopPersistenceScope(u) }
+                    return fail(fatal.description,"bookmark handling")
+                } catch {
+                    // Unavailable/stale OS bookmarks retain legacy relative/absolute fallback.
+                    // They do not invalidate a portable missing-media document.
                 }
             }
             if let rel = e.relativePath { candidates.append((dir.appendingPathComponent(rel).standardizedFileURL, false)) }
-            candidates.append((URL(fileURLWithPath: e.ref.path), false))
+            candidates.append((URL(fileURLWithPath: e.path), false))
             var reason = "원본 파일을 찾을 수 없습니다(이동·삭제됐거나 접근 권한이 없음)."
             var found = false
             for (k, (u, started)) in candidates.enumerated() {
+                if e.kind == .stillImage {
+                    guard !found, !cancelled() else { if started { stopPersistenceScope(u) }; continue }
+                    do {
+                        try await ProjectPersistence.validateImageReference(decoded,mediaID:e.id,at:u)
+                        if cancelled() { if started { stopPersistenceScope(u) }; continue }
+                        imageURLs[e.id] = u
+                        if started { scopes.append(u) }
+                        found = true // Availability only. Persisted descriptor remains unverified in the Timeline.
+                    } catch {
+                        if started { stopPersistenceScope(u) }
+                        reason = "이미지 원본을 검증하지 못했습니다(없음·권한·변경). 저장된 참조와 편집 구조는 유지했습니다."
+                    }
+                    continue
+                }
                 guard !found, !cancelled(), FileManager.default.isReadableFile(atPath: u.path), let a = try? await MediaProbe.inspect(u, settings: s, stage: { st in
                     Task { @MainActor [weak self] in
                         guard let self, epoch == self.openEpoch, self.openProgress?.completed == i else { return }
                         self.openProgress?.stage = "원본 미디어 확인 중 · " + st.label
                     }
                 }) else {
-                    if started { u.stopAccessingSecurityScopedResource() }; continue
+                    if started { stopPersistenceScope(u) }; continue
                 }
                 Self.trace.info("open media#\(i + 1, privacy: .public) candidate\(k + 1, privacy: .public) inspected")
-                let asset = a.withID(e.ref.id)
-                var ref = MediaRef(asset); ref.path = e.ref.path   // 저장된 경로를 키로 쓴다(실제 위치는 검사 결과에)
+                let asset = a.withID(e.id)
+                var ref = MediaRef(asset); ref.path = e.path   // 저장된 경로를 키로 쓴다(실제 위치는 검사 결과에)
                 do {
-                    t = try t.relinking(media: e.ref.id, to: ref)
-                    cache[e.ref.path] = asset
+                    t = try t.relinking(media: e.id, to: ref)
+                    cache[e.path] = asset
                     if started { scopes.append(u) }
                     found = true
                 } catch let err as EditError {
                     reason = "원본이 바뀌어 쓸 수 없습니다: \(err.description)"
-                    if started { u.stopAccessingSecurityScopedResource() }
-                } catch { if started { u.stopAccessingSecurityScopedResource() } }
+                    if started { stopPersistenceScope(u) }
+                } catch { if started { stopPersistenceScope(u) } }
             }
-            if !found { missing[e.ref.id] = reason }
+            if !found { missing[e.id] = reason }
             Self.trace.info("open media#\(i + 1, privacy: .public) \(found ? "found" : "missing", privacy: .public) in \(self.monoSeconds() - m0, format: .fixed(precision: 3), privacy: .public)s")
         }
         #if DEBUG
         await candidatePreparedForTest?(scopes.count)
         #endif
+        #if DEBUG || OTF_PERSIST_TESTS
+        do { try await persistenceCandidateForTest?(scopes.count) }
+        catch { for u in scopes { stopPersistenceScope(u) }; return fail(String(describing:error),"candidate") }
+        #endif
         if cancelled() { return abandon(scopes) }
+        do { _ = try ProjectPersistence.make(timeline:t,projectID:decoded.projectID,settings:s,bookmarks:bm,relativePaths:relative) }
+        catch { for u in scopes { stopPersistenceScope(u) }; return fail(String(describing:error),"candidate validation") }
         // 여는 동안 현재 프로젝트를 편집했으면 바꾸지 않는다(확인 없이 그 편집을 버리지 않게, 2026-10-11 리뷰)
-        if gestureBase != nil || timeline != before {
-            for u in scopes { u.stopAccessingSecurityScopedResource() }
+        if gestureBase != nil || timeline != before || projectSession != beforeSession || projectID != beforeID {
+            for u in scopes { stopPersistenceScope(u) }
             #if DEBUG
             spectrumLifecycleEventForTest?("candidateScopesReleased", scopes.count)
             #endif
@@ -2290,16 +2553,19 @@ extension ProjectStore {
         }
         stopAllScopes()
         scopedURLs = scopes
+        if rootScoped { scopedURLs.append(url); rootTransferred = true }
         #if DEBUG
-        spectrumLifecycleEventForTest?("candidateScopesTransferred", scopes.count)
+        spectrumLifecycleEventForTest?("candidateScopesTransferred", scopedURLs.count)
         #endif
-        replaceProject(timeline: t, url: url.standardizedFileURL, id: decoded.document.projectID, cache: cache, bookmarks: bm, missing: missing)
+        replaceProject(timeline: t, url: url.standardizedFileURL, id: decoded.projectID, cache:cache,bookmarks:bm,missing:missing,relativePaths:relative,imageURLs:imageURLs)
         addRecent(url.standardizedFileURL)
         Self.trace.info("open applied missing=\(missing.count, privacy: .public) total \(self.monoSeconds() - t0, format: .fixed(precision: 3), privacy: .public)s")
         if !missing.isEmpty {
-            let names = t.media.filter { missing[$0.id] != nil }.map(\.name)
-            presentAlert(AlertInfo(title: "찾을 수 없는 원본 미디어가 있습니다",
-                                   message: "\(names.joined(separator: ", "))\n\n편집 내용은 그대로 열었습니다. 이 원본을 쓰는 구간은 프리뷰에서 비어 보이고, 내보내기는 다시 연결할 때까지 할 수 없습니다. 파일 > 미디어 재연결…을 쓰세요."))
+            let names = decoded.media.filter { missing[$0.id] != nil }.map(\.name)
+            let guidance = decoded.media.contains(where: { $0.kind == .stillImage })
+                ? "정지 이미지가 포함된 프로젝트의 제품 프리뷰·내보내기는 아직 지원하지 않습니다. 이미지 재연결 UI는 아직 없으며 저장된 구조는 그대로 보존됩니다. 영상·소리는 기존 미디어 재연결을 사용할 수 있습니다."
+                : "이 원본을 쓰는 구간은 프리뷰에서 비어 보이고, 내보내기는 다시 연결할 때까지 할 수 없습니다. 파일 > 미디어 재연결…을 쓰세요."
+            presentAlert(AlertInfo(title:"찾을 수 없는 원본 미디어가 있습니다",message:"\(names.joined(separator:", "))\n\n편집 내용은 그대로 열었습니다. \(guidance)"))
         }
         return true
     }
@@ -2344,6 +2610,10 @@ extension ProjectStore {
 
     /// 찾을 수 없는 원본 하나를 고른 파일로 다시 연결한다(실행 취소 한 단계). 모든 원본 구간이 새 파일 안에 있어야 한다(클립을 줄이지 않음).
     func relinkMedia(_ id: UUID) {
+        if ProjectPersistence.references(timeline).contains(where: { $0.id == id && $0.kind == .stillImage }) {
+            statusMessage = "이미지 재연결 UI는 아직 지원하지 않습니다. 저장된 참조와 편집 구조는 유지했습니다."
+            return
+        }
         guard !fileCommandBlocked(), let r = timeline.media.first(where: { $0.id == id }) else { return }
         guard !relinkInProgress else { NSSound.beep(); statusMessage = Self.relinkBusyMessage; return }
         let p = NSOpenPanel()
@@ -2409,6 +2679,6 @@ extension ProjectStore {
         }
     }
     func relinkFirstMissing() {
-        if let id = timeline.media.first(where: { missingMedia[$0.id] != nil })?.id { relinkMedia(id) }
+        if let id = ProjectPersistence.references(timeline).first(where: { missingMedia[$0.id] != nil })?.id { relinkMedia(id) }
     }
 }

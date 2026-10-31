@@ -101,6 +101,7 @@ public enum ExportService {
     public static func export(_ p: PlannedComposition, to d: ExportDestination, sources: [MediaAsset],
                               options: Options = Options(), stage: @escaping @Sendable (ExportStage) async -> Void = { _ in },
                               progress: @escaping @Sendable (Double) async -> Void) async -> ExportOutcome {
+        guard !p.imagePreviewOnly else { return .failed(.export("내부 이미지 프리뷰 구성은 내보낼 수 없습니다.")) }
         if let f = validate(d, sources: sources) { return .failed(f) }
         // 스펙트럼(2026-10-25, SP-1A 1단계): 내보내기 그리기가 아직 없다 — 스펙트럼을 조용히 빼고 내보내지 않도록 대상 파일·임시 폴더 전에 거부한다.
         if !p.spectra.isEmpty {

@@ -14,7 +14,29 @@
 
 **기준:** 자막 작업은 브랜치 `feature/subtitles`(첫 자막 기능 로컬 커밋 `04d4b58`(엔진)·`c36923e`(앱)·`81fda71`(조사 시험)·문서 커밋, 푸시하지 않음). 이전 기준 `backup/2026-10-11-editor-work`(`51cef3c`), `main`은 `44943ea` 그대로. 프로젝트 형식: `main`·이전 브랜치 5(형식 1–4 읽기, D-023), `feature/subtitles` 6(자막, 자막이 없으면 5로 씀, D-035). 검증 경계: 자동 검사는 이 Mac 한 대·짧은 생성 fixture, 소유자 확인은 소유자가 보고한 정성 관찰이며 둘을 섞지 않는다.
 
-**2026-10-30 운영 이미지 모델 체크포인트 감사 — IMG-MODEL-05R / IMG-CP-06:** HEAD/upstream `faca371`, main `44943ea`. 아래 모델·안전 게이트·격리 codec/adapter 변경은 미커밋이다. [감사·검증 결과](diagnostics/IMG-CP-06-CHECKPOINT-AUDIT.md), [정확한 공개 후보 manifest](diagnostics/IMG-CP-06-MANIFEST.txt).
+**2026-10-31 IMG-CP-08 — gated persistence/import/preview 체크포인트 감사(미커밋):** HEAD/upstream `800f468`, main `44943ea`. [최종 감사·전체 목록](diagnostics/IMG-CP-08-CHECKPOINT-AUDIT.md), [정확한 manifest](diagnostics/IMG-CP-08-MANIFEST.txt). 제품 이미지 지원 완료나 공개 활성화 승인이 아니다.
+
+- **구현:** 정상 앱의 transaction 기반 format-9 open/save, 이미지 없는 조건부 5–8 writer와 legacy 1–8 reader, 운영 still-image 편집을 연결했다. 내부 import와 image-aware Metal preview는 `OTF_IMAGE_IMPORT` 빌드 조건 + `-OTFEnableImageImport` 실행 인자를 모두 요구한다. 기본 공개 경로는 꺼져 있다. carrier는 AVPlayer timing 전용이며 이미지 모델에 duration/frameCount/SourceTiming을 만들지 않는다. 일반 planner/export의 전체 이미지 카탈로그 차단과 preview-only plan export 거부를 유지한다.
+- **자동 검증과 과거 증거:** 이번 bounded Debug 엔진은 69 PASS·FAIL/SKIP 0·exit 0이다. Release는 이번 작업에서 NOT RUN이다. PERSIST-02의 Debug/Release 엔진 93·앱 10그룹 PASS, IMPORT-01 gate on/off 검사, PREVIEW-01R surface 보정·01G generation PASS·02R end/replay 회귀는 각각 당시 증거다. 과거 BLOCKED/PARTIAL/FAIL은 유지한다.
+- **실제 정상 signed 앱 관찰(재실행 아님):** [PREVIEW-03R PARTIAL](diagnostics/IMG-PREVIEW-03R-NORMAL-SIGNED-VALIDATION.md)에서 JPEG/PNG/alpha, 150프레임, seek0/149·5초 종료/replay, mixed 영상/이미지, transform·split/trim, 자막·기존 paused spectrum, missing/unverified 거부, export 차단과 영상 전용 복귀를 관찰했다. 화면 관찰을 raw surface hash 일치로 바꾸지 않는다. 서명은 개발용 ad-hoc/sandbox이며 배포 검증이 아니다.
+- **미해결/owner 대기:** 자동 editor 창 생성(03R에서 owner Window 메뉴 필요), native Open/Save·권한·재실행 bookmark 검증, 실제 스피커 음성, 정상 제품 GPU in-flight cancellation/drain 계측, spectrum diagnostics target 및 WMO app-host compiler 문제가 남는다. [BUILD-02 BLOCKED](diagnostics/IMG-BUILD-02-MEMBERSHIP-RECOVERY.md)와 [LAUNCH-01R 한정 PASS](diagnostics/IMG-LAUNCH-01R-WINDOW-PRESENTATION.md)를 구별한다. 정상 Debug 빌드 성공이 두 diagnostic 빌드 성공을 뜻하지 않는다.
+- **제한:** JPEG/단일 PNG, encoded 8 MiB·최대 2048 px·4,194,304 pixels·추정 decode 128 MiB는 잠정 제한이다. 내부 preview는 FHD30·동시 시각 8층·이미지 upload 합계 64 MiB 한정이며 고해상도 정책·실제 장기 allocation 안정성 검증이 아니다. 이미지 export·이미지 재연결 UI는 미구현이다. Stage 3C-2·spectrum export 상태는 변경하지 않는다.
+
+아래 날짜별 요약은 해당 작업 당시 상태다. 현재 구현/검증 범위는 위 IMG-CP-08과 개별 후속 보고서를 따른다.
+
+**2026-10-30 IMG-IMPORT-01 — 개발 게이트 이미지 import(미커밋):** `OTF_IMAGE_IMPORT` 빌드 플래그와 `-OTFEnableImageImport` 실행 인자를 모두 요구하는 내부 JPEG/PNG 선택·검증·150프레임 삽입 경로를 추가했다. 기본 앱은 꺼져 있으며 mutation 진입점도 차단한다. [검증·한계·owner 절차](diagnostics/IMG-IMPORT-01-GATED-IMPORT.md).
+- 운영 catalog/클립을 한 undo 단계로 반영하고 이미지 clip 편집·format-9 저장을 연결한다. 잠정 8 MiB·2048 px·4,194,304 pixels·추정 decode 128 MiB·직렬 검증 정책은 그대로이며 공개 제품 정책 승인이 아니다.
+- 실제 서명한 원본 SwiftUI main 검증 번들의 Finder 경로에서 JPEG/불투명·알파 PNG 삽입과 scope 이관·북마크 생성, 손상 파일 거부·scope 해제를 관찰했다. 별도 source-built 검증 번들이며 이번 정규 Xcode 빌드는 시간 제한에 걸렸다. native Open/Save 패널 owner 검증은 남아 있다.
+- **일반 공개 이미지 import는 활성화하지 않았다.** 이미지 목록/재연결 UI·제품 이미지 preview/export는 미구현이며 GPU renderer 통합도 없다. 미지원 preview는 기존 영상/overlay를 비우고 안내한다. Stage 3C-2·spectrum export 상태는 변경하지 않았다.
+
+**2026-10-30 IMG-PERSIST-01 — 정상 format-9 persistence 통합(미커밋):** HEAD/upstream `800f468`, main `44943ea`. [transaction·scope·검증 기록](diagnostics/IMG-PERSIST-01-TRANSACTIONAL-PERSISTENCE.md).
+
+- 정상 앱 `saveProject/writeProject/openProject`가 새 `ProjectPersistence` facade를 사용한다. 전체 카탈로그에 used/unused 이미지가 있으면 9, 이미지가 없으면 기존 조건부 5–8로 쓰고 legacy 1–8도 읽는다. 승인된 format-9 schema는 변경하지 않았으며 기존 `ProjectFile`은 legacy codec으로 유지한다.
+- 저장 후보를 완전히 검증한 뒤 기존 Cocoa replacement-directory 관례와 same-volume rename으로 반영한다. 교체 전 실패·취소와 교체 후 확인 경고를 구별한다. 누락 이미지도 unverified 참조로 열고 다시 저장하며, 재연결 metadata/UUID 정책을 유지한다. 정상 이미지 재연결 UI는 아직 없다.
+- **정상 image import UI·제품 GPU preview/export는 미구현/미지원**이다. 이미지 프로젝트를 열어도 이전 player item을 지우고 전체 카탈로그의 preview/export 게이트를 유지한다. Stage 3C-2·spectrum export 변경 없음.
+- 이번 Debug/Release 자동 검증은 각각 엔진 93 PASS·앱 persistence 10개 그룹 PASS(FAIL/SKIP 0, exit 0)다. 실제 sandbox 권한 부여는 CLI와 동일시하지 않으며, source scope 소유권의 결정적 주입 검증과 실제 파일 transaction 검증을 구별한다. Owner Mac의 native Open/Save 패널·실제 sandbox/volume·전체 수동 workflow는 추가 검증이 필요하다. 소유자 실제 파일은 사용하지 않았다.
+
+**2026-10-30 운영 이미지 모델 체크포인트 감사 당시 기록 — IMG-MODEL-05R / IMG-CP-06:** 당시 HEAD/upstream `faca371`, main `44943ea`. 아래 체크포인트는 IMG-CP-07에서 `800f468`로 게시됐다. 이후 정상 persistence 변경은 위 최신 기록과 구별한다. [감사·검증 결과](diagnostics/IMG-CP-06-CHECKPOINT-AUDIT.md), [정확한 공개 후보 manifest](diagnostics/IMG-CP-06-MANIFEST.txt).
 
 - **엔진 still-image 편집 구현:** 원본 source duration/frame count 없이 명시적 stillImage 카탈로그와 visual Clip을 사용한다. 소유자 승인 범위의 기본 150프레임·최소 1프레임·sourceIn 0, trim/split/move/copy/ripple/undo를 지원한다. [04U 범위와 증거](diagnostics/IMG-MODEL-04U-OPERATIONAL-TIMELINE.md).
 - **격리 format-9 adapter round-trip PASS:** used/unused·missing 이미지 참조, UUID·clip timing·transform·자막 효과·audio origin/lineage·spectrum·상대 경로/북마크를 보존한다. 저장된 참조와 runtime probe 검증을 분리하며 복원은 unverified 상태다. [05 BLOCKED](diagnostics/IMG-MODEL-05-ADAPTER-BLOCKER.md) 뒤 [05R 복원·호환성 보정](diagnostics/IMG-MODEL-05R-LOSSLESS-ADAPTER.md)을 기록한다.
@@ -25,7 +47,7 @@
 
 - [Metal feasibility](diagnostics/IMG-GPU-01-METAL-FEASIBILITY.md), accounting·lease 보정 후 [GPU-02D](diagnostics/IMG-GPU-02D-SUSTAINED-VALIDATION.md)의 제한된 offline 90/90·496.343fps, paced 90/90·deadline miss0/90을 기록했다. GPU-02D의 신세대 제출 누락은 [GPU-02E GENERATION RECOVERY PASS](diagnostics/IMG-GPU-02E-GENERATION-RECOVERY.md)로 보완했다. 한 Mac·고정 FHD SDR fixture·직접 buffer 시험이며 실제 제품 AVPlayer playback/export·장기 메모리 안정성은 미검증이다. 이전 BLOCKED/INCONCLUSIVE 기록은 보존한다.
 - StillImageProbe는 정상 import와 분리된 내부 기반이다. [PROBE-02](diagnostics/IMG-PROBE-02-SCOPE-LIFECYCLE.md)의 손상 IDAT 수용은 [PROBE-03](diagnostics/IMG-PROBE-03-PNG-VALIDATION.md)에서 보정했고, [PROBE-04](diagnostics/IMG-PROBE-04-SAFETY-SANDBOX.md)의 trailing-byte 결함은 [PROBE-05](diagnostics/IMG-PROBE-05-EXACT-ZLIB-BOUNDARY.md)의 플랫폼 zlib 종료·잔여입력 검사로 보정했다. PROBE-04 실제 sandbox UI 회귀와 PROBE-05 자동 회귀는 별도 증거다. 과거 FAIL은 삭제하지 않는다.
-- JPEG/단일 PNG·SDR sRGB·encoded8MiB·dimension2048·pixels4,194,304·추정decode128MiB는 **잠정 제한**이다. 전체 PNG 변형·JPEG 무결성·제품 준비 완료를 주장하지 않는다. 당시 이미지 media model·기본 지속시간·형식9는 소유자 결정 대기였다. 후속 엔진 구현은 위 최신 기록을 따르며 normal image import·제품 GPU 통합·정상 형식9 open/save는 여전히 미구현이다. Stage 3C-2와 spectrum export 상태는 기존 기록 그대로다.
+- JPEG/단일 PNG·SDR sRGB·encoded8MiB·dimension2048·pixels4,194,304·추정decode128MiB는 **잠정 제한**이다. 전체 PNG 변형·JPEG 무결성·제품 준비 완료를 주장하지 않는다. 당시 이미지 media model·기본 지속시간·형식9는 소유자 결정 대기였다. 당시에는 normal image import·제품 GPU 통합·정상 형식9 open/save가 미구현이었다. 후속 구현은 위 IMG-CP-08 최신 기록을 따른다. Stage 3C-2와 spectrum export 상태는 기존 기록 그대로다.
 
 **2026-10-29 이미지 CPU 실험 당시 요약 — IMG-B-OPT-01까지:** HEAD/upstream `8475ca7`, main `44943ea` 기준의 격리 실험이며 제품 채택 승인이 아니다.
 
@@ -80,7 +102,7 @@
 - ✅ 체크포인트 전 리뷰 결함 수정(`8b01322`).
 - ✅ 프로젝트 열기 ↔ 저장하지 않은 변경 확인 흐름(`9d14a9f`): 소유자가 처음 보고한 저장·열기 증상이 해결되었다고 정성 보고. 실제 저장 패널 확인 뒤 열기 경로는 자동 검사하지 않았다(모의 결과만).
 - ✅ 타임라인 클립 복사·붙여넣기(`51cef3c`, R-02): 단일 선택 + 연결된 짝, 앱 안 클립보드. 소유자 정성 보고 네 가지(재생 헤드에 연결 쌍 붙여넣기, 실행 취소·다시 실행, 같은 위치 반복 붙여넣기가 겹치지 않는 맞는 레인 사용, 텍스트 칸 복사·붙여넣기). 엔진 전체 테스트는 통과가 아니다(§S.6).
-- ➡️ 이미지 가져오기와 배치(R-01): **정상 import UI는 미구현이며 원 요구사항은 미충족**. 엔진 still-image 편집과 격리 format-9 adapter round-trip은 구현·검증됐지만 정상 open/save·제품 preview/export는 지원하지 않고 실제 Mac end-to-end workflow도 미검증이다(상단 IMG-CP-06 최신 기록).
+- ➡️ 이미지 가져오기와 배치(R-01): **정상 import UI는 미구현이며 원 요구사항은 미충족**. 엔진 편집·정상 format-9 persistence와 내부 게이트 import/preview를 구현·한정 검증했다. 공개 import UI·이미지 export는 미지원이며 owner native-panel/음성·전체 workflow와 창 생성 문제는 남아 있다(상단 IMG-CP-08 최신 기록).
 - 단계 2 완료 기준(아래 §2, 제안) 가운데 이미지 가져오기가 남아 있어 단계 2는 완료가 아니다.
 
 ### S.4 소유자 승인 순서 (D-028, D-029)와 그 뒤

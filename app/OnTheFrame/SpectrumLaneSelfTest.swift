@@ -1,4 +1,4 @@
-#if DEBUG
+#if DEBUG && OTF_SPECTRUM_DIAGNOSTICS
 import AppKit
 import OnTheFrameEngine
 

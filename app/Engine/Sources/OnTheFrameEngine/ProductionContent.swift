@@ -6,7 +6,7 @@ public struct ProductionContent: Sendable {
     public enum Unsupported: Error, Equatable, CustomStringConvertible {
         case stillImages([UUID])
         public var description: String {
-            "정지 이미지가 포함된 프로젝트의 저장·프리뷰·내보내기는 아직 지원하지 않습니다. 프로젝트 내용은 변경하지 않았습니다."
+            "정지 이미지가 포함된 프로젝트의 제품 프리뷰·내보내기는 아직 지원하지 않습니다. 참조와 편집 구조는 유지했습니다."
         }
     }
     private let timeline: Timeline?

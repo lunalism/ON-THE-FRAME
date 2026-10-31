@@ -44,7 +44,7 @@ final class EditorLayout {
     static let leftTabKey = "editor.leftTab"
 
     init() {
-        #if DEBUG
+        #if DEBUG || OTF_PERSIST_TESTS
         // 자체 검사 전용: 사용자 저장값을 건드리지 않게 따로 둔 저장소(Release에는 없음)
         let args = ProcessInfo.processInfo.arguments
         if let i = args.firstIndex(of: "-OTFLayoutSuite"), i + 1 < args.count, let d = UserDefaults(suiteName: args[i + 1]) {

@@ -19,7 +19,7 @@ struct OnTheFrameApp: App {
             // 파일(A-013): 프로젝트 하나를 편집기 창 하나에서. 새로 만들기·열기·최근·Finder 열기는 같은 저장하지 않은 변경 처리를 거친다.
             // 알림·시트·패널이 떠 있는 동안 파일 명령은 꺼진다(CP-03, fileCommandsAvailable). 저장소 함수도 같은 확인으로 막는다.
             CommandGroup(replacing: .newItem) {
-                Button("새 프로젝트") { store.requestNewProject() }.keyboardShortcut("n").disabled(!store.fileCommandsAvailable)
+                NewProjectButton(store: store)
                 Button("프로젝트 열기…") { store.requestOpenProject(nil) }.keyboardShortcut("o").disabled(!store.fileCommandsAvailable)
                 Menu("최근 프로젝트") {
                     ForEach(store.recentProjects) { r in Button(r.name) { store.openRecent(r) }.disabled(!store.fileCommandsAvailable) }
@@ -28,6 +28,11 @@ struct OnTheFrameApp: App {
                 }
                 Divider()
                 Button("가져오기…") { store.presentImportPanel() }.keyboardShortcut("i").disabled(!store.fileCommandsAvailable)
+                if ProjectStore.imageImportEnabled {
+                    Button("내부 시험 이미지 가져오기…") { store.presentStillImageImportPanel() }
+                        .disabled(!store.fileCommandsAvailable || store.imageImportBusy)
+                    Button("내부 이미지 가져오기 취소") { store.cancelImageImport() }.disabled(!store.imageImportBusy)
+                }
                 Button("내보내기…") { store.presentExportPanel() }.keyboardShortcut("e")
                     .disabled(!store.fileCommandsAvailable || (!store.canExport && store.exportBlockReason == nil))
                 Button("미디어 재연결…") { store.relinkFirstMissing() }.disabled(!store.fileCommandsAvailable || store.missingMedia.isEmpty)
@@ -102,6 +107,19 @@ struct OnTheFrameApp: App {
     }
 }
 
+/// File > New also presents the existing editor scene when no window is attached.
+private struct NewProjectButton: View {
+    @Bindable var store: ProjectStore
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("새 프로젝트") {
+            store.requestNewProject { openWindow(id: "main") }
+        }
+        .keyboardShortcut("n").disabled(!store.fileCommandsAvailable)
+    }
+}
+
 /// Finder·`open -a`로 열린 파일 처리. Debug 빌드에서는 숨은 자체 검사(-OTFSelfTest, 개발 검증용) 진입점도 둔다.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -136,6 +154,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if projects.count > 1 { ProjectStore.shared.statusMessage = "프로젝트는 한 번에 하나만 엽니다: \(p.lastPathComponent)" }
             let rest = urls.filter { $0.pathExtension.lowercased() != ProjectFile.fileExtension && !$0.hasDirectoryPath }
             if !rest.isEmpty { ProjectStore.shared.importFiles(rest) }
+            return
+        }
+        if ProjectStore.imageImportEnabled, urls.count == 1, let image = urls.first,
+           ["jpg", "jpeg", "png"].contains(image.pathExtension.lowercased()) {
+            ProjectStore.shared.requestStillImageImport(image)
             return
         }
         #if DEBUG
@@ -276,6 +299,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await SpectrumLifecycleSelfTest.run(folder: folder) }
             return
         }
+        #if OTF_SPECTRUM_DIAGNOSTICS
         if args.contains("-OTFSpectrumLaneTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {   // SP-1A 2A(2026-10-25)
             Task { await SpectrumLaneSelfTest.run(folder: folder) }
             return
@@ -288,6 +312,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await SpectrumLaneSelfTest.makeManualProjects(folder: folder) }
             return
         }
+        #else
+        if ["-OTFSpectrumLaneTest", "-OTFSpectrumLaneManual", "-OTFMakeSpectrumProjects"].contains(where: args.contains) {
+            NSLog("Spectrum lane diagnostics require the OnTheFrameSpectrumDiagnostics Debug target.")
+            NSApp.terminate(nil)
+            return
+        }
+        #endif
         if let i = args.firstIndex(of: "-OTFLayoutTest"), i + 1 < args.count, let folder = urls.first(where: { $0.hasDirectoryPath }) {
             let phase = args[i + 1]
             Task { await LayoutSelfTest.run(folder: folder, phase: phase) }

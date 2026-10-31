@@ -6,6 +6,8 @@ import Foundation
 /// 안전성(@unchecked Sendable): 생성 뒤 바꾸지 않는 사본만 담는다. assets는 트랙의 소유 asset이 해제되지 않도록 붙잡아 둔다
 /// (E2 기록: 트랙만 보관하면 삽입이 −12780으로 실패).
 public struct PlannedComposition: @unchecked Sendable {
+    /// Internal capability: preview adapters can never be passed to ExportService.
+    var imagePreviewOnly = false
     public let composition: AVComposition
     public let videoComposition: AVVideoComposition
     public let durationFrames: Int

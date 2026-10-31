@@ -206,7 +206,9 @@ struct MediaListView: View {
                 VStack(spacing: 10) {
                     Spacer()
                     Image(systemName: "film.stack").font(.system(size: 30)).foregroundStyle(.tertiary)
-                    Text("가져온 미디어가 없습니다").foregroundStyle(.secondary)
+                    Text(ProjectPersistence.references(store.timeline).contains(where: { $0.kind == .stillImage })
+                         ? "정지 이미지는 타임라인에서 편집합니다. 프리뷰·내보내기는 아직 지원하지 않습니다."
+                         : "가져온 미디어가 없습니다").foregroundStyle(.secondary)
                     Button("영상·소리 가져오기…") { store.presentImportPanel() }.disabled(!store.fileCommandsAvailable)
                     Text("파일을 여기로 끌어 놓아도 됩니다.").font(.caption).foregroundStyle(.tertiary)
                     Spacer()
@@ -560,7 +562,7 @@ final class PlayerNSView: NSView {
     }
     private var subtitleKVO: NSKeyValueObservation?
     private var pendingSubtitleItem: AVPlayerItem?
-    #if DEBUG
+    #if DEBUG || OTF_PREVIEW_COMPAT_TESTS
     /// 자체 검사 전용: 자막 층 상태(묶인 항목, 층 수)
     var subtitleBoundItem: AVPlayerItem? { subtitleSync?.playerItem }
     var subtitleLayerCount: Int { subtitleCanvas.sublayers?.count ?? 0 }
