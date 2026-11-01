@@ -1,0 +1,11 @@
+app/OnTheFrame/ImageBookmarkSelfTest.swift
+app/OnTheFrame/ImageExportSelfTest.swift
+app/OnTheFrame/OnTheFrameApp.swift
+app/OnTheFrame/ProjectStore.swift
+docs/HANDOFF.md
+docs/ROADMAP.md
+docs/diagnostics/IMG-BOOKMARK-01-CROSS-PROCESS.md
+docs/diagnostics/IMG-CP-12-CHECKPOINT-AUDIT.md
+docs/diagnostics/IMG-CP-12-MANIFEST.txt
+docs/diagnostics/IMG-SAFETY-01-SIGNED-EXPORT.md
+docs/diagnostics/IMG-WINDOW-01-AUTO-PRESENTATION.md

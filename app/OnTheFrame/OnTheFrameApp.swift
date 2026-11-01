@@ -1,6 +1,7 @@
 import AppKit
 import OnTheFrameEngine
 import SwiftUI
+import os
 
 @main
 struct OnTheFrameApp: App {
@@ -8,6 +9,9 @@ struct OnTheFrameApp: App {
     @State private var store = ProjectStore.shared
 
     var body: some Scene {
+        #if DEBUG
+        let _ = AppDelegate.traceWindowLifecycle("scene body")
+        #endif
         Window("ON THE FRAME", id: "main") {
             ContentView(store: store)
                 // 최소 크기는 패널 최소 크기에서 정한다(EditorLayout). 작은 화면에서는 EditorLayout이 창 최소 크기를 쓸 수 있는 영역에 맞춰 줄인다.
@@ -15,6 +19,8 @@ struct OnTheFrameApp: App {
         }
         // 창 위치·크기는 EditorLayout이 처음 70% 가운데 / 마지막 보통 창 되살리기로 직접 관리한다(SwiftUI 창 복원과 겹치지 않게 끔)
         .restorationBehavior(.disabled)
+        // The singleton editor must open even when no restorable scene exists.
+        .defaultLaunchBehavior(.presented)
         .commands {
             // 파일(A-013): 프로젝트 하나를 편집기 창 하나에서. 새로 만들기·열기·최근·Finder 열기는 같은 저장하지 않은 변경 처리를 거친다.
             // 알림·시트·패널이 떠 있는 동안 파일 명령은 꺼진다(CP-03, fileCommandsAvailable). 저장소 함수도 같은 확인으로 막는다.
@@ -113,6 +119,7 @@ private struct NewProjectButton: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        let _ = store.registerEditorScenePresenter { [openWindow] in openWindow(id: "main") }
         Button("새 프로젝트") {
             store.requestNewProject { openWindow(id: "main") }
         }
@@ -123,9 +130,24 @@ private struct NewProjectButton: View {
 /// Finder·`open -a`로 열린 파일 처리. Debug 빌드에서는 숨은 자체 검사(-OTFSelfTest, 개발 검증용) 진입점도 둔다.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        Self.traceWindowLifecycle("didFinishLaunching")
+        #endif
+        let store = ProjectStore.shared
+        guard NSApp.modalWindow == nil, store.editorWindow?.attachedSheet == nil else { return }
+        // Initial presentation is not a New Project transaction. If attachment is
+        // still pending, retain the visibility intent for attachEditorWindow.
+        store.requestInitialEditorPresentation()
+    }
     #if DEBUG
+    static func traceWindowLifecycle(_ event: String) {
+        guard ProcessInfo.processInfo.arguments.contains("-OTFWindowLifecycleTrace") else { return }
+        Logger(subsystem: "dev.ontheframe.app", category: "window-lifecycle").notice("event=\(event, privacy: .public) windows=\(NSApp?.windows.count ?? -1, privacy: .public) active=\(NSApp?.isActive ?? false, privacy: .public) mainThread=\(Thread.isMainThread, privacy: .public)")
+    }
     /// 배치 자체 검사 준비(창이 붙기 전): 따로 둔 저장소를 비우거나(-OTFLayoutReset) 화면 밖 저장값을 넣는다(-OTFLayoutInject x,y,w,h)
     func applicationWillFinishLaunching(_ notification: Notification) {
+        Self.traceWindowLifecycle("willFinishLaunching")
         let args = ProcessInfo.processInfo.arguments
         // CP-04 수동 확인(2026-10-12): 명시적으로 줄 때만 재연결 확인을 늦춘다. 검사 도우미는 준비된 fixture가 의도대로 되는지 스스로 본다.
         if let k = args.firstIndex(of: "-OTFManualRelinkDelay"), k + 1 < args.count, let sec = Double(args[k + 1]), sec > 0 {
@@ -146,6 +168,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 종료 때 이 프로젝트가 시작한 보안 범위 접근을 멈춘다
     func applicationWillTerminate(_ notification: Notification) { ProjectStore.shared.stopAllScopes() }
     func application(_ application: NSApplication, open urls: [URL]) {
+        #if DEBUG
+        Self.traceWindowLifecycle("open URLs count=\(urls.count)")
+        #endif
         ProjectStore.shared.ensureEditorVisible()
         // Finder에서 연 프로젝트 파일(A-013): 같은 저장하지 않은 변경 처리. 여러 개면 첫 파일만(창 하나에 프로젝트 하나).
         let projects = urls.filter { $0.pathExtension.lowercased() == ProjectFile.fileExtension }
@@ -163,6 +188,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
+        if args.contains("-OTFImageBookmarkTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await ImageBookmarkSelfTest.run(folder:folder) }
+            return
+        }
         if args.contains("-OTFImageExportTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await ImageExportSelfTest.run(folder:folder) }
             return
@@ -363,7 +392,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     /// Dock 아이콘을 눌렀는데 보이는 창이 없으면 편집기 창을 다시 보인다.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { ProjectStore.shared.ensureEditorVisible() }
+        #if DEBUG
+        Self.traceWindowLifecycle("reopen visible=\(flag)")
+        #endif
+        let store = ProjectStore.shared
+        if !flag || store.editorWindow?.isMiniaturized == true {
+            // With no attached window, the helper cannot create a SwiftUI scene.
+            // Let AppKit/SwiftUI perform its default reopen instead of suppressing it.
+            if store.editorWindow == nil { return sender.modalWindow == nil }
+            store.ensureEditorVisible()
+        }
         return false
     }
 

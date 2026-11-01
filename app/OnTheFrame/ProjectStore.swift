@@ -259,6 +259,9 @@ final class ProjectStore {
 
     func attachEditorWindow(_ w: NSWindow) {
         guard editorWindow !== w else { return }
+        #if DEBUG
+        AppDelegate.traceWindowLifecycle("attach editor")
+        #endif
         editorWindow = w
         EditorLayout.shared.attach(w)   // 처음 70% 가운데 또는 마지막 보통 창 되살리기(A-012)
         alerts.windowProvider = { [weak self] in self?.editorWindow }
@@ -2008,6 +2011,40 @@ final class ProjectStore {
     /// 편집기 창을 화면 앞으로(파일을 열며 실행했거나 Dock 아이콘을 눌렀는데 보이는 창이 없을 때).
     /// 파일을 열며 실행하면 창 복원 상태에 따라 편집기 창이 화면에 나오지 않는 경우를 자체 검사에서 보았다.
     @ObservationIgnored private var wantsEditorVisible = false
+    @ObservationIgnored private var editorScenePresenter: (() -> Void)?
+    @ObservationIgnored private var initialEditorPresentationPending = false
+
+    /// The command view supplies the same SwiftUI scene action as File > New.
+    /// Registration itself neither presents a window nor changes a project.
+    func registerEditorScenePresenter(_ present: @escaping () -> Void) {
+        guard editorScenePresenter == nil else { return }
+        editorScenePresenter = present
+        #if DEBUG
+        AppDelegate.traceWindowLifecycle("register scene presenter")
+        #endif
+        fulfillInitialEditorPresentation()
+    }
+
+    func requestInitialEditorPresentation() {
+        initialEditorPresentationPending = true
+        fulfillInitialEditorPresentation()
+    }
+
+    private func fulfillInitialEditorPresentation() {
+        guard initialEditorPresentationPending, let present = editorScenePresenter else { return }
+        initialEditorPresentationPending = false
+        // Run after scene/command registration; never repeat during later panels.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.editorClosedByUser, !self.discardConfirmed,
+                  NSApp.modalWindow == nil, self.editorWindow?.attachedSheet == nil else { return }
+            #if DEBUG
+            AppDelegate.traceWindowLifecycle("initial scene presentation")
+            #endif
+            if self.editorWindow == nil { present() }
+            self.ensureEditorVisible()
+        }
+    }
+
     func ensureEditorVisible() {
         wantsEditorVisible = true
         guard let w = editorWindow else { return }   // 아직 없으면 붙을 때(attachEditorWindow) 앞으로
@@ -2511,9 +2548,16 @@ extension ProjectStore {
             candidates.append((URL(fileURLWithPath: e.path), false))
             var reason = "원본 파일을 찾을 수 없습니다(이동·삭제됐거나 접근 권한이 없음)."
             var found = false
-            for (k, (u, started)) in candidates.enumerated() {
+            for (k, candidate) in candidates.enumerated() {
+                var (u, started) = candidate
                 if e.kind == .stillImage {
                     guard !found, !cancelled() else { if started { stopPersistenceScope(u) }; continue }
+                    // A fallback may be readable only because the current session owns access.
+                    // Acquire an independent candidate lease before releasing that session at commit.
+                    if !started, let owned = scopedURLs.first(where: { $0.standardizedFileURL == u.standardizedFileURL }) {
+                        guard startPersistenceScope(owned) else { continue }
+                        u = owned; started = true
+                    }
                     do {
                         try await ProjectPersistence.validateImageReference(decoded,mediaID:e.id,at:u)
                         if cancelled() { if started { stopPersistenceScope(u) }; continue }
