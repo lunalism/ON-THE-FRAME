@@ -98,12 +98,23 @@ public enum ProjectPersistence {
               reference.modifiedNs == validated.descriptor.identity.modifiedNs else { throw Failure.sourceChanged(mediaID) }
         try Task.checkCancellation()
     }
+    /// Exact source revision and probe state, independent of clip edits.
+    public struct ImageRevision: Equatable, Sendable {
+        fileprivate let source: OperationalMedia.StillSource
+    }
+    public static func imageRevision(_ timeline: Timeline, mediaID: UUID) -> ImageRevision? {
+        timeline.mediaCatalog.first(where: { $0.id == mediaID })?.still.map { ImageRevision(source:$0) }
+    }
+    /// Rebase an existing location hint after Save As; this grants no access or validation.
+    public static func relativePath(to source: URL, from project: URL) -> String? {
+        ProjectFile.relative(source,from:project.deletingLastPathComponent())
+    }
     public struct ImageChange: Sendable {
         public let requiresNotification: Bool
         public let oldWidth: Int, oldHeight: Int, oldOrientation: Int
         public let newWidth: Int, newHeight: Int, newOrientation: Int
     }
-    /// Engine readiness only; no image relink menu/action is installed.
+    /// Full candidate validation. The caller owns gating, access, confirmation and atomic commit.
     public static func relinkImage(_ project: Project, mediaID: UUID, to source: URL) async throws -> (Project,ImageChange) {
         let validated = try await StillImageProjectModel.ValidatedImage.inspect(source)
         let (state,change) = try OperationalProjectAdapter.relink(project.state,mediaID:mediaID,to:validated)

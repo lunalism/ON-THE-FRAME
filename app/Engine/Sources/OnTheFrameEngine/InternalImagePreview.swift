@@ -1,23 +1,85 @@
 import AVFoundation
 import CoreGraphics
+import Darwin
 import ImageIO
 import Metal
 
 /// Internal preview capability only. ExportService and the ordinary planner retain
 /// their complete-catalog rejection; this never changes the persisted media model.
 public enum InternalImagePreview {
+    public typealias SourceAvailability = @MainActor @Sendable (UUID, Bool) -> Void
+
     static func error(_ s: String) -> NSError { NSError(domain:"OTFInternalImagePreview",code:1,userInfo:[NSLocalizedDescriptionKey:s]) }
     public static func containsImages(_ t: Timeline) -> Bool { !t.stillImageIDs.isEmpty }
 
     /// Decode/Metal work is detached from the caller's (normally UI) executor. A
     /// persisted descriptor is compared against a fresh full probe under source access.
     public static func plan(_ t: Timeline, media: [UUID:MediaAsset], enabled: Bool,
-                            settings: RenderSettings = .m1, resolvedImages:[UUID:URL] = [:]) async throws -> PlannedComposition {
+                            settings: RenderSettings = .m1, resolvedImages:[UUID:URL] = [:],
+                            onSourceAvailability: SourceAvailability? = nil) async throws -> PlannedComposition {
         guard enabled else { throw error("내부 이미지 프리뷰가 꺼져 있습니다.") }
-        let work=Task.detached { try await build(t,media:media,settings:settings,resolvedImages:resolvedImages) }
+        let work=Task.detached { try await build(t,media:media,settings:settings,resolvedImages:resolvedImages,onSourceAvailability:onSourceAvailability) }
         return try await withTaskCancellationHandler(operation:{let result=try await work.value;try Task.checkCancellation();return result},onCancel:{work.cancel()})
     }
-    private static func build(_ t:Timeline,media:[UUID:MediaAsset],settings:RenderSettings,resolvedImages:[UUID:URL]) async throws -> PlannedComposition {
+    enum SecondReadFailure: Error, Equatable, CustomStringConvertible {
+        case missing, inaccessible, changed, decoder, resources, unverified(Int32)
+
+        var sourceUnavailable: Bool {
+            switch self {
+            case .missing, .inaccessible, .changed: return true
+            case .decoder, .resources, .unverified: return false
+            }
+        }
+        var description: String {
+            switch self {
+            case .missing: return "이미지 원본을 찾을 수 없습니다."
+            case .inaccessible: return "이미지 원본을 읽을 권한이 없습니다."
+            case .changed: return "검증 후 이미지 원본이 변경되었습니다."
+            case .decoder: return "이미지 원본은 읽을 수 있지만 디코딩에 실패했습니다."
+            case .resources: return "이미지 프리뷰의 색 공간 또는 픽셀 버퍼를 준비하지 못했습니다."
+            case .unverified(let code): return "이미지 원본 상태를 다시 확인하지 못했습니다 (errno \(code))."
+            }
+        }
+
+        static func fromErrno(_ code: Int32) -> Self {
+            switch code {
+            case ENOENT, ENOTDIR: return .missing
+            case EACCES, EPERM: return .inaccessible
+            default: return .unverified(code)
+            }
+        }
+    }
+
+    // ImageIO does not identify why its URL read failed. Reopen within the existing
+    // scope and compare the readable descriptor, without reading the image a third time.
+    private static func classifyReadFailure(at url: URL, expected: FileIdentity) -> SecondReadFailure {
+        let fd = Darwin.open(url.path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else { return .fromErrno(errno) }
+        defer { _ = Darwin.close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0 else { return .unverified(errno) }
+        return FileIdentity.fromStat(info) == expected ? .decoder : .changed
+    }
+
+    private static func thumbnail(at url: URL, maxSize: Int) -> CGImage? {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                        kCGImageSourceCreateThumbnailWithTransform: true,
+                                        kCGImageSourceThumbnailMaxPixelSize: maxSize]
+        return CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary)
+    }
+
+    static func decodedImage(at url: URL, descriptor: StillImageDescriptor,
+                             read: (URL, Int) -> CGImage? = thumbnail) throws -> CGImage {
+        guard let image = read(url, max(descriptor.width, descriptor.height)),
+              image.width == descriptor.displayWidth, image.height == descriptor.displayHeight else {
+            throw classifyReadFailure(at: url, expected: descriptor.identity)
+        }
+        return image
+    }
+
+    private static func build(_ t:Timeline,media:[UUID:MediaAsset],settings:RenderSettings,resolvedImages:[UUID:URL],
+                              onSourceAvailability: SourceAvailability?) async throws -> PlannedComposition {
         guard settings.renderSize==CGSize(width:1920,height:1080),settings.fps==30,t.durationFrames>0 else {throw error("내부 이미지 프리뷰는 FHD 30fps만 검증합니다.")}
         try Task.checkCancellation()
         let renderer=try ImagePreviewMetal()
@@ -25,26 +87,47 @@ public enum InternalImagePreview {
         // Includes hidden and unused catalog images: never silently omit invalid sources.
         for entry in t.mediaCatalog {
             guard let source=entry.still else {continue}
-            guard let url=resolvedImages[entry.id] ?? source.validated?.url,url.isFileURL else {throw error("이미지 원본 접근·검증이 필요합니다. 저장된 참조는 유지했습니다.")}
+            guard let url=resolvedImages[entry.id] ?? source.validated?.url,url.isFileURL else {
+                await onSourceAvailability?(entry.id, false)
+                throw error("이미지 원본 접근·검증이 필요합니다. 저장된 참조는 유지했습니다.")
+            }
             let scoped=url.startAccessingSecurityScopedResource()
             defer {if scoped {url.stopAccessingSecurityScopedResource()}}
-            let proof=try await StillImageProjectModel.ValidatedImage.inspect(url)
-            guard proof.descriptor.identity.size==source.reference.size,
-                  proof.descriptor.identity.modifiedNs==source.reference.modifiedNs,
-                  StillImageProjectModel.ImageInfo(proof.descriptor)==source.reference.image else {throw error("이미지 원본이 저장된 검증 정보와 다릅니다. 재검증/재연결이 필요합니다.")}
+            let proof: StillImageProjectModel.ValidatedImage
+            do {
+                proof = try await StillImageProjectModel.ValidatedImage.inspect(url)
+                guard proof.descriptor.identity.size == source.reference.size,
+                      proof.descriptor.identity.modifiedNs == source.reference.modifiedNs,
+                      StillImageProjectModel.ImageInfo(proof.descriptor) == source.reference.image else {
+                    throw error("이미지 원본이 저장된 검증 정보와 다릅니다. 재검증/재연결이 필요합니다.")
+                }
+            } catch {
+                try Task.checkCancellation()
+                await onSourceAvailability?(entry.id, false)
+                throw error
+            }
+            await onSourceAvailability?(entry.id, true)
             let d=proof.descriptor
             let count=d.displayWidth*d.displayHeight*4
             guard count<=64*1024*1024-decodedBytes else {throw error("내부 이미지 프리뷰의 64 MiB 이미지 예산을 초과했습니다.")}
-            guard let src=CGImageSourceCreateWithURL(url as CFURL,[kCGImageSourceShouldCache:false] as CFDictionary),
-                  let im=CGImageSourceCreateThumbnailAtIndex(src,0,[kCGImageSourceCreateThumbnailFromImageAlways:true,kCGImageSourceCreateThumbnailWithTransform:true,kCGImageSourceThumbnailMaxPixelSize:max(d.width,d.height)] as CFDictionary),
-                  im.width==d.displayWidth,im.height==d.displayHeight,
-                  let space=CGColorSpace(name:CGColorSpace.sRGB),
-                  let c=CGContext(data:nil,width:im.width,height:im.height,bitsPerComponent:8,bytesPerRow:im.width*4,space:space,bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue),let bytes=c.data else {throw error("이미지를 안전하게 디코딩하지 못했습니다.")}
-            c.interpolationQuality = .none;c.draw(im,in:CGRect(x:0,y:0,width:im.width,height:im.height))
-            try Task.checkCancellation()
-            guard FileIdentity.of(url)==d.identity else {throw StillImageProbeError.changed}
-            images[entry.id]=try renderer.upload(width:im.width,height:im.height,bytes:bytes)
-            sizes[entry.id]=CGSize(width:im.width,height:im.height);decodedBytes+=count
+            do {
+                try Task.checkCancellation()
+                let im = try decodedImage(at: url, descriptor: d)
+                guard let space=CGColorSpace(name:CGColorSpace.sRGB),
+                      let c=CGContext(data:nil,width:im.width,height:im.height,bitsPerComponent:8,bytesPerRow:im.width*4,space:space,bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue),let bytes=c.data else {throw SecondReadFailure.resources}
+                c.interpolationQuality = .none;c.draw(im,in:CGRect(x:0,y:0,width:im.width,height:im.height))
+                try Task.checkCancellation()
+                var current = stat()
+                guard stat(url.path, &current) == 0 else { throw SecondReadFailure.fromErrno(errno) }
+                guard FileIdentity.fromStat(current) == d.identity else { throw SecondReadFailure.changed }
+                images[entry.id]=try renderer.upload(width:im.width,height:im.height,bytes:bytes)
+            } catch let failure as SecondReadFailure {
+                try Task.checkCancellation()
+                if failure.sourceUnavailable { await onSourceAvailability?(entry.id, false) }
+                throw failure
+            }
+            sizes[entry.id] = CGSize(width: d.displayWidth, height: d.displayHeight)
+            decodedBytes += count
         }
         // Explicit AUDIO-ONLY projection. It never becomes model/session state and
         // is never used for eligibility or image visibility. Reuse exact native audio

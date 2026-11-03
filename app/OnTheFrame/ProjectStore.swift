@@ -27,6 +27,7 @@ final class ProjectStore {
     /// 확인 요청을 묶는 데 쓰기에 모자라다(CP-02, 2026-10-12).
     @ObservationIgnored private(set) var projectSession = 0
     /// 진행 중인 재연결 확인의 표식(CP-04, 아래 relinkMedia(_:to:) 설명)
+    private(set) var pendingImageRelinkID: UUID?
     @ObservationIgnored fileprivate var relinkOp: UUID?
     /// 마지막으로 저장하거나 연 상태. 지금 상태와 다르면 저장하지 않은 변경이 있다(실행 취소로 돌아오면 사라짐).
     var savedTimeline = Timeline()
@@ -41,6 +42,7 @@ final class ProjectStore {
     /// 미디어 id → 샌드박스 접근 북마크(저장 파일에 넣음)
     @ObservationIgnored var bookmarks: [UUID: Data] = [:]
     @ObservationIgnored var relativePaths: [UUID: String] = [:]
+    @ObservationIgnored private var imageRelinkBindings: [ImageRelinkBinding] = []
     @ObservationIgnored private var imageSourceURLs: [UUID: URL] = [:]
     #if DEBUG || OTF_PERSIST_TESTS
     @ObservationIgnored var persistenceBeforeCommitForTest: (() throws -> Void)?
@@ -93,6 +95,7 @@ final class ProjectStore {
     /// 타임라인 확대(프레임당 포인트). 보기를 다시 만들어도 유지한다.
     var timelineZoom: Double = 2
     private(set) var isPlaying = false
+    private(set) var imagePreviewError: String?
     var statusMessage: String?
     /// 표시 중인 알림(관찰·검사용 사본). 실제 표시는 AlertPresenter(AppKit 시트)가 맡고,
     /// 표시 중인 알림은 바꾸거나 코드로 닫지 않는다(2026-10-10 충돌 대응, app/README.md 충돌 기록).
@@ -341,7 +344,7 @@ final class ProjectStore {
 
     /// ⌘Z: 편집기에 초점이 있으면 타임라인 실행 취소, 텍스트 입력·다른 창이면 응답자 체인(표준 텍스트 실행 취소)
     func menuUndo() {
-        KeyTrace.note("menuAction=undo currentEventCode=\(NSApp.currentEvent?.keyCode ?? 0) type=\(NSApp.currentEvent?.type.rawValue ?? 0)")
+        KeyTrace.note("menuAction=undo type=\(NSApp.currentEvent?.type.rawValue ?? 0)")
         if KeyRouting.menuTargetsEditor(self) { undo() } else { NSApp.sendAction(Selector(("undo:")), to: nil, from: nil) }
     }
     func menuRedo() {
@@ -1583,12 +1586,15 @@ final class ProjectStore {
 
     /// 타임라인이 바뀌면: 재생 헤드를 새 길이 안으로, composition을 비동기로 다시 만들고 오래된 결과는 버린다.
     @ObservationIgnored private var imagePreviewTask: Task<Void,Never>?
-    #if OTF_PREVIEW_COMPAT_TESTS
+    #if DEBUG || OTF_PREVIEW_COMPAT_TESTS
+    @ObservationIgnored var imageSourceValidatedForTest: ((UUID) -> Void)?
     @ObservationIgnored var imagePreviewPreparedForTest: ((Int) async -> Void)?
     @ObservationIgnored private(set) var imagePreviewStaleDropsForTest = 0
     #endif
 
     func timelineChanged() {
+        imagePreviewError = nil
+        restoreImageRelinkBindings()
         if Self.imageImportEnabled && InternalImagePreview.containsImages(timeline) {
             rebuildInternalImagePreview(); return
         }
@@ -1675,6 +1681,21 @@ final class ProjectStore {
         }
     }
 
+    func applyImageAvailability(_ available: Bool, id: UUID, snapshot: Timeline, session: Int, generation: Int) {
+        guard !Task.isCancelled, generation == self.generation, session == projectSession else { return }
+        let wasAvailable = missingMedia[id] == nil
+        guard available != wasAvailable,
+              let revision = ProjectPersistence.imageRevision(snapshot, mediaID: id),
+              revision == ProjectPersistence.imageRevision(timeline, mediaID: id) else { return }
+
+        let reason = available ? nil : "이미지 원본을 검증하지 못했습니다(없음·권한·변경)."
+        missingMedia[id] = reason
+        // A later timeline rebuild can restore this revision's access binding again.
+        if let index = imageRelinkBindings.firstIndex(where: { $0.id == id && $0.revision == revision }) {
+            imageRelinkBindings[index].missing = reason
+        }
+    }
+
     /// Separate opt-in preview capability. Never passes the export eligibility gate.
     /// Serial task chaining keeps canceled decodes/plans from accumulating resources.
     private func rebuildInternalImagePreview() {
@@ -1694,12 +1715,17 @@ final class ProjectStore {
             await previous?.value
             guard let self,!Task.isCancelled,g==self.generation,session==self.projectSession else{return}
             do {
-                let plan=try await InternalImagePreview.plan(snap,media:media,enabled:Self.imageImportEnabled,settings:s,resolvedImages:resolved)
-                #if OTF_PREVIEW_COMPAT_TESTS
+                let plan=try await InternalImagePreview.plan(snap,media:media,enabled:Self.imageImportEnabled,settings:s,resolvedImages:resolved) { id, available in
+                    self.applyImageAvailability(available, id: id, snapshot: snap, session: session, generation: g)
+                    #if DEBUG || OTF_PREVIEW_COMPAT_TESTS
+                    if available { self.imageSourceValidatedForTest?(id) }
+                    #endif
+                }
+                #if DEBUG || OTF_PREVIEW_COMPAT_TESTS
                 await self.imagePreviewPreparedForTest?(g)
                 #endif
                 guard !Task.isCancelled,g==self.generation,session==self.projectSession else{
-                    #if OTF_PREVIEW_COMPAT_TESTS
+                    #if DEBUG || OTF_PREVIEW_COMPAT_TESTS
                     self.imagePreviewStaleDropsForTest += 1
                     #endif
                     return
@@ -1718,7 +1744,7 @@ final class ProjectStore {
                 self.previewHost?.spectrumOverlay.refresh()
             } catch {
                 guard !Task.isCancelled,g==self.generation,session==self.projectSession else{return}
-                self.statusMessage="이미지 프리뷰를 표시할 수 없습니다: \(error). 프로젝트와 클립은 유지했습니다."
+                self.imagePreviewError = "이미지 프리뷰를 표시할 수 없습니다: \(error). 프로젝트와 클립은 유지했습니다."
             }
         }
     }
@@ -2245,9 +2271,11 @@ extension ProjectStore {
         savedTimeline = t
         projectURL = url; projectID = id
         projectSession += 1   // 같은 프로젝트를 다시 열어도 새 회차(그 전 회차에 묶인 확인은 동작하지 않음, CP-02)
+        pendingImageRelinkID = nil
         relinkOp = nil        // 진행 중이던 재연결은 늦은 결과가 된다(CP-04, 바쁨 표식은 새 프로젝트에 남기지 않음)
         clipClipboard = nil   // 복사한 클립은 그 프로젝트에만(다른 프로젝트 미디어·권한을 다루지 않는다)
         assetCache = cache; bookmarks = bm; missingMedia = missing
+        imageRelinkBindings.removeAll()
         self.relativePaths = relativePaths; imageSourceURLs = imageURLs
         refreshAssets(refreshSpectrum:false)
         if (try? ProductionContent(t).supportedTimeline()) == nil {
@@ -2626,7 +2654,7 @@ extension ProjectStore {
         if !missing.isEmpty {
             let names = decoded.media.filter { missing[$0.id] != nil }.map(\.name)
             let guidance = decoded.media.contains(where: { $0.kind == .stillImage })
-                ? "정지 이미지가 포함된 프로젝트의 제품 프리뷰·내보내기는 아직 지원하지 않습니다. 이미지 재연결 UI는 아직 없으며 저장된 구조는 그대로 보존됩니다. 영상·소리는 기존 미디어 재연결을 사용할 수 있습니다."
+                ? "저장된 이미지 참조와 편집 구조는 보존했습니다. 내부 이미지 시험 모드에서는 미디어 목록의 재연결 버튼으로 JPEG/PNG 원본을 다시 선택할 수 있습니다. 누락 원본을 복구하기 전에는 내보낼 수 없습니다."
                 : "이 원본을 쓰는 구간은 프리뷰에서 비어 보이고, 내보내기는 다시 연결할 때까지 할 수 없습니다. 파일 > 미디어 재연결…을 쓰세요."
             presentAlert(AlertInfo(title:"찾을 수 없는 원본 미디어가 있습니다",message:"\(names.joined(separator:", "))\n\n편집 내용은 그대로 열었습니다. \(guidance)"))
         }
@@ -2669,12 +2697,105 @@ extension ProjectStore {
                                message: "‘\(r.name)’을(를) 찾을 수 없거나 접근 권한이 없습니다. 이동·삭제됐을 수 있습니다. 프로젝트 열기…로 다시 고르거나 최근 프로젝트 > 목록 지우기로 정리하세요."))
     }
 
+    // Each source revision keeps its own metadata while it remains undoable.
+    // Scope leases remain session-owned and are released by stopAllScopes.
+    struct ImageRelinkBinding {
+        let id: UUID
+        let revision: ProjectPersistence.ImageRevision
+        let url: URL?
+        let bookmark: Data?
+        let relativePath: String?
+        let projectURL: URL?
+        var missing: String?
+    }
+    func rememberImageRelinkBinding(_ id: UUID) {
+        guard let revision = ProjectPersistence.imageRevision(timeline,mediaID:id) else { return }
+        imageRelinkBindings.removeAll { $0.id == id && $0.revision == revision }
+        imageRelinkBindings.append(.init(id:id,revision:revision,url:imageSourceURLs[id],bookmark:bookmarks[id],relativePath:relativePaths[id],projectURL:projectURL,missing:missingMedia[id]))
+    }
+    func restoreImageRelinkBindings() {
+        for binding in imageRelinkBindings where ProjectPersistence.imageRevision(timeline,mediaID:binding.id) == binding.revision {
+            imageSourceURLs[binding.id] = binding.url
+            bookmarks[binding.id] = binding.bookmark
+            if let hint=binding.relativePath, let old=binding.projectURL, let current=projectURL {
+                relativePaths[binding.id] = ProjectPersistence.relativePath(to:old.deletingLastPathComponent().appendingPathComponent(hint),from:current)
+            } else { relativePaths[binding.id] = binding.relativePath }
+            missingMedia[binding.id] = binding.missing
+        }
+    }
+    func presentImageRelink(_ id: UUID) {
+        guard Self.imageImportEnabled, !fileCommandBlocked(), !projectReplaceBlocked(),
+              let ref=ProjectPersistence.references(timeline).first(where:{$0.id == id && $0.kind == .stillImage}) else { return }
+        let session=projectSession
+        let panel=NSOpenPanel()
+        panel.allowedContentTypes=[.jpeg,.png];panel.allowsMultipleSelection=false
+        panel.directoryURL=URL(fileURLWithPath:ref.path).deletingLastPathComponent()
+        panel.message="‘\(ref.name)’ 대신 쓸 JPEG 또는 PNG를 고르세요. 클립과 편집 내용은 유지됩니다."
+        guard runPanel(panel) == .OK, let url=panel.url, session == projectSession else { return }
+        Task { @MainActor in _ = await self.relinkStillImage(id,to:url) }
+    }
+    @discardableResult
+    func relinkStillImage(_ id: UUID, to url: URL) async -> Bool {
+        guard Self.imageImportEnabled, !Task.isCancelled, !fileCommandBlocked(), !projectReplaceBlocked(),
+              !imageImportBusy, gestureBase == nil, (ProjectPersistence.imageRevision(timeline,mediaID:id) != nil) else { return false }
+        let op=UUID(), session=projectSession, before=timeline
+        relinkOp=op
+        pendingImageRelinkID = id
+        let acquired=startPersistenceScope(url)
+        var transferred=false
+        defer {
+            if acquired && !transferred { stopPersistenceScope(url) }
+            if relinkOp == op {
+                pendingImageRelinkID = nil
+                relinkOp=nil
+            }
+        }
+        func current() -> Bool {
+            !Task.isCancelled && relinkOp == op && projectSession == session && timeline == before && gestureBase == nil && !openRequested && openProgress == nil && !discardConfirmed && !editorClosedByUser && exportPhase == .idle && exportTask == nil && importTask == nil && !imageImportBusy && pendingOps.isEmpty
+        }
+        do {
+            // Native selection must create its own lease; never borrow the old source grant.
+            guard acquired else { throw CocoaError(.fileReadNoPermission) }
+            let old=try ProjectPersistence.make(timeline:before,projectID:projectID,settings:settings,bookmarks:bookmarks,relativePaths:relativePaths)
+            let (candidate,change)=try await ProjectPersistence.relinkImage(old,mediaID:id,to:url)
+            guard current() else { return false }
+            if change.requiresNotification {
+                var accepted: Bool?
+                let prompt=AlertInfo(title:"이미지 크기·방향 변경",message:"기존 \(change.oldWidth)×\(change.oldHeight), 방향 \(change.oldOrientation) → 새 \(change.newWidth)×\(change.newHeight), 방향 \(change.newOrientation). 클립 길이와 변형 값은 유지하지만 화면 모습은 달라질 수 있습니다.",buttons:["재연결","취소"],cancelIndex:1,onButton:{ accepted = $0 == 0 })
+                presentAlert(prompt)
+                while accepted == nil && current() {
+                    try? await Task.sleep(nanoseconds:10_000_000)
+                }
+                guard accepted == true, current() else {
+                    if alert?.id == prompt.id { alerts.pressButton(1) }
+                    return false
+                }
+            }
+            // A user confirmation can suspend arbitrarily: fully probe again before commit.
+            try await ProjectPersistence.validateImageReference(candidate,mediaID:id,at:url)
+            guard current() else { return false }
+            let bookmark=try url.bookmarkData(options:[.withSecurityScope],includingResourceValuesForKeys:nil,relativeTo:nil)
+            rememberImageRelinkBinding(id)
+            pauseForEdit()
+            history.apply(candidate.timeline,focus:selection)
+            imageSourceURLs[id]=url;bookmarks[id]=bookmark;relativePaths[id]=nil;missingMedia[id]=nil
+            scopedURLs.append(url);transferred=true
+            rememberImageRelinkBinding(id)
+            timelineChanged()
+            statusMessage="‘\(url.lastPathComponent)’로 이미지를 다시 연결했습니다."
+            return true
+        } catch {
+            if current() { presentAlert(AlertInfo(title:"이미지를 다시 연결할 수 없습니다",message:"\(error)\nJPEG/PNG, 최대 8 MiB·2048 px 제한과 원본 접근 권한을 확인하세요. 기존 프로젝트는 유지했습니다.")) }
+            return false
+        }
+    }
+
     // MARK: 미디어 재연결
 
     /// 찾을 수 없는 원본 하나를 고른 파일로 다시 연결한다(실행 취소 한 단계). 모든 원본 구간이 새 파일 안에 있어야 한다(클립을 줄이지 않음).
     func relinkMedia(_ id: UUID) {
         if ProjectPersistence.references(timeline).contains(where: { $0.id == id && $0.kind == .stillImage }) {
-            statusMessage = "이미지 재연결 UI는 아직 지원하지 않습니다. 저장된 참조와 편집 구조는 유지했습니다."
+            presentImageRelink(id)
             return
         }
         guard !fileCommandBlocked(), let r = timeline.media.first(where: { $0.id == id }) else { return }
@@ -2699,6 +2820,7 @@ extension ProjectStore {
     /// 대상 미디어가 아직 있는지 확인한다. 아니면 아무것도 바꾸지 않는다(늦은 결과, 상태 문구만, 오류 알림도 띄우지 않음).
     @discardableResult
     func relinkMedia(_ id: UUID, to url: URL) async -> Bool {
+        if (ProjectPersistence.imageRevision(timeline,mediaID:id) != nil) { return await relinkStillImage(id, to:url) }
         guard relinkOp == nil else { statusMessage = Self.relinkBusyMessage; return false }
         let op = UUID(), session = projectSession
         relinkOp = op

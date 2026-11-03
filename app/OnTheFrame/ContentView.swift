@@ -181,25 +181,31 @@ struct MediaListView: View {
     @Bindable var store: ProjectStore
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // 찾을 수 없는 원본(A-013): 따로 보이고 재연결을 권한다
-            if !store.missingMedia.isEmpty {
+            // 재연결은 누락 원본 복구, 교체는 사용 가능한 이미지의 선택 동작이다.
+            if !store.missingMedia.isEmpty || (ProjectStore.imageImportEnabled && ProjectPersistence.references(store.timeline).contains { $0.kind == .stillImage }) {
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(store.timeline.media.filter { store.missingMedia[$0.id] != nil }) { r in
+                    ForEach(ProjectPersistence.references(store.timeline).filter { ($0.kind == .stillImage && ProjectStore.imageImportEnabled) || ($0.kind != .stillImage && store.missingMedia[$0.id] != nil) }, id: \.id) { r in
+                        let warning = store.missingMedia[r.id]
+                        let pending = store.pendingImageRelinkID == r.id
                         HStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                            Image(systemName: warning == nil ? "photo" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(warning == nil ? Color.secondary : Color.orange)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(r.name).lineLimit(1).truncationMode(.middle)
-                                Text(store.missingMedia[r.id] ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                Text(pending ? "교체할 이미지 확인 중…" : (warning ?? "정지 이미지")).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                             }
                             Spacer()
-                            Button("미디어 재연결…") { store.relinkMedia(r.id) }.controlSize(.small).disabled(!store.fileCommandsAvailable)
+                            Button(r.kind != .stillImage ? "미디어 재연결…" : (warning == nil ? "교체…" : "재연결…")) { store.relinkMedia(r.id) }
+                                .controlSize(.small)
+                                .fixedSize(horizontal: r.kind == .stillImage, vertical: false)
+                                .disabled(pending || !store.fileCommandsAvailable)
                         }
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("찾을 수 없는 원본 \(r.name)")
+                        .padding(8)
+                        .background(warning == nil ? Color.clear : Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel("\(warning == nil ? "정지 이미지" : "찾을 수 없는 원본") \(r.name)")
                     }
                 }
-                .padding(8)
-                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
                 .padding(.horizontal, 8).padding(.top, 6)
             }
             if store.assets.isEmpty && store.missingMedia.isEmpty {

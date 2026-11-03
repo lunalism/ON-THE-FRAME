@@ -337,7 +337,7 @@ enum ShortcutSelfTest {
     private static func arrow(_ u: Int) -> String { String(UnicodeScalar(u)!) }
     private static func editorText(_ w: NSWindow) -> String { (w.firstResponder as? NSTextView)?.string ?? "<no editor>" }
 
-    private static func key(_ code: UInt16, _ chars: String, _ mods: NSEvent.ModifierFlags, _ w: NSWindow, isRepeat: Bool = false, ignoring: String? = nil) async {
+    static func key(_ code: UInt16, _ chars: String, _ mods: NSEvent.ModifierFlags, _ w: NSWindow, isRepeat: Bool = false, ignoring: String? = nil) async {
         for t in [NSEvent.EventType.keyDown, .keyUp] {
             guard let e = NSEvent.keyEvent(with: t, location: .zero, modifierFlags: mods, timestamp: ProcessInfo.processInfo.systemUptime,
                                            windowNumber: w.windowNumber, context: nil, characters: chars,

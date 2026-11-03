@@ -25,6 +25,12 @@ struct TimelinePane: View {
                 Image(systemName: "plus.magnifyingglass").foregroundStyle(.secondary)
             }
             .padding(.horizontal, 10).padding(.vertical, 5)
+            if let error = store.imagePreviewError {
+                Text(error)
+                    .font(.callout).foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+            }
             Divider()
             ZStack {
                 TimelineRepresentable(store: store, state: TimelineDrawState(store: store), pixelsPerFrame: store.timelineZoom)

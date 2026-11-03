@@ -4,6 +4,24 @@
 
 ## 기준
 
+**2026-11-03 IMG-CP-14F · 내부 체크포인트 PUBLICATION READY.** CP-14의 이동 원본 Undo 불일치와 CP-14R의 두 번째 읽기 실패는 각각 RELINK-05/06에서 수정됐고 두 원래 시퀀스를 다시 통과했다. Debug·Release 각각 51/51, 서명 앱 71/71, scope 12/12. 소유자 네이티브 재연결과 마우스 Undo/Redo는 이전 관찰이며 이번 캡처는 자동 검사다. 가용성은 프리뷰 재검증 때 갱신된다. 공개 게이트는 꺼져 있고 장기·외장 볼륨·OS 권한 변경은 미검증이다. [최종 감사와 24개 후보](diagnostics/IMG-CP-14F-FINAL-AUDIT.md)
+
+**IMG-RELINK-06 · 두 번째 읽기 일관성 통과.** probe 직후 원본을 이동시킨 CP-14R 단언이 Debug·Release에서 모두 통과했다. 확인된 소실·권한 거부·교체만 해당 참조의 가용성을 낮추며, 같은 원본의 디코드·자원 오류와 확인 불가 상태는 프리뷰 오류로 남는다. 서명 앱에서 경고 행과 빈 표시 버퍼, 원본 복구 뒤 정상 행과 빨간 프레임을 확인했다. 두 차단 매니페스트는 이전 기록이며 게시 전 새 감사가 필요하다. [재현 및 검증](diagnostics/IMG-RELINK-06-SECOND-READ.md)
+
+**IMG-CP-14R · 게시 보류.** 이전 CP-14의 이동 원본 Undo 불일치는 RELINK-05 수정 뒤 재감사에서 정상화됐다. 서명 앱 66/66, 원본별 scope 12/12이며 소유자 마우스 Undo/Redo 확인은 RELINK-03 수정판의 관찰이다. 가용성은 기존 프리뷰 재검증 시 갱신한다. 이번 Debug·Release 검사에서 probe 성공 직후부터 디코드 전까지 원본이 이동하면 디코드 실패 뒤에도 마지막 가용성이 true인 별도 결함을 재현했다. 공개 게이트는 꺼져 있다. 2048 px 초과·장기 세션·외장 볼륨·OS 권한은 미검증이며 자막·스펙트럼·WMO 진단 컴파일 차단, 스펙트럼 Stage 3C-2/4 미구현 상태를 유지한다. [재감사 결과와 새 후보 목록](diagnostics/IMG-CP-14R-RELINK-RE-AUDIT.md)
+
+**2026-11-02 IMG-RELINK-05 · 이동 원본 Undo 일관성 통과.** 열린 세션에서 이동한 이미지의 원본 검증 결과를 현재 참조의 가용성과 Undo 복원 정보에 반영했다. 서명 앱에서 Undo의 누락 경고·빈 화면, Redo의 정상 행·교체 프레임, 원위치 복구 후 재검증을 확인했다. CP-14 매니페스트는 이전 차단 시점 기록이며 게시 전 최종 재감사가 필요하다. [재현·수정·검증 기록](diagnostics/IMG-RELINK-05-MOVED-SOURCE.md)
+
+**2026-11-02 IMG-CP-14 · 게시 보류.** 내부 JPEG/PNG 재연결, 소유자 마우스 Undo/Redo, 프리뷰 전용 오류 분리 및 누락/교체 행 구분을 감사했다. 열 때부터 누락된 프로젝트는 통과했으나 열린 세션에서 원본이 이동한 뒤 Undo하면 프리뷰 오류와 일반 교체 행이 함께 남는다. 파랑 G=51은 원본 PNG와 일치하며 원래 임계값 실패를 보존했다. 공개 게이트는 꺼져 있고 고해상도·장기 세션·OS 권한 변화 및 스펙트럼 Stage 3C-2/4는 미검증 또는 미구현이다. [감사 결과와 증거 구분](diagnostics/IMG-CP-14-RELINK-AUDIT.md)
+
+**2026-11-02 IMG-RELINK-04 · 미디어 목록.** 소유자가 IMG-RELINK-03 수정판에서 마우스 메뉴 Undo/Redo 동작을 확인했다. 재연결 성공 뒤에도 남던 주황 배경은 사용 가능한 이미지까지 경고 영역에 포함한 표시 오류였다. 이제 누락 행에는 재연결, 사용 가능한 이미지에는 교체를 표시한다. 생성 프로젝트로 누락·취소·실패·성공·Undo/Redo·저장 후 다시 열기의 목록 상태를 확인했다.
+
+**2026-11-02 IMG-RELINK-03 · PARTIAL.** 재연결 메뉴 Undo의 마우스 이벤트 접근과 프리뷰 오류 소유권을 수정했다. 생성 PNG의 실제 파랑 G는 51이었다. 서명 앱 메뉴 항목 호출과 키 이벤트는 통과했고 소유자 마우스 재확인은 남았다. [수정 기록과 검증 절차](diagnostics/IMG-RELINK-03-CORRECTIONS.md)
+
+**2026-11-01 IMG-RELINK-01 — GATED IMAGE RELINK PASS(미커밋, 자동 검증 한정):** [구현·검사·실패와 한계](diagnostics/IMG-RELINK-01-GATED-RELINK.md). 기준 HEAD/upstream `0f32bd6`, main `44943ea`. 내부 compile+runtime 게이트에서 JPEG/PNG 재연결 UI, 크기/방향 변경 확인, 독립 scope·원자적 후보 교체 및 undo/redo의 원본/bookmark 복원을 연결했다. UUID·편집·오디오/자막/spectrum 보존, 기존 엄격한 probe와 잠정 제한 유지.
+- 새 Debug/Release 엔진 각각 **43 PASS·FAIL/SKIP0·exit0**, 정상 signed Debug 앱 **19 PASS·scope7/7·exit0**, 앞선 runtime-off **2 PASS**. 새 원본의 preview/짧은 export 반영 확인. Native Open 취소는 도구 자동 조작이며 소유자 패널 관찰이 아니다.
+- 소유자는 이번 자동 검증만 선택했다. 실제 파일 선택·크기/방향 승인·재연결 후 새 프로세스 Save/Open은 **owner NOT RUN**. 중간 fixture 오류·launcher timeout과 후속 정상 실행 기록을 보존한다. 장기 반복 재연결의 session-owned scope 누적·외장 볼륨·OS 권한 변화·특정 GPU race는 미검증이다. 공개 활성화·형식9 schema·spectrum 구현 변경 없음. 아래 과거 미구현/감사 기록은 당시 상태로 보존한다.
+
 **2026-11-01 IMG-CP-12 — 창·export 안전·bookmark 통합 체크포인트 감사(미커밋), PUBLICATION READY:** [감사·증거 경계](diagnostics/IMG-CP-12-CHECKPOINT-AUDIT.md), [정확한 11개 manifest](diagnostics/IMG-CP-12-MANIFEST.txt). 기준 HEAD/upstream `faace37`, main `44943ea`. 공개 이미지 지원 완료나 공개 활성화 승인이 아니다.
 - 창: WINDOW-01의 정상 signed Debug 자동 표시·반복 Cmd+N·최소화/숨김 복구·dirty Cancel·단일 editor 검증을 재사용한다. 원래 zero-window 실패와 중간 실패는 보존한다. 개인 Spaces/외부 모니터 조합 전체를 검증한 것은 아니다.
 - Export: EXPORT-02의 owner native import/save/reopen/export·영상/음성 수락에 더해 [SAFETY-01](diagnostics/IMG-SAFETY-01-SIGNED-EXPORT.md)의 실제 인코딩 약80% 취소·기존 출력 해시 보존, 대치 성공·패널 취소를 구별한다. signed 자동6개 시나리오와 GPU active/resources/admission 0, 세션 scope1→0 관측은 한정 증거이며 특정 GPU command in-flight race나 OS 전체 scope 수 증명이 아니다.

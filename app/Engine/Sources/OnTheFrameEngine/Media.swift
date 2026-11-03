@@ -9,7 +9,10 @@ public struct FileIdentity: Sendable, Equatable, Codable {
     public static func of(_ url: URL) -> FileIdentity? {
         var st = stat()
         guard stat(url.path, &st) == 0 else { return nil }
-        return FileIdentity(device: Int64(st.st_dev), inode: UInt64(st.st_ino), size: Int64(st.st_size),
+        return fromStat(st)
+    }
+    static func fromStat(_ st: stat) -> FileIdentity {
+        FileIdentity(device: Int64(st.st_dev), inode: UInt64(st.st_ino), size: Int64(st.st_size),
                             modifiedNs: Int64(st.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(st.st_mtimespec.tv_nsec))
     }
     /// 같은 파일인가(장치·inode). 크기·시각은 비교하지 않는다.

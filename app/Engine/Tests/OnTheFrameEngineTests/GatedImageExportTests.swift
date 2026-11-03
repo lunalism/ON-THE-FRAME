@@ -91,6 +91,49 @@ final class GatedImageExportTests: XCTestCase {
         try await ClockCarrierCompatibilityTests.wait(5){ImagePreviewCompositor.admission.outstanding==0 && ImagePreviewMetal.ownership.counts.active==0}
         XCTAssertEqual(ImagePreviewMetal.ownership.counts.resources,0)
     }
+    /// Read-only comparison of the retained generated relink pair. Both readers produce 420v.
+    func testRetainedRelinkFlatColors() async throws {
+        guard let path = ProcessInfo.processInfo.environment["OTF_RELINK_COLOR_FIXTURE"] else {
+            throw XCTSkip("requires generated relink acceptance pair")
+        }
+        let folder = URL(fileURLWithPath: path)
+        let image = folder.appendingPathComponent("fixtures/replacement.png")
+        let id = UUID()
+        let timeline = try Timeline().registeringImage(await StillImageProjectModel.ValidatedImage.inspect(image), id: id)
+            .placingImage(media: id, at: 0, lane: Lane.videoID, length: 150)
+        let plan = try await InternalImagePreview.plan(timeline, media: [:], enabled: true, resolvedImages: [id: image])
+        let (preview, raw) = try await reader(plan.composition, plan)
+        let (encoded, decoded) = try await reader(AVURLAsset(url: folder.appendingPathComponent("exports/relinked-b.mp4")))
+        defer { preview.cancelReading(); encoded.cancelReading() }
+
+        func flat(_ sample: CMSampleBuffer, x: Int) throws -> [Int] {
+            let buffer = try XCTUnwrap(CMSampleBufferGetImageBuffer(sample))
+            XCTAssertEqual(CVPixelBufferGetPixelFormatType(buffer), kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange)
+            CVPixelBufferLockBaseAddress(buffer, .readOnly)
+            defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+            func byte(_ plane: Int, _ offset: Int) -> Int {
+                let row = (540 >> plane) * CVPixelBufferGetBytesPerRowOfPlane(buffer, plane)
+                return Int(CVPixelBufferGetBaseAddressOfPlane(buffer, plane)!.assumingMemoryBound(to: UInt8.self)[row + x + offset])
+            }
+            return [byte(0, 0), byte(1, 0), byte(1, 1)]
+        }
+        // Independent sRGB fixture decode -> ColorSync 709 RGB -> video-range 709 matrix.
+        let references = [[216, 18, 140], [60, 224, 102]]
+        for frame in 0..<150 {
+            let source = try XCTUnwrap(raw.copyNextSampleBuffer())
+            let output = try XCTUnwrap(decoded.copyNextSampleBuffer())
+            guard [0, 75, 149].contains(frame) else { continue }
+            for (i, x) in [480, 1280].enumerated() {
+                let a = try flat(source, x: x), b = try flat(output, x: x)
+                print("relink flat frame=\(frame) x=\(x) raw=\(a) mp4=\(b) ref=\(references[i])")
+                for channel in 0..<3 {
+                    XCTAssertLessThanOrEqual(abs(a[channel] - references[i][channel]), 1)
+                    XCTAssertLessThanOrEqual(abs(b[channel] - a[channel]), 1)
+                }
+            }
+        }
+    }
+
     func testImageOnlyFiveSecondAndSharedRendering()async throws {
         let s=try await setup(),(result,url,log)=await export(s,"five-second.mp4")
         XCTAssertEqual(result,.completed(url));guard case .completed=result else{return}
