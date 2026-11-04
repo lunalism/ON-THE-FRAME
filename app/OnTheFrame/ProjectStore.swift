@@ -1751,9 +1751,9 @@ final class ProjectStore {
 
     private func observeEnd(_ item: AVPlayerItem) {
         if let o = endObserver { NotificationCenter.default.removeObserver(o) }
-        endObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main) { [weak self] _ in
+        endObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main) { [weak self, weak item] _ in
             MainActor.assumeIsolated {
-                guard let self else { return }
+                guard let self, let item, self.player.currentItem === item else { return }
                 self.setPlaying(false)
                 self.playhead = self.timeline.durationFrames
             }
@@ -1768,8 +1768,10 @@ final class ProjectStore {
         player.play(); setPlaying(true)
     }
     func pause() {
+        let wasPlaying = isPlaying
         player.pause(); setPlaying(false)
         playhead = min(settings.frame(containing: player.currentTime()), timeline.durationFrames)
+        if wasPlaying, !timeline.spectra.isEmpty, previewHost?.hasPendingSpectrumSeek == false { seek(to: playhead) }
     }
     func pauseForEdit() { if isPlaying { pause() } }
     func step(_ k: Int) { pauseForEdit(); seek(to: playhead + k) }
@@ -1796,8 +1798,9 @@ final class ProjectStore {
     /// 재생 중에만 디스플레이 유휴 절전을 막는다(E3-1: 디스플레이가 꺼지면 화면 표시가 멈춤).
     private func setPlaying(_ p: Bool) {
         spectrumPreview.playback.stop()
-        if p { previewHost?.spectrumOverlay.invalidate(forgetFrame: true) }
+        if p || isPlaying { previewHost?.spectrumOverlay.invalidate(forgetFrame: true) }
         isPlaying = p
+        previewHost?.spectrumOverlay.updatePlaybackLink()
         if p, sleepAssertion == 0 {
             IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn),
                                         "ON THE FRAME playback" as CFString, &sleepAssertion)
@@ -2174,6 +2177,7 @@ extension ProjectStore {
         if missing != missingMedia { missingMedia = missing }
         previewHost?.spectrumOverlay.invalidate()
         spectrumPreview.update(timeline: timeline, media: assets)
+        previewHost?.spectrumOverlay.updatePlaybackLink()
         if refreshSpectrum { previewHost?.spectrumOverlay.refresh() }
     }
     /// 타임라인 클립이 쓰는 찾을 수 없는 원본

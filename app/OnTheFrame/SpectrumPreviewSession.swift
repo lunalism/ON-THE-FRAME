@@ -8,6 +8,8 @@ import OnTheFrameEngine
 @MainActor
 final class SpectrumPreviewSession {
     lazy var playback = PlaybackSpectrumController(session: self)
+    private var playbackAssets: [UUID: MediaAsset] = [:]
+    private var playbackTimeline: Timeline?
     private let coordinator: SpectrumFrameCoordinator
     private(set) var epoch = 0
     private(set) var revision = 0
@@ -23,6 +25,8 @@ final class SpectrumPreviewSession {
 
     func resetProject() {
         playback.stop()
+        playbackAssets.removeAll()
+        playbackTimeline = nil
         epoch &+= 1
         revision &+= 1
         coordinator.resetProject()
@@ -31,25 +35,45 @@ final class SpectrumPreviewSession {
     func update(timeline: Timeline, media: [MediaAsset]) {
         playback.stop()
         revision &+= 1
+        playbackTimeline = timeline
+        playbackAssets = Dictionary(uniqueKeysWithValues: media.map { ($0.id, $0) })
         coordinator.update(timeline: timeline, media: media)
     }
 
     @discardableResult
-    func request(spectrum: UUID, frame: Int, priority: Int = 0,
+    func request(spectrum: UUID, frame: Int, priority: Int = 0, checkPlaybackMedia: Bool = false,
                  completion: @escaping @MainActor @Sendable (SpectrumFrameOutcome) -> Void) -> SpectrumFrameTicket {
         let requestedEpoch = epoch, requestedRevision = revision
         return coordinator.request(spectrum: spectrum, frame: frame, canvasWidth: 1920, canvasHeight: 1080, priority: priority) { [weak self] outcome in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                var accepted = outcome
+                if checkPlaybackMedia, case .ready(_, .some) = outcome {
+                    if let timeline = self.playbackTimeline, let entry = timeline.spectra.first(where: { $0.id == spectrum }),
+                       let id = timeline.spectrumMediaID(entry), let asset = self.playbackAssets[id] {
+                        let available = await Task.detached(priority: .userInitiated) {
+                            FileIdentity.of(asset.url) == asset.identity && FileManager.default.isReadableFile(atPath: asset.url.path)
+                        }.value
+                        if !available { accepted = .mediaUnavailable(id) }
+                    } else { accepted = .missingSource }
+                }
                 #if DEBUG
-                let outcome = await self.transformOutcomeForTest?(spectrum, frame, outcome) ?? outcome
-                await self.beforeDeliveryForTest?(outcome)
+                // Synthetic controller tests have no configured project or media.
+                // Configured projects may delay delivery but always keep the validated outcome.
+                let synthetic: Bool
+                if case .itemMissing = outcome { synthetic = self.playbackTimeline == nil }
+                else { synthetic = false }
+                if let transform = self.transformOutcomeForTest {
+                    let injected = await transform(spectrum, frame, accepted)
+                    if synthetic { accepted = injected }
+                }
+                await self.beforeDeliveryForTest?(accepted)
                 #endif
                 guard self.epoch == requestedEpoch, self.revision == requestedRevision else {
                     completion(.superseded)
                     return
                 }
-                completion(outcome)
+                completion(accepted)
             }
         }
     }

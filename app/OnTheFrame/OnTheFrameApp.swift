@@ -366,6 +366,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await LayoutSelfTest.run(folder: folder, phase: phase) }
             return
         }
+        if args.contains("-OTFSubtitleBoundaryProbe"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await PreviewSelfTest.runSubtitleBoundaries(folder: folder) }
+            return
+        }
+        if args.contains("-OTFContinuousSpectrumTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await PreviewSelfTest.runSpectrum(folder: folder) }
+            return
+        }
         if args.contains("-OTFPreviewTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await PreviewSelfTest.run(folder: folder) }
             return

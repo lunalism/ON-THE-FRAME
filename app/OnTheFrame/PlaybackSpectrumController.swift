@@ -2,22 +2,30 @@ import AVFoundation
 import OnTheFrameEngine
 
 /// Output timing is a proxy for media available for display, not AVPlayerLayer scan-out proof.
-/// No display link is installed in 3C-1. The eventual driver supplies target host timestamps.
+/// The preview display link supplies target host timestamps.
 @MainActor
 final class SpectrumPlaybackTiming {
     private(set) weak var item: AVPlayerItem?
     private(set) var output: AVPlayerItemVideoOutput?
     private var lastFrame: Int?
 
-    func attach(_ item: AVPlayerItem) {
+    private weak var previewView: PlayerNSView?
+
+    func attach(_ item: AVPlayerItem, view: PlayerNSView? = nil) {
         guard self.item !== item else { return }
         detach()
         let output = AVPlayerItemVideoOutput(pixelBufferAttributes: nil)
         item.add(output)
         self.item = item; self.output = output
+        previewView = view
+        view?.spectrumOutputChanged(on: item)
     }
     func detach() {
-        if let item, let output { item.remove(output) }
+        if let item, let output {
+            item.remove(output)
+            previewView?.spectrumOutputChanged(on: item)
+        }
+        previewView = nil
         item = nil; output = nil; lastFrame = nil
     }
     /// Rational floor on the fixed 30fps grid; never clamp invalid/end time to a plausible frame.
@@ -47,7 +55,7 @@ final class SpectrumPlaybackTiming {
     }
 }
 
-/// Bounded nonpresenting consumer of the same coordinator as the paused overlay.
+/// Bounded playback consumer of the same coordinator as the paused overlay.
 /// Cancelled tickets occupy slots until terminal delivery, bounding queued cancellation storms too.
 @MainActor
 final class PlaybackSpectrumController {
@@ -143,7 +151,7 @@ final class PlaybackSpectrumController {
             }
             let requestSerial = serial, start = ProcessInfo.processInfo.systemUptime
             let ticket = session.request(spectrum: key.spectrum, frame: key.frame,
-                                         priority: key.frame == currentFrame ? 0 : 1) { [weak self] outcome in
+                                         priority: key.frame == currentFrame ? 0 : 1, checkPlaybackMedia: true) { [weak self] outcome in
                 self?.finish(key, serial: requestSerial, outcome: outcome)
             }
             pending[key] = Pending(ticket: ticket, serial: requestSerial, start: start)
@@ -206,7 +214,7 @@ final class PlaybackSpectrumController {
 }
 
 extension ProjectStore {
-    /// 3C-2 entry point. Not called by a timer/display link or the periodic playhead observer in 3C-1.
+    /// 3C-2 entry point. Called by the active preview display link.
     /// No CALayer assignment occurs here or in the controller.
     func sampleSpectrumPlayback(hostTime: CFTimeInterval) {
         let playback = spectrumPreview.playback
@@ -215,7 +223,7 @@ extension ProjectStore {
               !view.hasPendingSpectrumSeek, let item = player.currentItem else {
             playback.stop(); return
         }
-        playback.timing.attach(item)
+        playback.timing.attach(item, view: view)
         let frame = playback.timing.sample(hostTime: hostTime, timeline: timeline)
         playback.advance(frame: frame, timeline: timeline)
     }

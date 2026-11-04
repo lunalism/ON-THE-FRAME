@@ -368,9 +368,10 @@ final class PlayerNSView: NSView {
         spectrumWindowObserver = nil
         if let window {
             spectrumWindowObserver = SpectrumWindowObservation(NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.spectrumOverlay.store?.spectrumPreview.playback.stop(); self?.spectrumOverlay.invalidate(forgetFrame: true) }
+                MainActor.assumeIsolated { self?.spectrumOverlay.stopPlaybackLink(); self?.spectrumOverlay.store?.spectrumPreview.playback.stop(); self?.spectrumOverlay.invalidate(forgetFrame: true) }
             })
         }
+        spectrumOverlay.updatePlaybackLink()
         if window == nil { spectrumOverlay.store?.spectrumPreview.playback.stop(); spectrumOverlay.invalidate(forgetFrame: true) }
         else if let store = spectrumOverlay.store, !store.isPlaying,
                 store.player.currentItem != nil, store.appliedGeneration == store.generation {
@@ -572,6 +573,7 @@ final class PlayerNSView: NSView {
     #if DEBUG || OTF_PREVIEW_COMPAT_TESTS
     /// 자체 검사 전용: 자막 층 상태(묶인 항목, 층 수)
     var subtitleBoundItem: AVPlayerItem? { subtitleSync?.playerItem }
+    var subtitleGenerationForTest: Int { subtitleGeneration }
     var subtitleLayerCount: Int { subtitleCanvas.sublayers?.count ?? 0 }
     func subtitleLayerForTest(_ id: UUID) -> CALayer? { subtitleLayers[id] }
     #endif
@@ -624,6 +626,14 @@ final class PlayerNSView: NSView {
             Task { @MainActor [weak self] in self?.bindPendingSubtitles() }
         }
     }
+    /// 비디오 출력을 추가하거나 제거하면 동기 층이 출력 변경 전 시각에 머물 수 있다.
+    /// 같은 항목에 다시 묶어 불투명도 애니메이션이 재생 시각을 따르게 한다.
+    func spectrumOutputChanged(on item: AVPlayerItem) {
+        guard let sync = subtitleSync, sync.playerItem === item else { return }
+        sync.playerItem = nil
+        sync.playerItem = item
+    }
+
     /// 기다리던 항목이 준비되면 지금 자막 층에 묶는다(그사이 자막 층이 바뀌었으면 새 층의 항목을 본다)
     private func bindPendingSubtitles() {
         guard let it = pendingSubtitleItem, it.status == .readyToPlay, let sync = subtitleSync, sync.playerItem == nil else { return }

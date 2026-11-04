@@ -28,8 +28,48 @@ final class PausedSpectrumOverlay {
     #endif
 
     init(view: PlayerNSView) { self.view = view }
-    func attach(_ store: ProjectStore) { self.store = store }
-    func detach() { invalidate(forgetFrame: true); store = nil }
+    private var playbackLink: CADisplayLink?
+
+    func updatePlaybackLink() {
+        guard let store, let view, view.window != nil, store.isPlaying,
+              !store.timeline.spectra.isEmpty else { stopPlaybackLink(); return }
+        guard playbackLink == nil else { return }
+        let link = view.displayLink(target: self, selector: #selector(playbackTick(_:)))
+        playbackLink = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    func stopPlaybackLink() {
+        playbackLink?.invalidate()
+        playbackLink = nil
+    }
+
+    @objc private func playbackTick(_ link: CADisplayLink) {
+        guard link === playbackLink, let store, let view, store.previewHost === view else { return }
+        store.sampleSpectrumPlayback(hostTime: link.targetTimestamp)
+        let controller = store.spectrumPreview.playback
+        let frame = controller.currentFrame
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        var ordered: [CALayer] = []
+        if let frame {
+            for entry in store.timeline.spectra.reversed() where entry.visible(atFrame: frame) {
+                guard case let .ready(_, rendered?) = controller.currentOutcome(spectrum: entry.id, frame: frame) else { continue }
+                let layer = layers[entry.id] ?? CALayer()
+                layer.actions = PlayerNSView.noActions
+                layer.contents = rendered.image
+                layer.frame = Self.layerRect(rendered.drawRect)
+                layers[entry.id] = layer
+                ordered.append(layer)
+            }
+        }
+        layers = layers.filter { ordered.contains($0.value) }
+        view.spectrumCanvas.sublayers = ordered
+    }
+
+    func attach(_ store: ProjectStore) { self.store = store; updatePlaybackLink() }
+    func detach() { stopPlaybackLink(); invalidate(forgetFrame: true); store = nil }
 
     func invalidate(forgetFrame: Bool = false) {
         serial &+= 1

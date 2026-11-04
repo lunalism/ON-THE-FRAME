@@ -14,6 +14,121 @@ enum PreviewSelfTest {
     struct Check: Codable { let name: String; let pass: Bool; let detail: String }
     struct Manifest: Codable { let width: Int; let height: Int; var steps: [Step]; var checks: [Check] }
 
+    static func runSpectrum(folder: URL) async {
+        let store = ProjectStore()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 360),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let view = PlayerNSView()
+        view.playerLayer.player = store.player
+        window.contentView = view
+        store.previewHost = view
+        window.orderFront(nil)
+        var lines: [String] = []
+        func check(_ name: String, _ passed: Bool) { lines.append("\(passed ? "PASS" : "FAIL") \(name)") }
+        defer {
+            try? lines.joined(separator: "\n").write(to: folder.appendingPathComponent("spectrum-playback.txt"), atomically: true, encoding: .utf8)
+            window.orderOut(nil)
+            NSApp.terminate(nil)
+        }
+        let urls = ["otf-A.mp4", "aud-wav48s.wav"].map { folder.appendingPathComponent($0) }
+        store.importFiles(urls)
+        guard await waitUntil(15, { store.importing == 0 && store.assets.count == 2 }),
+              let video = store.assets.first(where: { $0.url.lastPathComponent == "otf-A.mp4" }),
+              let audio = store.assets.first(where: { $0.id != video.id }) else { check("fixtures", false); return }
+        store.addToTimeline(video.id)
+        store.addLane(.audio)
+        store.seek(to: 0)
+        store.addToTimeline(audio.id)
+        guard let clip = store.timeline.audioClips.first(where: { $0.mediaID == audio.id }) else { check("selected WAV", false); return }
+        store.addSpectrum(fromAudioClip: clip.id, session: store.projectSession)
+        guard let entry = store.timeline.spectra.first,
+              await waitUntil(15, { store.appliedGeneration == store.generation && store.player.currentItem?.status == .readyToPlay }) else { check("setup", false); return }
+        store.seek(to: clip.start)
+        check("paused", await waitUntil(5) { view.spectrumOverlay.layers[entry.id]?.contents != nil })
+        store.play()
+        var frames = Set<Int>()
+        func sample() -> Bool {
+            if let f = store.spectrumPreview.playback.currentFrame, view.spectrumOverlay.layers[entry.id]?.contents != nil,
+               frames.insert(f).inserted {
+                lines.append("timeline=\(f) source=\(clip.sourceIn + f - clip.start) playerSeconds=\(store.player.currentTime().seconds)")
+            }
+            return frames.count >= 5
+        }
+        check("continuous distinct frames", await waitUntil(4, sample))
+        store.pause()
+        check("pause confirmation", await waitUntil(3) { view.spectrumOverlay.confirmedFrame == store.playhead && view.spectrumOverlay.layers[entry.id]?.contents != nil })
+        store.seek(to: 45); store.seek(to: 12)
+        check("latest seek", await waitUntil(3) { view.spectrumOverlay.confirmedFrame == 12 && view.spectrumOverlay.layers[entry.id]?.contents != nil })
+        frames.removeAll()
+        store.play()
+        check("resume", await waitUntil(4, sample))
+        check("end", await waitUntil(12) { !store.isPlaying && store.playhead == store.timeline.durationFrames && view.spectrumOverlay.layers.isEmpty })
+        store.seek(to: 0); store.play(); store.resetProject()
+        check("replace", await waitUntil(3) { store.player.currentItem == nil && store.spectrumPreview.playback.currentFrame == nil && view.spectrumOverlay.layers.isEmpty })
+    }
+
+    static func runSubtitleBoundaries(folder: URL) async {
+        let store = ProjectStore.shared
+        var rows: [String] = []
+        defer {
+            try? rows.joined(separator: "\n").write(to: folder.appendingPathComponent("boundary.tsv"), atomically: true, encoding: .utf8)
+            NSApp.terminate(nil)
+        }
+        guard await store.openProject(at: folder.appendingPathComponent("test.ontheframe")),
+              await waitUntil(10, { store.previewHost?.window != nil }), let view = store.previewHost,
+              await waitUntil(15, { store.player.currentItem?.status == .readyToPlay && view.subtitleBoundItem === store.player.currentItem }) else {
+            rows.append("setup failed"); return
+        }
+        let targets = [0, 117, 120, 150, 180, 237, 240, 270, 357, 360]
+        for entry in store.timeline.subtitles {
+            rows.append("item \(entry.id) \(entry.text) [\(entry.start),\(entry.end))")
+        }
+        rows.append("phase\ttarget\tplayerSeconds\tframe\tgeneration\tbound\texpected\tpresented\topacities\traster\tspectrumFrame")
+        func record(_ phase: String, _ target: Int) {
+            let time = store.player.currentTime(), f = store.settings.frame(containing: time)
+            let entries = store.timeline.subtitles
+            let layers = entries.map { view.subtitleLayerForTest($0.id) }
+            let alpha = layers.map { $0?.presentation()?.opacity ?? -1 }
+            let present = entries.indices.filter { alpha[$0] > 0.5 && layers[$0]?.presentation()?.contents != nil && layers[$0]?.presentation()?.isHidden == false }
+            let expected = store.timeline.subtitles(atFrame: f).map { $0.id.uuidString }
+            let fields = [phase, String(target), String(time.seconds), String(f), String(view.subtitleGenerationForTest),
+                          String(view.subtitleBoundItem === store.player.currentItem), expected.joined(separator: ","),
+                          present.map { entries[$0].id.uuidString }.joined(separator: ","), String(describing: alpha),
+                          String(describing: layers.map { $0?.contents != nil }), String(store.spectrumPreview.playback.currentFrame ?? -1)]
+            rows.append(fields.joined(separator: "\t"))
+        }
+        for frame in targets + [180, 61, 0] {
+            store.seek(to: frame)
+            guard await waitUntil(4, { !view.hasPendingSpectrumSeek }) else { rows.append("seek timeout"); return }
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            record("seek", frame)
+        }
+        func play() {
+            store.play()
+            if ProcessInfo.processInfo.arguments.contains("-OTFDisableSpectrumTicks") { view.spectrumOverlay.stopPlaybackLink() }
+        }
+        play()
+        for frame in targets {
+            _ = await waitUntil(6) { store.settings.frame(containing: store.player.currentTime()) >= frame }
+            record("play", frame)
+        }
+        _ = await waitUntil(2) { !store.isPlaying }
+        play()
+        _ = await waitUntil(3) { store.isPlaying && store.playhead > 1 && store.playhead < 30 }
+        record("replay", 0)
+        store.pause()
+        for frame in [180, 61, 270] {
+            store.seek(to: frame)
+            guard await waitUntil(4, { !view.hasPendingSpectrumSeek }) else { rows.append("seek timeout"); return }
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            record("postPlaybackSeek", frame)
+            play()
+            _ = await waitUntil(3) { store.playhead >= frame + 3 }
+            record("resume", frame + 3)
+            store.pause()
+        }
+    }
+
     static let P = 100
 
     static func run(folder: URL) async {
