@@ -67,13 +67,13 @@ enum PreviewSelfTest {
         check("replace", await waitUntil(3) { store.player.currentItem == nil && store.spectrumPreview.playback.currentFrame == nil && view.spectrumOverlay.layers.isEmpty })
     }
 
-    /// Generated 30 fps fixture: video [0,240), WAV [0,360) with sourceIn 30.
-    static func runAudioTail(folder: URL) async {
+    /// Both 30 fps fixtures use a 12-second selected WAV clip trimmed by one second.
+    static func runAudioInterval(folder: URL, videoGap: Bool) async {
         let store = ProjectStore.shared
         var log: [String] = []
         func check(_ name: String, _ pass: Bool) { log.append("\(pass ? "PASS" : "FAIL") \(name)") }
         defer {
-            try? log.joined(separator: "\n").write(to: folder.appendingPathComponent("audio-tail.txt"), atomically: true, encoding: .utf8)
+            try? log.joined(separator: "\n").write(to: folder.appendingPathComponent(videoGap ? "video-gap.txt" : "audio-tail.txt"), atomically: true, encoding: .utf8)
             NSApp.terminate(nil)
         }
         guard await store.openProject(at: folder.appendingPathComponent("test.ontheframe")),
@@ -87,8 +87,24 @@ enum PreviewSelfTest {
             var ends: [Double] = []
             for track in tracks { ends.append(try await track.load(.timeRange).end.seconds) }
             log.append("itemSeconds=\(item.duration.seconds) audioTrackEnds=\(ends) visualEnd=\(store.timeline.clips.map(\.end).max() ?? -1) source=\(clip.lineageKey)")
-            check("duration", item.duration.seconds == 12 && ends.contains(12) && store.timeline.clips.map(\.end).max() == 240)
-            let targets = [239, 240, 245, 270, 330]
+            let ranges = store.timeline.clips.sorted { $0.start < $1.start }.map { $0.start..<$0.end }
+            check("duration", item.duration.seconds == 12 && ends.contains(12) &&
+                  (videoGap ? ranges == [0..<120, 240..<360] : ranges.last?.upperBound == 240))
+            if videoGap {
+                var wavMappings: [CMTimeMapping] = []
+                for track in tracks {
+                    for segment in try await track.load(.segments) where !segment.isEmpty {
+                        guard let source = (segment as? AVCompositionTrackSegment)?.sourceURL,
+                              source.standardizedFileURL == media.url.standardizedFileURL else { continue }
+                        wavMappings.append(segment.timeMapping)
+                    }
+                }
+                check("selected WAV spans both boundaries without a splice", wavMappings.count == 1 &&
+                      wavMappings.first?.source == CMTimeRange(start: store.settings.time(30), duration: item.duration) &&
+                      wavMappings.first?.target == CMTimeRange(start: .zero, duration: item.duration))
+                log += try await recordGapPictures(store, item: item, folder: folder)
+            }
+            let targets = videoGap ? [117, 120, 123, 180, 237, 240, 243, 270, 357] : [239, 240, 245, 270, 330]
             let settings = entry.style.analysisSettings
             let reference = try await Task.detached {
                 let source = try await SpectrumFileSource.open(url: media.url)
@@ -105,33 +121,47 @@ enum PreviewSelfTest {
                 }
                 return values
             }.value
-            store.seek(to: 220)
+            store.seek(to: videoGap ? 0 : 220)
             _ = await waitUntil(3) { !view.hasPendingSpectrumSeek }
             store.play()
             var seen = Set<Int>()
-            let deadline = Date().addingTimeInterval(8)
+            var awaitingDisplay = Set<Int>()
+            let deadline = Date().addingTimeInterval(videoGap ? 16 : 8)
             while store.isPlaying && Date() < deadline {
                 if let frame = controller.currentFrame, let expected = reference[frame], !seen.contains(frame),
-                   case let .ready(bands, rendered?) = controller.currentOutcome(spectrum: entry.id, frame: frame),
-                   let displayed = view.spectrumOverlay.layers[entry.id]?.contents, displayed as AnyObject === rendered.image {
+                   case let .ready(bands, rendered) = controller.currentOutcome(spectrum: entry.id, frame: frame) {
+                    let displayed = view.spectrumOverlay.layers[entry.id]?.contents
+                    if rendered != nil && displayed == nil {
+                        if awaitingDisplay.insert(frame).inserted {
+                            log.append("awaiting display frame=\(frame) playerSeconds=\(item.currentTime().seconds)")
+                        }
+                        try? await Task.sleep(nanoseconds: 1_000_000)
+                        continue
+                    }
+                    let matchesDisplay: Bool
+                    if let rendered {
+                        matchesDisplay = displayed as AnyObject? === rendered.image
+                    } else {
+                        matchesDisplay = displayed == nil && expected.allSatisfy { $0 == 0 }
+                    }
                     seen.insert(frame)
                     let time = item.currentTime()
-                    log.append("timeline=\(frame) source=\(frame + 30) playerSeconds=\(time.seconds) peak=\(bands.max() ?? -1)")
-                    check("bands and clock \(frame)", bands == expected && abs(time.seconds * 30 - Double(frame)) < 2)
-                    if frame == 270 {
+                    log.append("timeline=\(frame) source=\(frame + 30) playerSeconds=\(time.seconds) visible=\(displayed != nil) peak=\(bands.max() ?? -1)")
+                    check("display, bands and clock \(frame)", matchesDisplay && bands == expected && abs(time.seconds * 30 - Double(frame)) < 2)
+                    if frame == (videoGap ? 180 : 270) {
                         store.pause()
                         let stopped = store.playhead
                         let settled = await waitUntil(2) { view.spectrumOverlay.confirmedFrame == stopped && view.spectrumOverlay.layers[entry.id]?.contents != nil }
-                        check("pause at nine seconds", abs(stopped - frame) <= 1 && settled && controller.currentFrame == nil)
+                        check("pause at target", abs(stopped - frame) <= 1 && settled && controller.currentFrame == nil)
                         store.play()
                     }
                 }
                 try? await Task.sleep(nanoseconds: 1_000_000)
             }
-            check("continuous boundary and tail", seen == Set(targets) && reference[240] != reference[245])
+            check("continuous interval", seen == Set(targets) && reference[240] != reference[videoGap ? 243 : 245])
             let drained = await waitUntil(2) { controller.pendingCount == 0 }
             check("end", drained && !store.isPlaying && store.playhead == 360 && controller.currentFrame == nil && view.spectrumOverlay.layers.isEmpty)
-            for frame in [270, 300, 90, 330] {
+            for frame in (videoGap ? [180, 90, 120, 270, 180, 240, 90] : [270, 300, 90, 330]) {
                 store.seek(to: frame)
                 check("paused \(frame)", await waitUntil(3) { view.spectrumOverlay.confirmedFrame == frame && view.spectrumOverlay.layers[entry.id]?.contents != nil })
                 store.play()
@@ -145,10 +175,11 @@ enum PreviewSelfTest {
             }
             store.selection = entry.id
             store.setSpectrumSource(entry.id, key: nil, from: entry.sourceKey, project: store.projectSession)
-            store.seek(to: 300)
+            let unsetFrame = videoGap ? 180 : 300
+            store.seek(to: unsetFrame)
             _ = await waitUntil(2) { !view.hasPendingSpectrumSeek }
             store.play()
-            let advanced = await waitUntil(2) { (controller.currentFrame ?? -1) >= 310 }
+            let advanced = await waitUntil(2) { (controller.currentFrame ?? -1) >= unsetFrame + 10 }
             check("unset source stays blank while WAV plays", advanced && store.timeline.spectrum(entry.id)?.sourceKey == nil &&
                   controller.retainedCount == 0 && view.spectrumOverlay.layers.isEmpty)
             store.resetProject()
@@ -168,7 +199,7 @@ enum PreviewSelfTest {
               await waitUntil(15, { store.player.currentItem?.status == .readyToPlay && view.subtitleBoundItem === store.player.currentItem }) else {
             rows.append("setup failed"); return
         }
-        let targets = [0, 117, 120, 150, 180, 237, 240, 270, 357, 360]
+        let targets = [0, 117, 120, 123, 150, 180, 237, 240, 243, 270, 357, 360]
         for entry in store.timeline.subtitles {
             rows.append("item \(entry.id) \(entry.text) [\(entry.start),\(entry.end))")
         }
@@ -306,21 +337,72 @@ enum PreviewSelfTest {
                 if o.hasNewPixelBuffer(forItemTime: t) || Date().timeIntervalSince(start) > 1 {
                     var shown = CMTime.invalid
                     if let pb = o.copyPixelBuffer(forItemTime: t, itemTimeForDisplay: &shown), shown.isNumeric, abs((shown - t).seconds) < 0.0005 {
-                        CVPixelBufferLockBaseAddress(pb, .readOnly)
-                        defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
-                        let w = CVPixelBufferGetWidth(pb), h = CVPixelBufferGetHeight(pb), bpr = CVPixelBufferGetBytesPerRow(pb)
-                        var d = Data(count: w * h * 4)
-                        d.withUnsafeMutableBytes { dst in
-                            let base = CVPixelBufferGetBaseAddress(pb)!
-                            for y in 0..<h { memcpy(dst.baseAddress! + y * w * 4, base + y * bpr, w * 4) }
-                        }
-                        return (try? d.write(to: url)) != nil ? url : nil
+                        return (try? PreviewSelfTest.writePicture(pb, to: url)) != nil ? url : nil
                     }
                 }
                 try? await Task.sleep(nanoseconds: 10_000_000)
             }
             return nil
         }
+    }
+
+    private static func writePicture(_ pb: CVPixelBuffer, to url: URL) throws {
+        CVPixelBufferLockBaseAddress(pb, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
+        let w = CVPixelBufferGetWidth(pb), h = CVPixelBufferGetHeight(pb), bpr = CVPixelBufferGetBytesPerRow(pb)
+        var d = Data(count: w * h * 4)
+        d.withUnsafeMutableBytes { dst in
+            let base = CVPixelBufferGetBaseAddress(pb)!
+            for y in 0..<h { memcpy(dst.baseAddress! + y * w * 4, base + y * bpr, w * 4) }
+        }
+        try d.write(to: url)
+    }
+
+    /// A black composition image can remain current across the gap without a new video sample.
+    /// Defer readback of these nine FHD samples until paused so diagnostic I/O cannot skip a boundary.
+    private static func recordGapPictures(_ store: ProjectStore, item: AVPlayerItem, folder: URL) async throws -> [String] {
+        let pictures = folder.appendingPathComponent("preview")
+        try FileManager.default.createDirectory(at: pictures, withIntermediateDirectories: true)
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+        item.add(output)
+        defer { item.remove(output) }
+        var latest: CVPixelBuffer?
+        var shown = CMTime.invalid
+        var rows: [String] = []
+        var manifest = Manifest(width: 1920, height: 1080, steps: [], checks: [])
+        store.play()
+        var snapshots: [(CVPixelBuffer, URL)] = []
+        for target in [117, 120, 123, 180, 237, 240, 243, 270, 357] {
+            let time = store.settings.time(target)
+            let deadline = Date().addingTimeInterval(5)
+            var now = item.currentTime()
+            while Date() < deadline {
+                now = item.currentTime()
+                if output.hasNewPixelBuffer(forItemTime: now) {
+                    var display = CMTime.invalid
+                    if let buffer = output.copyPixelBuffer(forItemTime: now, itemTimeForDisplay: &display) {
+                        latest = buffer
+                        shown = display
+                    }
+                }
+                if now >= time { break }
+                try await Task.sleep(nanoseconds: 1_000_000)
+            }
+            let inGap = (120..<240).contains(target)
+            let displayFrame = shown.isNumeric ? store.settings.frame(containing: shown) : -1
+            let onTime = store.settings.frame(containing: now) == target
+            let valid = onTime && (inGap ? (120...target).contains(displayFrame) : displayFrame == target)
+            let name = "picture-\(target).bgra"
+            if let latest { snapshots.append((latest, pictures.appendingPathComponent(name))) }
+            let expected = inGap ? "black" : "id33#\(target < 120 ? target : target - 240)"
+            manifest.steps.append(Step(name: String(target), file: latest == nil ? nil : name, expected: expected,
+                                       playhead: target, generation: store.generation, applied: store.appliedGeneration))
+            rows.append("\(valid ? "PASS" : "FAIL") video target=\(target) player=\(now.seconds) outputFrame=\(displayFrame)")
+        }
+        store.pause()
+        for (buffer, url) in snapshots { try writePicture(buffer, to: url) }
+        try JSONEncoder().encode(manifest).write(to: folder.appendingPathComponent("preview-manifest.json"))
+        return rows
     }
 
     private static func waitUntil(_ seconds: Double, _ cond: () -> Bool) async -> Bool {

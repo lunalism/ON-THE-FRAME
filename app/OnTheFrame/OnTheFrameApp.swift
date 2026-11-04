@@ -366,8 +366,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await LayoutSelfTest.run(folder: folder, phase: phase) }
             return
         }
-        if args.contains("-OTFAudioTailTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
-            Task { await PreviewSelfTest.runAudioTail(folder: folder) }
+        let videoGapTest = args.contains("-OTFVideoGapTest")
+        if args.contains("-OTFAudioTailTest") || videoGapTest, let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await PreviewSelfTest.runAudioInterval(folder: folder, videoGap: videoGapTest) }
             return
         }
         if args.contains("-OTFSubtitleBoundaryProbe"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
