@@ -63,6 +63,11 @@ enum SpectrumPlaybackSelfTest {
         check("timing.videoEndedAudioContinues", SpectrumPlaybackTiming.select(requested: tail, display: CMTime(value: 119, timescale: 30), timeline: timeline) == nil)
         let gap = Timeline(clips: [Clip(mediaID: media, start: 60, sourceIn: 0, length: 60)], durationFrames: 180)
         check("timing.videoGapUnknown", SpectrumPlaybackTiming.select(requested: time, display: time, timeline: gap) == nil)
+        check("timing.tailAtBoundary", SpectrumPlaybackTiming.audioTailFrame(at: CMTime(value: 120, timescale: 30), timeline: timeline) == 120)
+        check("timing.noTailInsideVideo", SpectrumPlaybackTiming.audioTailFrame(at: time, timeline: timeline) == nil)
+        check("timing.noTailInGap", SpectrumPlaybackTiming.audioTailFrame(at: time, timeline: gap) == nil)
+        check("timing.noAudioOnlyFallback", SpectrumPlaybackTiming.audioTailFrame(at: tail, timeline: audioOnly) == nil)
+        check("timing.noTailAtEnd", SpectrumPlaybackTiming.audioTailFrame(at: CMTime(value: 180, timescale: 30), timeline: timeline) == nil)
         check("timing.noSource", c.timing.sample(hostTime: 0, timeline: timeline) == nil)
 
         c.advance(frame: 30, timeline: timeline)

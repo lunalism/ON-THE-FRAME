@@ -41,6 +41,15 @@ final class SpectrumPlaybackTiming {
               timeline.clips.contains(where: { $0.start <= displayFrame && displayFrame < $0.start + $0.length }) else { return nil }
         return displayFrame
     }
+    /// Only a trailing audio interval may use the playing item's clock without a confirmed picture.
+    static func audioTailFrame(at time: CMTime, timeline: Timeline) -> Int? {
+        guard let frame = frame(time, duration: timeline.durationFrames),
+              !timeline.clips.isEmpty, timeline.clips.allSatisfy({ $0.end <= frame }),
+              !InternalImagePreview.containsImages(timeline),
+              timeline.audioClips.contains(where: { $0.start <= frame && frame < $0.end }) else { return nil }
+        return frame
+    }
+
     func sample(hostTime: CFTimeInterval, timeline: Timeline) -> Int? {
         guard hostTime.isFinite, let output, item != nil else { return nil }
         let requested = output.itemTime(forHostTime: hostTime)
@@ -224,7 +233,10 @@ extension ProjectStore {
             playback.stop(); return
         }
         playback.timing.attach(item, view: view)
-        let frame = playback.timing.sample(hostTime: hostTime, timeline: timeline)
+        var frame = playback.timing.sample(hostTime: hostTime, timeline: timeline)
+        if frame == nil, player.timeControlStatus == .playing {
+            frame = SpectrumPlaybackTiming.audioTailFrame(at: item.currentTime(), timeline: timeline)
+        }
         playback.advance(frame: frame, timeline: timeline)
     }
 }

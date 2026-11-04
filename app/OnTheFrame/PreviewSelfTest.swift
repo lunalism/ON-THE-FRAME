@@ -67,6 +67,95 @@ enum PreviewSelfTest {
         check("replace", await waitUntil(3) { store.player.currentItem == nil && store.spectrumPreview.playback.currentFrame == nil && view.spectrumOverlay.layers.isEmpty })
     }
 
+    /// Generated 30 fps fixture: video [0,240), WAV [0,360) with sourceIn 30.
+    static func runAudioTail(folder: URL) async {
+        let store = ProjectStore.shared
+        var log: [String] = []
+        func check(_ name: String, _ pass: Bool) { log.append("\(pass ? "PASS" : "FAIL") \(name)") }
+        defer {
+            try? log.joined(separator: "\n").write(to: folder.appendingPathComponent("audio-tail.txt"), atomically: true, encoding: .utf8)
+            NSApp.terminate(nil)
+        }
+        guard await store.openProject(at: folder.appendingPathComponent("test.ontheframe")),
+              await waitUntil(15, { store.player.currentItem?.status == .readyToPlay && store.previewHost?.window != nil }),
+              let view = store.previewHost, let item = store.player.currentItem,
+              let entry = store.timeline.spectra.first, let clip = store.timeline.audioClips.first,
+              entry.sourceKey == clip.lineageKey, let media = store.mediaByID[clip.mediaID] else { check("setup", false); return }
+        let controller = store.spectrumPreview.playback
+        do {
+            let tracks = try await item.asset.loadTracks(withMediaType: .audio)
+            var ends: [Double] = []
+            for track in tracks { ends.append(try await track.load(.timeRange).end.seconds) }
+            log.append("itemSeconds=\(item.duration.seconds) audioTrackEnds=\(ends) visualEnd=\(store.timeline.clips.map(\.end).max() ?? -1) source=\(clip.lineageKey)")
+            check("duration", item.duration.seconds == 12 && ends.contains(12) && store.timeline.clips.map(\.end).max() == 240)
+            let targets = [239, 240, 245, 270, 330]
+            let settings = entry.style.analysisSettings
+            let reference = try await Task.detached {
+                let source = try await SpectrumFileSource.open(url: media.url)
+                var chunks: [Int: [[Float]]] = [:]
+                let pieces = [SpectrumSourcePiece(start: 0, length: media.frameCount, sourceIn: 0)]
+                var values: [Int: [Float]] = [:]
+                for frame in targets {
+                    let needed = try SpectrumAnalysis.chunks(frame: frame + 30, pieces: pieces, fps: 30,
+                        rate: source.sampleRate, settings: settings, chunkSamples: source.chunkSamples)
+                    for index in needed where chunks[index] == nil { chunks[index] = try await source.decodeChunk(index) }
+                    values[frame] = try SpectrumAnalysis.bands(frame: frame + 30, pieces: pieces, fps: 30,
+                        rate: source.sampleRate, channelCount: source.channelCount, chunkSamples: source.chunkSamples,
+                        settings: settings) { chunks[$0] }
+                }
+                return values
+            }.value
+            store.seek(to: 220)
+            _ = await waitUntil(3) { !view.hasPendingSpectrumSeek }
+            store.play()
+            var seen = Set<Int>()
+            let deadline = Date().addingTimeInterval(8)
+            while store.isPlaying && Date() < deadline {
+                if let frame = controller.currentFrame, let expected = reference[frame], !seen.contains(frame),
+                   case let .ready(bands, rendered?) = controller.currentOutcome(spectrum: entry.id, frame: frame),
+                   let displayed = view.spectrumOverlay.layers[entry.id]?.contents, displayed as AnyObject === rendered.image {
+                    seen.insert(frame)
+                    let time = item.currentTime()
+                    log.append("timeline=\(frame) source=\(frame + 30) playerSeconds=\(time.seconds) peak=\(bands.max() ?? -1)")
+                    check("bands and clock \(frame)", bands == expected && abs(time.seconds * 30 - Double(frame)) < 2)
+                    if frame == 270 {
+                        store.pause()
+                        let stopped = store.playhead
+                        let settled = await waitUntil(2) { view.spectrumOverlay.confirmedFrame == stopped && view.spectrumOverlay.layers[entry.id]?.contents != nil }
+                        check("pause at nine seconds", abs(stopped - frame) <= 1 && settled && controller.currentFrame == nil)
+                        store.play()
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000)
+            }
+            check("continuous boundary and tail", seen == Set(targets) && reference[240] != reference[245])
+            let drained = await waitUntil(2) { controller.pendingCount == 0 }
+            check("end", drained && !store.isPlaying && store.playhead == 360 && controller.currentFrame == nil && view.spectrumOverlay.layers.isEmpty)
+            for frame in [270, 300, 90, 330] {
+                store.seek(to: frame)
+                check("paused \(frame)", await waitUntil(3) { view.spectrumOverlay.confirmedFrame == frame && view.spectrumOverlay.layers[entry.id]?.contents != nil })
+                store.play()
+                check("resume \(frame)", await waitUntil(2) {
+                    guard let current = controller.currentFrame else { return false }
+                    return (frame..<frame + 12).contains(current) && view.spectrumOverlay.layers[entry.id]?.contents != nil
+                })
+                store.pause()
+                let frozen = store.playhead
+                check("freeze \(frozen)", await waitUntil(2) { view.spectrumOverlay.confirmedFrame == frozen && controller.currentFrame == nil })
+            }
+            store.selection = entry.id
+            store.setSpectrumSource(entry.id, key: nil, from: entry.sourceKey, project: store.projectSession)
+            store.seek(to: 300)
+            _ = await waitUntil(2) { !view.hasPendingSpectrumSeek }
+            store.play()
+            let advanced = await waitUntil(2) { (controller.currentFrame ?? -1) >= 310 }
+            check("unset source stays blank while WAV plays", advanced && store.timeline.spectrum(entry.id)?.sourceKey == nil &&
+                  controller.retainedCount == 0 && view.spectrumOverlay.layers.isEmpty)
+            store.resetProject()
+            check("replacement", await waitUntil(3) { store.player.currentItem == nil && controller.pendingCount == 0 && view.spectrumOverlay.layers.isEmpty })
+        } catch { check(String(describing: error), false) }
+    }
+
     static func runSubtitleBoundaries(folder: URL) async {
         let store = ProjectStore.shared
         var rows: [String] = []
