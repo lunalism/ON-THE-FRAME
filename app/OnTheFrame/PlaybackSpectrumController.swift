@@ -41,14 +41,22 @@ final class SpectrumPlaybackTiming {
               timeline.clips.contains(where: { $0.start <= displayFrame && displayFrame < $0.start + $0.length }) else { return nil }
         return displayFrame
     }
-    /// After the first video clip ends, a gap or tail can follow item time until video coverage resumes.
+    /// Audio-backed intervals without clip coverage follow item time in projects containing video.
     static func audioIntervalFrame(at time: CMTime, timeline: Timeline) -> Int? {
         guard let frame = frame(time, duration: timeline.durationFrames),
-              timeline.clips.contains(where: { $0.end <= frame }),
+              !timeline.clips.isEmpty,
               !timeline.clips.contains(where: { $0.start <= frame && frame < $0.end }),
               !InternalImagePreview.containsImages(timeline),
               timeline.audioClips.contains(where: { $0.start <= frame && frame < $0.end }) else { return nil }
+        if !timeline.clips.contains(where: { $0.start <= frame }) {
+            guard timeline.spectra.contains(where: { $0.visible(atFrame: frame) && hasActiveSource($0, at: frame, timeline: timeline) }) else { return nil }
+        }
         return frame
+    }
+
+    static func hasActiveSource(_ item: SpectrumItem, at frame: Int, timeline: Timeline) -> Bool {
+        guard let key = item.sourceKey else { return false }
+        return timeline.audioClips.contains { $0.lineageKey == key && $0.start <= frame && frame < $0.end }
     }
 
     func sample(hostTime: CFTimeInterval, timeline: Timeline) -> Int? {
@@ -88,6 +96,7 @@ final class PlaybackSpectrumController {
     let timing = SpectrumPlaybackTiming()
     private(set) var currentFrame: Int?
     private var serial = 0
+    private var firstVideoFrame = 0
     private var epoch = -1, revision = -1
     private var desired: [Key] = []
     private var completed: [Key: CompletionState] = [:]
@@ -124,6 +133,7 @@ final class PlaybackSpectrumController {
         guard let session else { stop(); return }
         if epoch != session.epoch || revision != session.revision {
             stop(detachTiming: false); epoch = session.epoch; revision = session.revision
+            firstVideoFrame = timeline.clips.lazy.map(\.start).min() ?? 0
         }
         guard let frame, frame >= 0, frame < timeline.durationFrames else {
             if currentFrame != nil { stop(detachTiming: false) }
@@ -139,6 +149,7 @@ final class PlaybackSpectrumController {
             guard next < timeline.durationFrames else { break }
             for item in timeline.spectra where item.visible(atFrame: next) {
                 if desired.count == Self.pendingLimit { break }
+                if next < firstVideoFrame && !SpectrumPlaybackTiming.hasActiveSource(item, at: next, timeline: timeline) { continue }
                 desired.append(Key(spectrum: item.id, frame: next))
             }
         }
