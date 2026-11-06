@@ -14,6 +14,9 @@ import OnTheFrameEngine
     // 13 publication(id,deadline); 14 rejected(id); 15 identity(lease,item,composition)
     // 16 invalidation(lease,serial,accessRevision,session,generation)
     // 20 tick(id,targetHostTime,playhead); 21 guard(tick,1=player/2=access,context)
+    // 23 timing(tick,requestedUS,displayUS,requestedFrame,selected,reason,lastFrame)
+    // reason: 1 invalid/uncovered, 2 no new buffer, 3 copy failed, 4 select completed.
+    // 24 fallback(tick,itemUS,itemFrame,selected,timeControlStatus,covered)
     // 22 chosen(tick,frame,lease); 30 clear(oldFrame,serial,tick); 31 set(frame,serial,tick)
     // 32 request(id,frame,serial,epoch,revision,spectrumHash)
     // 33 delivery(id,frame,serial,outcome); 34 accepted(id,frame,serial,outcome,image,spectrumHash)

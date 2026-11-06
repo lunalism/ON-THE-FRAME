@@ -4,6 +4,19 @@
 
 ## 기준
 
+**2026-11-06 - SP-3C2-40: STAGE 4 CONTRACT READY**
+
+영상 backed·lead-in·공백·꼬리·pure-audio, 내부 image-covered/gap/tail·mixed, 선택 계보/시간 매핑, proactive renewal은 구현 및 해당 자동 fixture 검증 범위다. 과거 영상·공백·꼬리 제한 수락만 유지하고 **최신 통합판 OWNER MANUAL DEFERRED**다. 전체 Stage 3C-2 수락은 미완료다.
+
+시작/전환 UX 공백, 느린 access validation starvation, large-catalog, 간헐 image player-layer, full Release app, 장기/물리 timing은 남는다. B는 Stage4 설계·제한된 prototype의 일괄 차단 사유가 아니다. 공유 매핑 C가 새로 발견되면 수정 전 구현 진행을 재평가한다. 최종 release 수락과 prototype 진입은 다르다.
+
+이번 시작 관리량19,041,872KiB(약18.160GiB), 여유 약1.840GiB. 문서 수 KiB만 추가하며 새 빌드/대형 산출물/삭제 없음. 미래 작업은 기존 fixture/엔진 바이너리 재사용, 단일 job, 제한 APFS scratch와 build/cache 포함 사전 예산,20GiB 도달 전 중지 계획이 필요하다. 용량 부족 시 별도 승인된 좁은 cache 정리 또는 증거 의존성 검토 후 artifact 재배치/이미지 관리안을 제안하되 이번에 수행하지 않는다.
+
+다음 권고는 이 체크포인트의 검토·게시 작업을 별도 지시로 수행한 뒤, 본 계약의 비동기 frame bridge/메모리 계수를 구체화한 첫 Stage4 구현 작업이다. 이번에 export rejection을 제거하거나 export를 구현하지 않았다.
+
+
+[SP-3C2-40: boundary audit and proposed export contract](diagnostics/SP-3C2-40-EXPORT-CONTRACT.md)
+
 **2026-11-06 · SP-3C2-35 — PUBLICATION READY (감사·미커밋).** 선행 갱신과 Debug trace를 전체8개 후보로 감사했고 중대한 게시 차단 결함을 발견하지 않았다. 소스5개·앱·증거 지문을 확인했으며 이번 변경은 문서3개뿐이다. 아래 자동 결과는 SP-3C2-34 과거 실행이며 새 빌드/기능 테스트는 없다. TTL1초/선행100ms는 잠정 B 정책이고, 현재 유효 lease만 pending 중 유지한다. 실패는 MainActor 처리 시 즉시 철회하고 만료는 실행 가능한 tick에서 차단한다. trace는 Debug·명시적 기록,8,192개/2MiB 제한으로 보존 가능하며 다중 store/spectrum 상관·무오버헤드는 보장하지 않는다. 비교 미확인8개, 느린 검증 starvation, 과거 이미지 player-layer 간헐 문제·OS 철회·장기/물리 지연·전체 Release 앱 차단은 남는다. **OWNER MANUAL DEFERRED — NOT PASS.** Stage 3C-2 전체 수락과 Stage4 export 미완료. 관리 약19.48/20GiB, index 비어 있음, 삭제/staging/commit/push 없음. 다음 개발 권고는 공백/꼬리 경계3개 timing/분석 지연 진단이다. [계약·trace 경계·게시 감사](diagnostics/SP-3C2-28-IMAGE-SPECTRUM.md#sp-3c2-35--선행-갱신debug-trace-게시-감사-2026-11-06)
 
 **2026-11-06 · SP-3C2-34 — PROACTIVE RENEWAL PASS (자동 검증·미커밋).** 게시 HEAD/upstream `844f2e485c0873bd875a0ae865cf0e151cb166e3`. 승인된 잠정 TTL1초/선행100ms를 적용했다. 기존 lease는 갱신 pending 중에도 원래 만료 전까지 허용하며, 성공은 시작+1초 이전·동일 컨텍스트에서만 게시한다. 실패/무효화는 즉시 철회하고 worker는 취소 후 종료까지 슬롯을 유지한다. 시작 간격0.9초, 실패/만료 성공 뒤1초 제한은 교체·무효화에도 유지한다. 기존 Debug 계측 보존. 새 signed 재생135/135·픽셀40·자막1800/1800·FFT/layer1792/1800, 선행 갱신70회에서 접근 갱신에 의한 layer 제거0회. 초기5개와 공백/꼬리 경계3개 미확인 표본은 남는다. 계약19/19·접근16/16·합성 지연3/3·controller92/92·overlay58/58·eligibility32/32/gate-off3/3·오디오37/37·lead37/37·gap46/46·tail23/23, 보존 엔진 Debug/Release 새 실행39/39씩. 1.1초 지연의 starvation은 fail closed로 남으며 무공백/물리 scan-out/지속 접근을 보장하지 않는다. **OWNER MANUAL DEFERRED — NOT PASS.** 관리 약19.48/20GiB, index 비어 있음, 정리·staging/commit/push 없음. 다음은 선행 갱신 체크포인트 감사다. [정책·검증·실패 보존·남은 범위](diagnostics/SP-3C2-28-IMAGE-SPECTRUM.md#sp-3c2-34--선행-이미지-접근-갱신-2026-11-06)

@@ -58,16 +58,49 @@ final class SpectrumPlaybackTiming {
         return timeline.audioClips.contains { $0.lineageKey == key && $0.start <= frame && frame < $0.end }
     }
 
+    #if DEBUG
+    private static func traceBoundary(_ frame: Int?) -> Bool {
+        guard let frame else { return true }
+        return (0...2).contains(frame) || (118...122).contains(frame)
+            || (238...242).contains(frame) || (358...360).contains(frame)
+    }
+    #endif
+
     func sample(hostTime: CFTimeInterval, timeline: Timeline) -> Int? {
         guard hostTime.isFinite, let output, item != nil else { return nil }
         let requested = output.itemTime(forHostTime: hostTime)
+        #if DEBUG
+        var traceDisplay = CMTime.invalid, traceReason: Int64 = 1, traceSelected: Int? = nil
+        defer {
+            if SpectrumContinuityTrace.active, Self.traceBoundary(Self.frame(requested, duration: timeline.durationFrames)) {
+                SpectrumContinuityTrace.record(23, SpectrumContinuityTrace.tick,
+                    requested.isNumeric ? Int64(requested.seconds * 1_000_000) : -1,
+                    traceDisplay.isNumeric ? Int64(traceDisplay.seconds * 1_000_000) : -1,
+                    Int64(Self.frame(requested, duration: timeline.durationFrames) ?? -1),
+                    Int64(traceSelected ?? -1), traceReason, Int64(lastFrame ?? -1))
+            }
+        }
+        #endif
         guard let frame = Self.frame(requested, duration: timeline.durationFrames),
               timeline.clips.contains(where: { $0.start <= frame && frame < $0.start + $0.length }) else { lastFrame = nil; return nil }
-        guard output.hasNewPixelBuffer(forItemTime: requested) else { return lastFrame == frame ? frame : nil }
+        guard output.hasNewPixelBuffer(forItemTime: requested) else {
+            #if DEBUG
+            traceReason = 2; traceSelected = lastFrame == frame ? frame : nil
+            #endif
+            return lastFrame == frame ? frame : nil
+        }
         var display = CMTime.invalid
         // Acquire only to obtain its media timestamp. No readback, image copy, or retained pixel buffer.
-        guard output.copyPixelBuffer(forItemTime: requested, itemTimeForDisplay: &display) != nil else { lastFrame = nil; return nil }
+        guard output.copyPixelBuffer(forItemTime: requested, itemTimeForDisplay: &display) != nil else {
+            #if DEBUG
+            traceReason = 3; traceDisplay = display
+            #endif
+            lastFrame = nil; return nil
+        }
         lastFrame = Self.select(requested: requested, display: display, timeline: timeline)
+        #if DEBUG
+        traceReason = 4; traceDisplay = display; traceSelected = lastFrame
+        #endif
         return lastFrame
     }
 }
@@ -286,9 +319,27 @@ extension ProjectStore {
         }
         playback.timing.attach(item, view: view)
         var frame = playback.timing.sample(hostTime: hostTime, timeline: timeline)
+        #if DEBUG
+        if frame == nil {
+            let status = player.timeControlStatus
+            // Capture the exact existing fallback query; no second playback clock.
+            let fallbackTime = status == .playing ? item.currentTime() : CMTime.invalid
+            if status == .playing {
+                frame = SpectrumPlaybackTiming.audioIntervalFrame(at: fallbackTime, timeline: timeline, validatedImageAccess: hasImages)
+            }
+            let fallbackFrame = SpectrumPlaybackTiming.frame(fallbackTime, duration: timeline.durationFrames)
+            if SpectrumContinuityTrace.active, fallbackFrame == nil || [0, 1, 2, 118, 119, 120, 121, 122, 238, 239, 240, 241, 242, 358, 359, 360].contains(fallbackFrame!) {
+                let covered = fallbackFrame.map { f in timeline.clips.contains { $0.start <= f && f < $0.end } } ?? false
+                SpectrumContinuityTrace.record(24, SpectrumContinuityTrace.tick,
+                    fallbackTime.isNumeric ? Int64(fallbackTime.seconds * 1_000_000) : -1,
+                    Int64(fallbackFrame ?? -1), Int64(frame ?? -1), Int64(status.rawValue), covered ? 1 : 0)
+            }
+        }
+        #else
         if frame == nil, player.timeControlStatus == .playing {
             frame = SpectrumPlaybackTiming.audioIntervalFrame(at: item.currentTime(), timeline: timeline, validatedImageAccess: hasImages)
         }
+        #endif
         #if DEBUG
         SpectrumContinuityTrace.record(22, SpectrumContinuityTrace.tick, Int64(frame ?? -1), SpectrumContinuityTrace.lease)
         #endif
