@@ -8,6 +8,8 @@ import Foundation
 public struct PlannedComposition: @unchecked Sendable {
     /// Internal capability: preview adapters can never be passed to ExportService.
     var imagePreviewOnly = false
+    /// Read-only mode identity, not proof of installation or continued source access.
+    public var isImagePreviewOnly: Bool { imagePreviewOnly }
     public let composition: AVComposition
     public let videoComposition: AVVideoComposition
     public let durationFrames: Int

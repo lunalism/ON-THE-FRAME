@@ -188,6 +188,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
+        if args.contains("-OTFImageEligibilityTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await ImageEligibilitySelfTest.run(folder: folder) }
+            return
+        }
         if args.contains("-OTFImageRelinkTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await ImageRelinkSelfTest.run(folder:folder) }
             return

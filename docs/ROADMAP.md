@@ -6,6 +6,12 @@
 
 ## S. 현재 상태 체크리스트 (정본, 2026-10-11)
 
+**2026-11-06 · SP-3C2-26 — PUBLICATION READY (감사·미커밋).** SP-3C2-25의 설치 검증 계약·생명주기·실제 8개 후보와 보존된 source/app/시험 증거를 대조했고 중대한 차단 결함을 발견하지 않았다. 이번은 문서 3개 갱신과 읽기 전용 감사이며 빌드/기능 재실행은 없다. 아래32/32(대기12 포함)·3/3·92/92·58/58·엔진39/39씩·이미지2/2는 SP-3C2-25 과거 실행이다. 설치 검증은 현재 원본 접근을 보장하지 않는다. 다음 통합에는 이미지 원본의 비동기 접근 확인과 선택 오디오 기존 검증, 완료 후 현재 설치 컨텍스트 재확인이 필요하다. **OWNER MANUAL DEFERRED — NOT PASS.** 기준 HEAD/upstream/live remote `1c61df249468af09a7e90daf82c8e510e9a06480`, main/원격 HEAD 불변. 관리17.62/20 GiB, index 비어 있음, 기존 미추적4개·복구 refs·앱/증거 보존. 이미지 fallback/공개 활성화·export·schema·소유자 데이터 수정·staging/commit/push 없음. 정확한 8개 파일 SHA-256/mode는 이번 최종 보고의 매니페스트를 따른다. [소유권·경쟁 조건·접근 한계·게시 감사](diagnostics/SP-3C2-25-IMAGE-ELIGIBILITY.md#sp-3c2-26-체크포인트-감사-2026-11-06)
+
+**2026-11-06 · SP-3C2-25 — IMAGE ELIGIBILITY CONTRACT PASS (자동 검증·미커밋).** SP-3C2-22 게시 후 기준 HEAD/upstream/live remote는 `1c61df249468af09a7e90daf82c8e510e9a06480`, main은 `44943eadabdf5a37d5242d614e7279813126dfde`다. SP-3C2-23/24에서 확인한 설치 소유권/API 차단을 해소했다. `ProjectStore`가 정확한 item/composition·project session·generation·access revision에 묶인 비공개 증거를 만들고 읽기 전용 상태를 제공한다. 전체 이미지 검사와 초기 seek 완료 뒤에만 설치 검증을 인정하고 재빌드·실패·교체·알려진 접근 변경을 거부한다. 같은 계획의 일반 seek는 증거를 유지한다. **설치 당시 검증이며 현재 파일 접근 가능성 보장이 아니다.** 미래 fallback의 live-access 조건은 별도 검증이 필요하다. controller의 이미지 제외는 유지한다.
+
+최종 signed Debug 계약32/32(대기 단언 포함), runtime gate-off3/3, controller92/92, overlay58/58; 보존 엔진 Debug/Release 각각39/39·이미지 Debug2/2, 종료 코드 모두0. 새 계약의 Release 앱 실행·broad Release 빌드는 하지 않았다. 관리 할당량17.62/20 GiB(증가0.36), 기존 앱·증거·미추적4개·복구 refs 보존. **OWNER MANUAL DEFERRED — NOT PASS.** 이미지 fallback·공개 이미지·spectrum export·schema·소유자 데이터 변경·staging/commit/push 없음. 다음 제안은 이 계약의 체크포인트 감사 후 이미지 통합에서 필요한 live-access/오디오 시각 조건을 별도 검증하는 것이다. [계약·상태표·전환·검증 경계](diagnostics/SP-3C2-25-IMAGE-ELIGIBILITY.md)
+
 이 절이 작업·상태 목록의 정본이다. 다른 문서의 요약은 이 절을 가리킨다. 아래 1–7절의 단계 구성·완료 기준은 여전히 제안(P-001)이며, 이 체크리스트에 적은 소유자 결정이 그 단계 구성 전체나 완료 기준을 승인하지 않는다. 짧은 인계 요약은 [HANDOFF.md](HANDOFF.md).
 
 **표시:** ✅ 적은 범위 안에서 완료 · ⏳ 일부 구현·조사했지만 해결되지 않음 · ➡️ 시작하지 않음(결정 대기 포함). ⏳는 지금 에이전트가 작업 중이라는 뜻이 아니다.

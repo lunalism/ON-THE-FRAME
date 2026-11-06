@@ -1584,7 +1584,45 @@ final class ProjectStore {
 
     // MARK: 프리뷰
 
-    /// 타임라인이 바뀌면: 재생 헤드를 새 길이 안으로, composition을 비동기로 다시 만들고 오래된 결과는 버린다.
+    /// Installation validation only: decoded image textures belong to the applied plan.
+    /// This does NOT certify that source files remain accessible. A future fallback must
+    /// separately enforce its live media-access and playback/seek policy. No I/O here.
+    enum ImagePreviewEligibility: Equatable {
+        case absent, pending, invalidated, cancelled, failed, validatedAtInstallation
+    }
+    private struct AppliedImagePreview {
+        let item: AVPlayerItem
+        let composition: AVComposition
+        let session: Int
+        let generation: Int
+        let accessRevision: Int
+    }
+    @ObservationIgnored private var appliedImagePreview: AppliedImagePreview?
+    @ObservationIgnored private var imageEligibilityState: ImagePreviewEligibility = .absent
+    @ObservationIgnored private var imageAccessRevision = 0
+
+    /// Query every time; a returned enum is a snapshot, never a reusable authorization.
+    /// Expected context lets asynchronous consumers reject their own stale requests.
+    func imagePreviewEligibility(for item: AVPlayerItem?, session: Int, generation: Int) -> ImagePreviewEligibility {
+        guard Self.imageImportEnabled else { return .absent }
+        guard session == projectSession, generation == self.generation else { return .invalidated }
+        guard pendingImageRelinkID == nil else { return .pending }
+        guard let proof = appliedImagePreview else { return imageEligibilityState }
+        guard let item, player.currentItem === item, proof.item === item,
+              proof.session == projectSession, proof.generation == self.generation,
+              appliedGeneration == self.generation, proof.accessRevision == imageAccessRevision,
+              let plan = currentPlan, plan.isImagePreviewOnly,
+              plan.composition === proof.composition, item.asset === proof.composition else { return .invalidated }
+        guard imagePreviewError == nil, item.status != .failed else { return .failed }
+        guard item.status == .readyToPlay else { return .pending }
+        return .validatedAtInstallation
+    }
+
+    private func invalidateImageEligibility(_ state: ImagePreviewEligibility) {
+        appliedImagePreview = nil
+        imageEligibilityState = state
+    }
+
     @ObservationIgnored private var imagePreviewTask: Task<Void,Never>?
     #if DEBUG || OTF_PREVIEW_COMPAT_TESTS
     @ObservationIgnored var imageSourceValidatedForTest: ((UUID) -> Void)?
@@ -1592,6 +1630,7 @@ final class ProjectStore {
     @ObservationIgnored private(set) var imagePreviewStaleDropsForTest = 0
     #endif
 
+    /// 타임라인이 바뀌면 composition을 다시 만들고 오래된 결과는 버린다.
     func timelineChanged() {
         imagePreviewError = nil
         restoreImageRelinkBindings()
@@ -1599,6 +1638,7 @@ final class ProjectStore {
             rebuildInternalImagePreview(); return
         }
         imagePreviewTask?.cancel()
+        invalidateImageEligibility(.absent)
         refreshAssets(refreshSpectrum:false) // Metadata/cache refresh does not render or filter the Timeline.
         guard supportedProductionTimeline(ProductionContent(timeline)) != nil else { return }
         updateWindowDocumentState()
@@ -1688,6 +1728,8 @@ final class ProjectStore {
               let revision = ProjectPersistence.imageRevision(snapshot, mediaID: id),
               revision == ProjectPersistence.imageRevision(timeline, mediaID: id) else { return }
 
+        imageAccessRevision &+= 1
+        if appliedImagePreview != nil { invalidateImageEligibility(.invalidated) }
         let reason = available ? nil : "이미지 원본을 검증하지 못했습니다(없음·권한·변경)."
         missingMedia[id] = reason
         // A later timeline rebuild can restore this revision's access binding again.
@@ -1699,6 +1741,7 @@ final class ProjectStore {
     /// Separate opt-in preview capability. Never passes the export eligibility gate.
     /// Serial task chaining keeps canceled decodes/plans from accumulating resources.
     private func rebuildInternalImagePreview() {
+        invalidateImageEligibility(.pending)
         refreshAssets(refreshSpectrum:false)
         let previous=imagePreviewTask
         previous?.cancel()
@@ -1721,6 +1764,7 @@ final class ProjectStore {
                     if available { self.imageSourceValidatedForTest?(id) }
                     #endif
                 }
+                let accessRevision = self.imageAccessRevision
                 #if DEBUG || OTF_PREVIEW_COMPAT_TESTS
                 await self.imagePreviewPreparedForTest?(g)
                 #endif
@@ -1740,10 +1784,19 @@ final class ProjectStore {
                 let finished=await self.player.seek(to:s.time(frame),toleranceBefore:.zero,toleranceAfter:.zero)
                 guard !Task.isCancelled,g==self.generation,session==self.projectSession,self.player.currentItem === item else{return}
                 self.appliedGeneration=g
+                if finished, plan.isImagePreviewOnly, self.currentPlan?.composition === plan.composition,
+                   accessRevision == self.imageAccessRevision {
+                    self.appliedImagePreview = AppliedImagePreview(item: item, composition: plan.composition,
+                        session: session, generation: g, accessRevision: accessRevision)
+                    self.imageEligibilityState = .validatedAtInstallation
+                } else {
+                    self.invalidateImageEligibility(.invalidated)
+                }
                 self.previewHost?.subtitleSeekFinished(token:token,frame:frame,finished:finished)
                 self.previewHost?.spectrumOverlay.refresh()
             } catch {
                 guard !Task.isCancelled,g==self.generation,session==self.projectSession else{return}
+                self.invalidateImageEligibility(.failed)
                 self.imagePreviewError = "이미지 프리뷰를 표시할 수 없습니다: \(error). 프로젝트와 클립은 유지했습니다."
             }
         }
@@ -2229,6 +2282,7 @@ extension ProjectStore {
         return true
     }
     func stopAllScopes() {
+        invalidateImageEligibility(.cancelled)
         imagePreviewTask?.cancel()
         generation += 1 // Fence image decode/plan publication before source access ends.
         // Commit/termination only. Candidate validation must keep the old session alive.
