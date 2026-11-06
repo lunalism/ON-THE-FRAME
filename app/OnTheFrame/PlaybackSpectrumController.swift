@@ -41,10 +41,9 @@ final class SpectrumPlaybackTiming {
               timeline.clips.contains(where: { $0.start <= displayFrame && displayFrame < $0.start + $0.length }) else { return nil }
         return displayFrame
     }
-    /// Audio-backed intervals without clip coverage follow item time in projects containing video.
+    /// Audio-backed intervals without video coverage follow the existing player item time.
     static func audioIntervalFrame(at time: CMTime, timeline: Timeline) -> Int? {
         guard let frame = frame(time, duration: timeline.durationFrames),
-              !timeline.clips.isEmpty,
               !timeline.clips.contains(where: { $0.start <= frame && frame < $0.end }),
               !InternalImagePreview.containsImages(timeline),
               timeline.audioClips.contains(where: { $0.start <= frame && frame < $0.end }) else { return nil }
@@ -133,7 +132,7 @@ final class PlaybackSpectrumController {
         guard let session else { stop(); return }
         if epoch != session.epoch || revision != session.revision {
             stop(detachTiming: false); epoch = session.epoch; revision = session.revision
-            firstVideoFrame = timeline.clips.lazy.map(\.start).min() ?? 0
+            firstVideoFrame = timeline.clips.lazy.map(\.start).min() ?? Int.max
         }
         guard let frame, frame >= 0, frame < timeline.durationFrames else {
             if currentFrame != nil { stop(detachTiming: false) }

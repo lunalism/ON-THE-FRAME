@@ -80,7 +80,15 @@ enum SpectrumPlaybackSelfTest {
         leadSession.playback.advance(frame: 30, timeline: mixedLead)
         check("schedule.leadInRequestsOnlyActiveLineage", leadSession.playback.pendingCount == 3)
         leadSession.playback.stop()
-        check("timing.noAudioOnlyFallback", SpectrumPlaybackTiming.audioIntervalFrame(at: tail, timeline: audioOnly) == nil)
+        check("timing.audioOnlyWithoutSelection", SpectrumPlaybackTiming.audioIntervalFrame(at: tail, timeline: audioOnly) == nil)
+        let pure = Timeline(audioClips: timeline.audioClips, spectra: [selected], durationFrames: 180)
+        check("timing.selectedAudioOnly", SpectrumPlaybackTiming.audioIntervalFrame(at: time, timeline: pure) == 30)
+        check("timing.audioOnlyEnd", SpectrumPlaybackTiming.audioIntervalFrame(at: CMTime(value: 180, timescale: 30), timeline: pure) == nil)
+        let pureMixed = Timeline(audioClips: mixedLead.audioClips, spectra: mixedLead.spectra, durationFrames: 180)
+        let pureSession = SpectrumPreviewSession()
+        pureSession.playback.advance(frame: 30, timeline: pureMixed)
+        check("schedule.audioOnlyActiveLineage", pureSession.playback.pendingCount == 3)
+        pureSession.playback.stop()
         check("timing.noTailAtEnd", SpectrumPlaybackTiming.audioIntervalFrame(at: CMTime(value: 180, timescale: 30), timeline: timeline) == nil)
         let boundedClips = [Clip(mediaID: media, start: 0, sourceIn: 0, length: 30),
                             Clip(mediaID: media, start: 60, sourceIn: 0, length: 60)]
@@ -139,12 +147,13 @@ enum SpectrumPlaybackSelfTest {
         session.transformOutcomeForTest = nil; delivery.releaseAll()
         _ = await wait { c.pendingCount == 0 }
         check("project.resetReleasesResources", c.currentFrame == nil && c.retainedCount == 0 && c.pendingCount == 0 && c.timing.output == nil)
-        let many = Timeline(spectra: (0..<20).map { _ in SpectrumItem(lane: UUID(), start: 0, length: 180) }, durationFrames: 180)
+        let many = Timeline(audioClips: timeline.audioClips, spectra: (0..<20).map { _ in SpectrumItem(lane: UUID(), start: 0, length: 180, sourceKey: timeline.audioClips[0].lineageKey) }, durationFrames: 180)
         c.advance(frame: 20, timeline: many)
         check("schedule.manyItemsBound", c.pendingCount == 8)
         _ = await wait { c.pendingCount == 0 }
         check("schedule.terminalUnavailableNoImage", c.retainedCount == 0)
         c.stop()
+        session.resetProject() // Switching from the audio-only fixture back to video changes the project identity.
 
         do {
             // Large real owned images exercise the byte limit, rather than only the entry count.
@@ -244,7 +253,8 @@ enum SpectrumPlaybackSelfTest {
             let controller = session.playback
             session.transformOutcomeForTest = { id, frame, _ in await delivery.hold(id, frame) }
             defer { session.transformOutcomeForTest = nil; controller.stop(); delivery.releaseAll() }
-            let timeline = Timeline(spectra: [SpectrumItem(id: id, lane: UUID(), start: 0, length: 180)], durationFrames: 180)
+            let audio = Clip(mediaID: UUID(), start: 0, sourceIn: 0, length: 180)
+            let timeline = Timeline(audioClips: [audio], spectra: [SpectrumItem(id: id, lane: UUID(), start: 0, length: 180, sourceKey: audio.lineageKey)], durationFrames: 180)
             func hasImage(_ frame: Int, _ index: Int) -> Bool {
                 guard case let .ready(_, rendered?) = controller.currentOutcome(spectrum: id, frame: frame) else { return false }
                 return rendered.image === images[index].image
@@ -296,7 +306,8 @@ enum SpectrumPlaybackSelfTest {
         var c: PlaybackSpectrumController { session.playback }
         init(items: Int = 1) {
             ids = (0..<items).map { _ in UUID() }
-            timeline = Timeline(spectra: ids.map { SpectrumItem(id: $0, lane: UUID(), start: 0, length: 180) }, durationFrames: 180)
+            let audio = Clip(mediaID: UUID(), start: 0, sourceIn: 0, length: 180)
+            timeline = Timeline(audioClips: [audio], spectra: ids.map { SpectrumItem(id: $0, lane: UUID(), start: 0, length: 180, sourceKey: audio.lineageKey) }, durationFrames: 180)
             let delivery = delivery
             session.transformOutcomeForTest = { id, frame, _ in await delivery.hold(id, frame) }
         }

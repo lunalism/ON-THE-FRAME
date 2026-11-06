@@ -367,7 +367,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let intervalTests: [String: PreviewSelfTest.AudioIntervalFixture] = [
-            "-OTFAudioLeadTest": .lead, "-OTFVideoGapTest": .gap, "-OTFAudioTailTest": .tail
+            "-OTFPureAudioTest": .audio, "-OTFAudioLeadTest": .lead, "-OTFVideoGapTest": .gap, "-OTFAudioTailTest": .tail
         ]
         if let fixture = args.compactMap({ intervalTests[$0] }).first,
            let folder = urls.first(where: { $0.hasDirectoryPath }) {

@@ -68,13 +68,18 @@ enum PreviewSelfTest {
     }
 
     enum AudioIntervalFixture: String {
-        case tail = "audio-tail", gap = "video-gap", lead = "audio-lead"
+        case tail = "audio-tail", gap = "video-gap", lead = "audio-lead", audio = "pure-audio"
     }
 
     /// Each 30 fps fixture uses a 12-second selected WAV clip trimmed by one second.
     static func runAudioInterval(folder: URL, fixture: AudioIntervalFixture) async {
         let videoRanges: [Range<Int>], targets: [Int], pauseFrame: Int, seekFrames: [Int]
         switch fixture {
+        case .audio:
+            videoRanges = []
+            targets = [15, 60, 90, 120, 180, 240, 270, 300, 330, 357]
+            pauseFrame = 60
+            seekFrames = [300, 90, 330, 270]
         case .lead:
             videoRanges = [120..<360]
             targets = [15, 60, 117, 120, 123, 180, 240, 300, 357]
@@ -124,7 +129,13 @@ enum PreviewSelfTest {
                 check("selected WAV spans both boundaries without a splice", wavMappings.count == 1 &&
                       wavMappings.first?.source == CMTimeRange(start: store.settings.time(30), duration: item.duration) &&
                       wavMappings.first?.target == CMTimeRange(start: .zero, duration: item.duration))
-                log += try await recordIntervalPictures(store, item: item, folder: folder, targets: targets, videoRanges: videoRanges)
+                if fixture == .audio {
+                    let videos = try await item.asset.loadTracks(withMediaType: .video)
+                    check("no video track or composition", videos.isEmpty && item.videoComposition == nil && !InternalImagePreview.containsImages(store.timeline))
+                    check("black preview background", view.layer?.backgroundColor == NSColor.black.cgColor && !view.isShowingStill && view.window?.isVisible == true)
+                } else {
+                    log += try await recordIntervalPictures(store, item: item, folder: folder, targets: targets, videoRanges: videoRanges)
+                }
             }
             let settings = entry.style.analysisSettings
             let reference = try await Task.detached {
@@ -169,7 +180,7 @@ enum PreviewSelfTest {
                     let time = item.currentTime()
                     log.append("timeline=\(frame) source=\(frame + 30) playerSeconds=\(time.seconds) visible=\(displayed != nil) peak=\(bands.max() ?? -1)")
                     check("display, bands and clock \(frame)", matchesDisplay && bands == expected && abs(time.seconds * 30 - Double(frame)) < 2)
-                    if frame == pauseFrame {
+                    if frame == pauseFrame || (fixture == .audio && frame == 270) {
                         store.pause()
                         let stopped = store.playhead
                         let settled = await waitUntil(2) { view.spectrumOverlay.confirmedFrame == stopped && view.spectrumOverlay.layers[entry.id]?.contents != nil }
@@ -179,8 +190,8 @@ enum PreviewSelfTest {
                 }
                 try? await Task.sleep(nanoseconds: 1_000_000)
             }
-            let boundary = fixture == .lead ? 120 : 240
-            let following = boundary + (fixture == .tail ? 5 : 3)
+            let boundary = (fixture == .lead || fixture == .audio) ? 120 : 240
+            let following = fixture == .audio ? 240 : boundary + (fixture == .tail ? 5 : 3)
             check("continuous interval", seen == Set(targets) && reference[boundary] != reference[following])
             let drained = await waitUntil(2) { controller.pendingCount == 0 }
             check("end", drained && !store.isPlaying && store.playhead == 360 && controller.currentFrame == nil && view.spectrumOverlay.layers.isEmpty)
@@ -196,19 +207,88 @@ enum PreviewSelfTest {
                 let frozen = store.playhead
                 check("freeze \(frozen)", await waitUntil(2) { view.spectrumOverlay.confirmedFrame == frozen && controller.currentFrame == nil })
             }
+            if fixture == .audio {
+                store.seek(to: 360)
+                _ = await waitUntil(3) { !view.hasPendingSpectrumSeek }
+                store.play()
+                check("audio-only replay", await waitUntil(3) { (controller.currentFrame ?? -1) > 0 && (controller.currentFrame ?? 360) < 30 })
+                store.pause()
+            }
             store.selection = entry.id
-            store.setSpectrumSource(entry.id, key: nil, from: entry.sourceKey, project: store.projectSession)
+            store.setSpectrumSource(entry.id, key: nil, from: store.timeline.spectrum(entry.id)?.sourceKey, project: store.projectSession)
             let unsetFrame = fixture == .tail ? 300 : pauseFrame
             store.seek(to: unsetFrame)
             _ = await waitUntil(2) { !view.hasPendingSpectrumSeek }
             store.play()
             let advanced = await waitUntil(2) { store.settings.frame(containing: item.currentTime()) >= unsetFrame + 10 }
-            let expectedClock = fixture == .lead ? controller.currentFrame == nil : controller.currentFrame != nil
+            let expectedClock = (fixture == .lead || fixture == .audio) ? controller.currentFrame == nil : controller.currentFrame != nil
             check("unset source stays blank while WAV plays", advanced && expectedClock && store.timeline.spectrum(entry.id)?.sourceKey == nil &&
                   controller.retainedCount == 0 && view.spectrumOverlay.layers.isEmpty)
+            if fixture == .audio {
+                store.pause()
+                store.setSpectrumSource(entry.id, key: entry.sourceKey, from: nil, project: store.projectSession)
+                try await checkAudioEdits(store, entry: entry, clip: clip, media: media, check: check)
+            }
             store.resetProject()
             check("replacement", await waitUntil(3) { store.player.currentItem == nil && controller.pendingCount == 0 && view.spectrumOverlay.layers.isEmpty })
         } catch { check(String(describing: error), false) }
+    }
+
+    /// Real store edits on the disposable audio-only project; oracle mapping is explicit.
+    private static func checkAudioEdits(_ store: ProjectStore, entry: SpectrumItem, clip: Clip,
+                                        media: MediaAsset, check: (String, Bool) -> Void) async throws {
+        let left = UUID(), right = UUID()
+        store.commit({ timeline in
+            // Existing ripple trim rejects overlays crossing the cut. Prepare this edit
+            // fixture without overlays, then restore the selected spectrum after editing.
+            var bare = try timeline.liftingSpectrum(entry.id)
+            for subtitle in timeline.subtitles { bare = try bare.liftingSubtitle(subtitle.id) }
+            let split = try bare.splitting(clip: clip.id, atFrame: 180, newIDs: (left, right))
+            let trimmed = try split.trimmingStart(clip: left, by: 10).trimmingEnd(clip: left, by: -30)
+            let moved = try trimmed.relocating(clip: right, toStart: 180, lane: clip.lane)
+                .relocating(clip: left, toStart: 30, lane: clip.lane)
+            return try moved.addingSpectrum(lane: entry.lane, at: 0, length: 360,
+                                           sourceKey: entry.sourceKey, style: entry.style, id: entry.id)
+        }, focus: left)
+        guard await waitUntil(10, { store.appliedGeneration == store.generation && store.player.currentItem?.status == .readyToPlay }),
+              let view = store.previewHost else { check("edited audio setup", false); return }
+        check("split trim move lineage", store.timeline.clip(left)?.lineageKey == clip.lineageKey &&
+              store.timeline.clip(right)?.lineageKey == clip.lineageKey && store.timeline.clip(left)?.sourceIn == 40 &&
+              store.timeline.clip(left)?.start == 30 && store.timeline.clip(right)?.sourceIn == 210)
+        let settings = entry.style.analysisSettings
+        let expected = try await Task.detached {
+            let source = try await SpectrumFileSource.open(url: media.url)
+            let pieces = [SpectrumSourcePiece(start: 0, length: media.frameCount, sourceIn: 0)]
+            var chunks: [Int: [[Float]]] = [:], result: [Int: [Float]] = [:]
+            for frame in Array(80...95) + Array(240...255) {
+                let sourceFrame = frame < 180 ? frame + 10 : frame + 30
+                for index in try SpectrumAnalysis.chunks(frame: sourceFrame, pieces: pieces, fps: 30, rate: source.sampleRate, settings: settings, chunkSamples: source.chunkSamples) where chunks[index] == nil {
+                    chunks[index] = try await source.decodeChunk(index)
+                }
+                result[frame] = try SpectrumAnalysis.bands(frame: sourceFrame, pieces: pieces, fps: 30, rate: source.sampleRate, channelCount: source.channelCount, chunkSamples: source.chunkSamples, settings: settings) { chunks[$0] }
+            }
+            return result
+        }.value
+        for target in [80, 240] {
+            store.seek(to: target)
+            _ = await waitUntil(3) { !view.hasPendingSpectrumSeek }
+            store.play()
+            check("edited selected FFT and visible layer \(target)", await waitUntil(3) {
+                let controller = store.spectrumPreview.playback
+                guard let frame = controller.currentFrame, (target...target + 15).contains(frame),
+                      case let .ready(bands, rendered?) = controller.currentOutcome(spectrum: entry.id, frame: frame) else { return false }
+                return bands == expected[frame] && view.spectrumOverlay.layers[entry.id]?.contents as AnyObject? === rendered.image
+            })
+            store.pause()
+        }
+        store.seek(to: 175) // Gap between edited pieces: no selected coverage.
+        _ = await waitUntil(3) { !view.hasPendingSpectrumSeek }
+        store.play()
+        check("edited source gap blank", await waitUntil(1) {
+            let frame = store.settings.frame(containing: store.player.currentTime())
+            return (175..<180).contains(frame) && store.spectrumPreview.playback.currentFrame == nil && view.spectrumOverlay.layers.isEmpty
+        })
+        store.pause()
     }
 
     static func runSubtitleBoundaries(folder: URL) async {
