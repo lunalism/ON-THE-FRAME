@@ -134,10 +134,26 @@ public enum ExportService {
         } catch { return Task.isCancelled ? .cancelled : .failed(.export(String(describing:error))) }
     }
 
+    #if DEBUG
+    /// Explicit test-only capability. Normal export continues to reject every spectrum plan.
+    static func exportSpectrumSlice(_ timeline: Timeline, media: [UUID: MediaAsset], enabled: Bool,
+                                    to destination: ExportDestination, controls: SpectrumExportControls,
+                                    options: Options = Options(), progress: @escaping @Sendable (Double) async -> Void = { _ in }) async -> ExportOutcome {
+        guard enabled else { return .failed(.export("Internal spectrum export is disabled.")) }
+        do {
+            let frames = try SpectrumExportFrames(timeline: timeline, assets: Array(media.values), controls: controls)
+            let plan = try await CompositionPlanner.plan(timeline, media: media, settings: .m1)
+            try Task.checkCancellation()
+            return await exportPrepared(plan, to: destination, sources: Array(media.values), options: options,
+                                        stage: { _ in }, progress: progress, spectrum: frames)
+        } catch { return Task.isCancelled || error is CancellationError ? .cancelled : .failed(.export(String(describing: error))) }
+    }
+    #endif
+
     private static func exportPrepared(_ p: PlannedComposition, to d: ExportDestination, sources: [MediaAsset],
                                        options: Options, stage: @escaping @Sendable (ExportStage) async -> Void,
                                        progress: @escaping @Sendable (Double) async -> Void,
-                                       imageIdentities: [URL:FileIdentity] = [:]) async -> ExportOutcome {
+                                       imageIdentities: [URL:FileIdentity] = [:], spectrum: (any ExportFrameOverlay)? = nil) async -> ExportOutcome {
         let imageExport = !imageIdentities.isEmpty
         if p.imagePreviewOnly && !imageExport { return .failed(.export("내부 이미지 프리뷰 구성은 내보낼 수 없습니다.")) }
         func imageSafety() -> ExportFailure? {
@@ -152,7 +168,7 @@ public enum ExportService {
         if let f = imageSafety() { return .failed(f) }
         if let f = validate(d, sources: sources) { return .failed(f) }
         // 스펙트럼(2026-10-25, SP-1A 1단계): 내보내기 그리기가 아직 없다 — 스펙트럼을 조용히 빼고 내보내지 않도록 대상 파일·임시 폴더 전에 거부한다.
-        if !p.spectra.isEmpty {
+        if !p.spectra.isEmpty && spectrum == nil {
             return .failed(.export("이 빌드는 스펙트럼을 아직 내보내지 못합니다(스펙트럼 \(p.spectra.count)개). 스펙트럼 없이 내보내려면 스펙트럼을 지우세요."))
         }
         // A-014: 영상 원본이 하나도 없으면(소리 파일만) 영상 트랙을 만들 수 없다 — 내보내지 않는다(앱은 미리 막는다)
@@ -172,14 +188,14 @@ public enum ExportService {
 
         await stage(.encoding)
         let result: Result<Void, Error>
-        if p.subtitles.isEmpty && !imageExport {
+        if p.subtitles.isEmpty && !imageExport && spectrum == nil {
             // 자막이 없는 프로젝트: 지금까지의 내보내기 세션 경로 그대로
             let (r, injected) = await encodeWithSession(p, to: tempFile, options: options, progress: progress)
             if injected { return .failed(.injected) }
             result = r
         } else {
             // 자막이 있는 프로젝트: 구조 R(기본 합성기 리더 → 4:2:0 자막 → 쓰기, SubtitleExporter)
-            do { try await SubtitleExporter.encode(p, to: tempFile, failAfterFraction: options.failAfterFraction, progress: progress, strictFrameGrid:imageExport); result = .success(()) }
+            do { try await SubtitleExporter.encode(p, to: tempFile, failAfterFraction: options.failAfterFraction, progress: progress, strictFrameGrid:imageExport, spectrum:spectrum); result = .success(()) }
             catch is SubtitleExporter.Injected { return .failed(.injected) }
             catch let e as ExportFailure { return .failed(e) }
             catch { result = .failure(error) }
@@ -209,6 +225,7 @@ public enum ExportService {
         // 마무리(검증) 중 취소(CP-13): 승격 직전에 다시 본다. 취소했으면 결과를 옮기지 않고 임시 파일만 지운다.
         if Task.isCancelled { return .cancelled }
         if let f = imageSafety() { return .failed(f) }
+        do { try spectrum?.validateSources() } catch { return .failed(.export(String(describing: error))) }
         let outcome = promote(tempFile, to: d, sources: sources)
         if case .completed = outcome { await progress(1) }   // 검증·승격 성공 뒤에만 1.0
         return outcome

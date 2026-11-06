@@ -30,7 +30,7 @@ enum SubtitleExporter {
     struct Injected: Error {}
 
     /// 쓰기. 취소는 작업(Task) 취소, 결과는 성공 또는 오류(CancellationError·Injected·그 밖)다. tempFile만 만든다.
-    static func encode(_ p: PlannedComposition, to tempFile: URL, failAfterFraction: Double?, progress: @escaping @Sendable (Double) async -> Void, strictFrameGrid: Bool = false) async throws {
+    static func encode(_ p: PlannedComposition, to tempFile: URL, failAfterFraction: Double?, progress: @escaping @Sendable (Double) async -> Void, strictFrameGrid: Bool = false, spectrum: (any ExportFrameOverlay)? = nil) async throws {
         let n = p.durationFrames
         // 발자국은 자막 구간에 들어설 때 만들고 끝나면 버린다(2026-10-23 측정: 효과 자막 200개를 미리 만들면 내보내기 내내 약 118 MB를 붙잡았다)
         let footprints = FootprintWindow(p.subtitles)
@@ -61,6 +61,9 @@ enum SubtitleExporter {
         writer.startSession(atSourceTime: .zero)
 
         let pump = Pump(n: n, strictFrameGrid:strictFrameGrid)
+        let videoQueue = DispatchQueue(label: "dev.ontheframe.subtitle-export.video")
+        let audioQueue = DispatchQueue(label: "dev.ontheframe.subtitle-export.audio")
+        let started = ProcessInfo.processInfo.systemUptime
         let io = IO(reader: reader, vOut: vOut, vIn: vIn, adaptor: adaptor, aOut: aOut, aIn: aIn)
         let watcher = Task {   // 진행률: 쓴 프레임 수 / 전체 × 0.99(줄어들지 않게)
             var last = -1
@@ -68,6 +71,11 @@ enum SubtitleExporter {
                 let k = pump.written
                 if k != last { last = k; await progress(Double(k) / Double(max(1, n)) * ExportService.encodingProgressCap) }
                 if let f = failAfterFraction, Double(k) / Double(max(1, n)) >= f { pump.fail(Injected()) }
+                if let spectrum {
+                    if ProcessInfo.processInfo.systemUptime - started > spectrum.jobTimeout { pump.fail(ExportFailure.export("Internal spectrum job deadline exceeded.")) }
+                    pump.checkFrameDeadline(spectrum.stepTimeout)
+                    if pump.error != nil { pump.wakeAfterFailure() }
+                }
                 if pump.finished { break }
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }
@@ -76,19 +84,22 @@ enum SubtitleExporter {
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                 let group = DispatchGroup()
                 group.enter()
-                io.vIn.requestMediaDataWhenReady(on: DispatchQueue(label: "dev.ontheframe.subtitle-export.video")) {
-                    pump.videoStep(io, footprints) { group.leave() }
+                pump.videoWake = { videoQueue.async { pump.videoStep(io, footprints, spectrum, videoQueue) { group.leave() } } }
+                io.vIn.requestMediaDataWhenReady(on: videoQueue) {
+                    pump.videoStep(io, footprints, spectrum, videoQueue) { group.leave() }
                 }
                 if io.aIn != nil {
                     group.enter()
-                    io.aIn!.requestMediaDataWhenReady(on: DispatchQueue(label: "dev.ontheframe.subtitle-export.audio")) {
+                    pump.audioWake = { audioQueue.async { pump.audioStep(io) { group.leave() } } }
+                    io.aIn!.requestMediaDataWhenReady(on: audioQueue) {
                         pump.audioStep(io) { group.leave() }
                     }
                 }
                 group.notify(queue: DispatchQueue(label: "dev.ontheframe.subtitle-export.done")) { cont.resume() }
             }
-        } onCancel: { pump.cancel() }
+        } onCancel: { pump.cancel(); if spectrum != nil { pump.wakeAfterFailure() } }
         pump.markFinished()
+        pump.videoWake = nil; pump.audioWake = nil
         watcher.cancel(); _ = await watcher.value
         if let e = pump.error {
             writer.cancelWriting(); reader.cancelReading()
@@ -96,12 +107,25 @@ enum SubtitleExporter {
         }
         if reader.status == .failed { writer.cancelWriting(); throw reader.error ?? NSError(domain: "SubtitleExporter", code: 3) }
         writer.endSession(atSourceTime: CMTime(value: CMTimeValue(n), timescale: 30))
-        await writer.finishWriting()
+        if let spectrum {
+            let box = WriterBox(writer: writer)
+            let remaining = max(0, spectrum.jobTimeout - (ProcessInfo.processInfo.systemUptime - started))
+            let finalizer = Task {
+                try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                if !Task.isCancelled { box.writer.cancelWriting() }
+            }
+            await withTaskCancellationHandler(operation: { await box.writer.finishWriting() }, onCancel: { box.writer.cancelWriting() })
+            finalizer.cancel(); _ = await finalizer.value
+            try Task.checkCancellation()
+        } else {
+            await writer.finishWriting()
+        }
         guard writer.status == .completed else { throw writer.error ?? NSError(domain: "SubtitleExporter", code: 4) }
         log.info("subtitle export wrote \(n) frames, reader samples \(pump.readerSamples)")
     }
 
     /// 안전성(@unchecked Sendable): 각 입력은 자기 직렬 큐에서만 쓴다. 설정은 시작 전에 끝난다.
+    struct WriterBox: @unchecked Sendable { let writer: AVAssetWriter }
     struct IO: @unchecked Sendable {
         let reader: AVAssetReader, vOut: AVAssetReaderVideoCompositionOutput, vIn: AVAssetWriterInput, adaptor: AVAssetWriterInputPixelBufferAdaptor
         let aOut: AVAssetReaderAudioMixOutput?, aIn: AVAssetWriterInput?
@@ -131,12 +155,50 @@ enum SubtitleExporter {
             }
             return nil
         }
-        func videoStep(_ io: IO, _ footprints: FootprintWindow, done: () -> Void) {
+        // Wake closures are installed before callbacks; access is lock-protected for cancellation.
+        private var _videoWake: (() -> Void)?, _audioWake: (() -> Void)?
+        var videoWake: (() -> Void)? { get { lock.withLock { _videoWake } } set { lock.withLock { _videoWake = newValue } } }
+        var audioWake: (() -> Void)? { get { lock.withLock { _audioWake } } set { lock.withLock { _audioWake = newValue } } }
+        private var waitingSince: Double?
+        private var preparing = false, prepared = false
+        private var spectrumFootprint: SubtitleFootprint?
+        private var prepareTask: Task<Void, Never>?
+        func checkFrameDeadline(_ seconds: Double) {
+            lock.withLock {
+                if let start = waitingSince, ProcessInfo.processInfo.systemUptime - start > seconds, _error == nil {
+                    _error = ExportFailure.export("Internal spectrum frame deadline exceeded.")
+                }
+            }
+        }
+        func wakeAfterFailure() { videoWake?(); audioWake?() }
+        func videoStep(_ io: IO, _ footprints: FootprintWindow, _ spectrum: (any ExportFrameOverlay)?, _ queue: DispatchQueue, done: @escaping @Sendable () -> Void) {
             func finish() { if !videoDone { videoDone = true; io.vIn.markAsFinished(); done() } }
+            if error != nil { prepareTask?.cancel(); spectrumFootprint = nil; finish(); return }
+            if videoDone || preparing { return }
             if !primed { primed = true; next = nextSample(io) }
             while io.vIn.isReadyForMoreMediaData && !videoDone {
                 if error != nil { finish(); return }
                 if k >= n { finish(); return }
+                if let spectrum, !prepared {
+                    preparing = true
+                    lock.withLock { waitingSince = ProcessInfo.processInfo.systemUptime }
+                    let frame = k
+                    prepareTask = Task.detached {
+                        let result: Result<SubtitleFootprint?, Error>
+                        do { result = .success(try await spectrum.prepare(frame)) } catch { result = .failure(error) }
+                        queue.async {
+                            self.preparing = false; self.prepareTask = nil
+                            self.lock.withLock { self.waitingSince = nil }
+                            guard !self.videoDone else { return }
+                            switch result {
+                            case .success(let footprint): self.spectrumFootprint = footprint; self.prepared = true
+                            case .failure(let error): self.fail(error)
+                            }
+                            self.videoStep(io, footprints, spectrum, queue, done: done)
+                        }
+                    }
+                    return
+                }
                 let t = CMTime(value: CMTimeValue(k), timescale: 30)
                 while let s = next, CMTimeCompare(s.0, t) <= 0 { current = s.1; currentTime = s.0; next = nextSample(io) }
                 if strictFrameGrid && CMTimeCompare(currentTime,t) != 0 {
@@ -148,28 +210,32 @@ enum SubtitleExporter {
                 }
                 var out = src
                 let vis = footprints.visible(at: k)
-                if !vis.isEmpty {
+                if !vis.isEmpty || spectrumFootprint != nil {
                     var o: CVPixelBuffer?
                     guard let pool = io.adaptor.pixelBufferPool, CVPixelBufferPoolCreatePixelBuffer(nil, pool, &o) == kCVReturnSuccess, let ob = o,
                           CVPixelBufferGetPixelFormatType(ob) == SubtitleExporter.pixelFormat else { fail(ExportFailure.export("자막 프레임 버퍼를 만들지 못했습니다.")); finish(); return }
                     SubtitleFootprint.copyPlanes(src, ob)
                     CVPixelBufferLockBaseAddress(ob, [])
+                    spectrumFootprint?.composite(ob)
                     for f in vis { f.composite(ob) }
                     CVPixelBufferUnlockBaseAddress(ob, [])
                     CVBufferPropagateAttachments(src, ob)
                     out = ob
                 }
+                spectrum?.composed(k, source: src, output: out)
                 // 출력 태그는 709(쓰기 설정)다. 버퍼 첨부도 709로 맞춰 쓰기 쪽이 다른 행렬로 바꾸지 않게 한다(값은 그대로, §42).
                 CVBufferSetAttachment(out, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
                 CVBufferSetAttachment(out, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
                 CVBufferSetAttachment(out, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
                 if !io.adaptor.append(out, withPresentationTime: t) { fail(ExportFailure.export("프레임 \(k)을 쓰지 못했습니다.")); finish(); return }
+                spectrumFootprint = nil; prepared = false
                 k += 1
                 lock.lock(); _written = k; lock.unlock()
             }
         }
         func audioStep(_ io: IO, done: () -> Void) {
             func finish() { if !audioDone { audioDone = true; io.aIn!.markAsFinished(); done() } }
+            if error != nil { finish(); return }
             while io.aIn!.isReadyForMoreMediaData && !audioDone {
                 if error != nil { finish(); return }
                 guard let sb = io.aOut!.copyNextSampleBuffer() else { finish(); return }

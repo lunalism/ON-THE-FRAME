@@ -6,6 +6,16 @@
 
 ## S. 현재 상태 체크리스트 (정본, 2026-10-11)
 
+**2026-11-06 · SP-4A-02 — PUBLICATION READY (감사·미커밋).** SP-4A-01 후보8개와 최종 미디어/증거 해시를 대조했고 내부 첫 slice의 중대한 게시 차단 결함을 발견하지 않았다. 엔진/검사5개는 변경하지 않고 문서3개만 갱신했다. Y/Cb/Cr 오차0은 pre-encode 합성 비교이며 lossless H.264/AAC나 독립 renderer 검증이 아니다. 이전 통합2회·DFT·취소/출력보호 PASS를 재사용했고 이번에는 기존 MP4의360 PTS, 오디오0–12초/576,000 stereo sample frames, 대표 spectrum색 영역을 읽기 전용 CLI로 보강 확인했다(exit0; sandbox decoder 시작 실패2회 exit133 보존). 새 export·앱/엔진 빌드 없음.
+
+일반 spectrum·이미지-spectrum·pure audio·다중 spectrum·공개 이미지·schema gate 유지. **OWNER MANUAL DEFERRED — NOT PASS**, full Release·장시간·실제 sandbox 철회·최종 preview/export parity·Stage4 전체 수락은 미완료다. 관리 약18.430/20GiB, 기준 HEAD/upstream/live remote `a8abc89a3433918478ce3957bc71c802e2f63d7b`와 main/복구 refs/기존 파일 보존, index 비어 있음. staging/commit/push 없음. 다음 개발 권고는 기존12초 경로의 finalizing 취소/source 교체/fault matrix 강화다. [감사·비교 단계·게시 범위·한계](diagnostics/SP-4A-01-SPECTRUM-EXPORT.md#sp-4a-02--게시-체크포인트-감사-2026-11-06)
+
+**2026-11-06 · SP-4A-01 — FIRST SPECTRUM MP4 PASS (생성 fixture 자동 검증·미커밋).** 기존 SubtitleExporter의 reader/420v compositor/writer에 한 프레임씩 비동기 spectrum 준비를 연결했다. 별도 encoder·preview clock 없이 공통 FFT/renderer와 immutable source snapshot을 사용한다. `#if DEBUG` internal API + 명시적 gate/시험 deadline만 허용하며 일반 spectrum rejection·이미지 제한·schema는 유지한다.
+
+생성 FHD30 H.264/AAC MP4 12초/360장 전체 decode·정확한 k/30 PTS·영상 표식 통과. video→spectrum→subtitle의 별도 Y/CbCr 수식 비교 오차0, 자막120/240 경계 포함 검증. sourceIn1초 PCM 오차0, AAC frame RMS 최대0.00197914, 독립 DFT220/440/880Hz 및 slow/fast/medium 펄스8/16/12 통과. 취소·쓰기 실패·원본 소실·시간 제한·승격 충돌에서 기존 출력/원본 보호 및 현재 temp5개 정리, worker drain, 일반 자막 export360장 회귀 통과. Engine Debug·최종 CLI·통합·독립 DFT exit0; 중간 fixture/하네스 실패는 보존했다.
+
+**OWNER MANUAL DEFERRED — NOT PASS.** Stage4 전체/공개 export·이미지-spectrum·pure-audio·다중 spectrum·full Release·장기/모든 native I/O 취소 타이밍은 미검증이다. 기존 Stage3C-2 preview 한계도 남는다. 시작18.160GiB → 최종 약18.43/20GiB, 기존 산출물 삭제 없음. HEAD/upstream/live remote `a8abc89a3433918478ce3957bc71c802e2f63d7b`, main 불변, index 비어 있음. 소유자 데이터 수정·공개 활성화·staging/commit/push 없음. 다음 권고는 **SP-4A-02 export checkpoint audit**다. [구조·정확한 파일·생성 미디어·검사/중간 실패·재현·자원·한계](diagnostics/SP-4A-01-SPECTRUM-EXPORT.md)
+
 **2026-11-06 - SP-3C2-40: STAGE 4 CONTRACT READY**
 
 영상 backed·lead-in·공백·꼬리·pure-audio, 내부 image-covered/gap/tail·mixed, 선택 계보/시간 매핑, proactive renewal은 구현 및 해당 자동 fixture 검증 범위다. 과거 영상·공백·꼬리 제한 수락만 유지하고 **최신 통합판 OWNER MANUAL DEFERRED**다. 전체 Stage 3C-2 수락은 미완료다.
