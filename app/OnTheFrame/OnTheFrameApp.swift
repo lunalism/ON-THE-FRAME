@@ -188,6 +188,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
+        if args.contains("-OTFImageLiveAccessTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await ImageSpectrumSelfTest.runAccess(folder: folder) }
+            return
+        }
+        if args.contains("-OTFImageSpectrumTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await ImageSpectrumSelfTest.run(folder: folder) }
+            return
+        }
         if args.contains("-OTFImageEligibilityTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await ImageEligibilitySelfTest.run(folder: folder) }
             return

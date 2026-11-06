@@ -235,7 +235,7 @@ enum PreviewSelfTest {
     }
 
     /// Real store edits on the disposable audio-only project; oracle mapping is explicit.
-    private static func checkAudioEdits(_ store: ProjectStore, entry: SpectrumItem, clip: Clip,
+    static func checkAudioEdits(_ store: ProjectStore, entry: SpectrumItem, clip: Clip,
                                         media: MediaAsset, check: (String, Bool) -> Void) async throws {
         let left = UUID(), right = UUID()
         store.commit({ timeline in

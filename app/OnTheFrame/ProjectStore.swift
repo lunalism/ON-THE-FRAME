@@ -1618,7 +1618,92 @@ final class ProjectStore {
         return .validatedAtInstallation
     }
 
+    // A one-second lease measured from validation START, not completion. It bounds
+    // undetected external loss; it never promises continuous filesystem availability.
+    // One task slot survives cancellation until its worker drains (no task storms).
+    @ObservationIgnored private var imagePlaybackAccessTask: Task<Void, Never>?
+    @ObservationIgnored private var imagePlaybackAccessSerial = 0
+    @ObservationIgnored private var imagePlaybackAccessUntil: Double = 0
+    @ObservationIgnored private var imagePlaybackAccessRetry: Double = 0
+    #if DEBUG
+    @ObservationIgnored var imagePlaybackAccessPreparedForTest: (() async -> Void)?
+    @ObservationIgnored private(set) var imagePlaybackAccessStaleForTest = 0
+    @ObservationIgnored private(set) var imagePlaybackAccessChecksForTest = 0
+    var imagePlaybackAccessStateForTest: String {
+        guard let item = player.currentItem,
+              imagePreviewEligibility(for: item, session: projectSession, generation: generation) == .validatedAtInstallation else { return "invalidated" }
+        if imagePlaybackAccessTask != nil { return "pending" }
+        if ProcessInfo.processInfo.systemUptime < imagePlaybackAccessUntil { return "valid" }
+        if imagePlaybackAccessUntil > 0 { return "expired" }
+        return imagePlaybackAccessRetry > 0 ? "failed" : "unknown"
+    }
+    #endif
+
+    /// MainActor-only, no disk work. Pending/failed/expired evidence is never allowed.
+    /// The caller separately enforces playing, pending-seek and visual coverage rules.
+    func imagePlaybackAccessIsCurrent(for item: AVPlayerItem) -> Bool {
+        guard imagePreviewEligibility(for: item, session: projectSession, generation: generation) == .validatedAtInstallation,
+              let proof = appliedImagePreview else { return false }
+        let now = ProcessInfo.processInfo.systemUptime
+        if imagePlaybackAccessTask != nil { return false }
+        if now < imagePlaybackAccessUntil { return true }
+        guard now >= imagePlaybackAccessRetry else { return false }
+        let serial = imagePlaybackAccessSerial, snapshot = timeline, id = projectID
+        let urls = imageSourceURLs, settings = settings
+        imagePlaybackAccessRetry = now + 1
+        #if DEBUG
+        imagePlaybackAccessChecksForTest += 1
+        #endif
+        imagePlaybackAccessTask = Task { @MainActor [weak self] in
+            let worker = Task.detached(priority: .userInitiated) { () -> Bool in
+                do {
+                    let project = try ProjectPersistence.make(timeline: snapshot, projectID: id, settings: settings)
+                    let references = ProjectPersistence.references(snapshot).filter { $0.kind == .stillImage }
+                    guard !references.isEmpty else { return false }
+                    for reference in references {
+                        try Task.checkCancellation()
+                        guard let url = urls[reference.id] else { return false }
+                        // Relative URLs may be readable under the owner's directory grant
+                        // without yielding a new URL scope. Match the existing planner:
+                        // balance any new lease, and require the actual full read to pass.
+                        let scoped = url.startAccessingSecurityScopedResource()
+                        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                        try await ProjectPersistence.validateImageReference(project, mediaID: reference.id, at: url)
+                    }
+                    try Task.checkCancellation()
+                    return true
+                } catch { return false }
+            }
+            let valid = await withTaskCancellationHandler(operation: { await worker.value }, onCancel: { worker.cancel() })
+            guard let self else { return }
+            defer { self.imagePlaybackAccessTask = nil }
+            #if DEBUG
+            if valid { await self.imagePlaybackAccessPreparedForTest?() }
+            #endif
+            guard !Task.isCancelled, serial == self.imagePlaybackAccessSerial,
+                  self.player.currentItem === item, self.projectSession == proof.session,
+                  self.generation == proof.generation, self.imageAccessRevision == proof.accessRevision,
+                  self.currentPlan?.composition === proof.composition,
+                  self.imagePreviewEligibility(for: item, session: proof.session, generation: proof.generation) == .validatedAtInstallation else {
+                #if DEBUG
+                self.imagePlaybackAccessStaleForTest += 1
+                #endif
+                return
+            }
+            self.imagePlaybackAccessUntil = valid ? now + 1 : 0
+        }
+        return false
+    }
+
+    private func invalidateImagePlaybackAccess() {
+        imagePlaybackAccessSerial &+= 1
+        imagePlaybackAccessUntil = 0
+        imagePlaybackAccessRetry = 0
+        imagePlaybackAccessTask?.cancel()
+    }
+
     private func invalidateImageEligibility(_ state: ImagePreviewEligibility) {
+        invalidateImagePlaybackAccess()
         appliedImagePreview = nil
         imageEligibilityState = state
     }
@@ -2799,6 +2884,7 @@ extension ProjectStore {
         let op=UUID(), session=projectSession, before=timeline
         relinkOp=op
         pendingImageRelinkID = id
+        invalidateImagePlaybackAccess()
         let acquired=startPersistenceScope(url)
         var transferred=false
         defer {

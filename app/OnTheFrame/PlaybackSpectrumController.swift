@@ -42,12 +42,12 @@ final class SpectrumPlaybackTiming {
         return displayFrame
     }
     /// Audio-backed intervals without video coverage follow the existing player item time.
-    static func audioIntervalFrame(at time: CMTime, timeline: Timeline) -> Int? {
+    static func audioIntervalFrame(at time: CMTime, timeline: Timeline, validatedImageAccess: Bool = false) -> Int? {
         guard let frame = frame(time, duration: timeline.durationFrames),
               !timeline.clips.contains(where: { $0.start <= frame && frame < $0.end }),
-              !InternalImagePreview.containsImages(timeline),
+              (!InternalImagePreview.containsImages(timeline) || validatedImageAccess),
               timeline.audioClips.contains(where: { $0.start <= frame && frame < $0.end }) else { return nil }
-        if !timeline.clips.contains(where: { $0.start <= frame }) {
+        if InternalImagePreview.containsImages(timeline) || !timeline.clips.contains(where: { $0.start <= frame }) {
             guard timeline.spectra.contains(where: { $0.visible(atFrame: frame) && hasActiveSource($0, at: frame, timeline: timeline) }) else { return nil }
         }
         return frame
@@ -243,10 +243,16 @@ extension ProjectStore {
               !view.hasPendingSpectrumSeek, let item = player.currentItem else {
             playback.stop(); return
         }
+        let hasImages = InternalImagePreview.containsImages(timeline)
+        // Preserve composited timestamps in covered intervals. Access failure blanks
+        // the spectrum even when already-decoded image textures remain displayable.
+        if hasImages && !imagePlaybackAccessIsCurrent(for: item) {
+            playback.advance(frame: nil, timeline: timeline); return
+        }
         playback.timing.attach(item, view: view)
         var frame = playback.timing.sample(hostTime: hostTime, timeline: timeline)
         if frame == nil, player.timeControlStatus == .playing {
-            frame = SpectrumPlaybackTiming.audioIntervalFrame(at: item.currentTime(), timeline: timeline)
+            frame = SpectrumPlaybackTiming.audioIntervalFrame(at: item.currentTime(), timeline: timeline, validatedImageAccess: hasImages)
         }
         playback.advance(frame: frame, timeline: timeline)
     }
