@@ -221,12 +221,18 @@ public enum ExportService {
             let au = try await a.loadTracks(withMediaType: .audio)
             guard au.count == (p.hasAudio ? 1 : 0) else { return .failed(.verification("audio tracks \(au.count)")) }
         } catch { return .failed(.verification(error.localizedDescription)) }
+        #if DEBUG
+        await spectrum?.checkpoint(.promotionPreparation)
+        #endif
         options.beforePromotion?()
         // 마무리(검증) 중 취소(CP-13): 승격 직전에 다시 본다. 취소했으면 결과를 옮기지 않고 임시 파일만 지운다.
         if Task.isCancelled { return .cancelled }
         if let f = imageSafety() { return .failed(f) }
         do { try spectrum?.validateSources() } catch { return .failed(.export(String(describing: error))) }
         let outcome = promote(tempFile, to: d, sources: sources)
+        #if DEBUG
+        if case .completed = outcome { await spectrum?.checkpoint(.promoted) }
+        #endif
         if case .completed = outcome { await progress(1) }   // 검증·승격 성공 뒤에만 1.0
         return outcome
     }

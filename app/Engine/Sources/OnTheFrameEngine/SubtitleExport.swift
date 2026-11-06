@@ -106,26 +106,64 @@ enum SubtitleExporter {
             throw e
         }
         if reader.status == .failed { writer.cancelWriting(); throw reader.error ?? NSError(domain: "SubtitleExporter", code: 3) }
+        #if DEBUG
+        await spectrum?.checkpoint(.beforeFinalization)
+        #endif
         writer.endSession(atSourceTime: CMTime(value: CMTimeValue(n), timescale: 30))
         if let spectrum {
-            let box = WriterBox(writer: writer)
+            let box = WriterFinalization(writer: writer)
             let remaining = max(0, spectrum.jobTimeout - (ProcessInfo.processInfo.systemUptime - started))
             let finalizer = Task {
                 try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
-                if !Task.isCancelled { box.writer.cancelWriting() }
+                if !Task.isCancelled { box.cancel(deadline: true) }
             }
-            await withTaskCancellationHandler(operation: { await box.writer.finishWriting() }, onCancel: { box.writer.cancelWriting() })
+            await withTaskCancellationHandler(operation: {
+                #if DEBUG
+                await spectrum.checkpoint(.finalizationPending)
+                #endif
+                await box.finish()
+            }, onCancel: { box.cancel() })
             finalizer.cancel(); _ = await finalizer.value
             try Task.checkCancellation()
+            if box.deadlineExceeded { throw ExportFailure.export("Internal spectrum finalization deadline exceeded.") }
         } else {
             await writer.finishWriting()
         }
         guard writer.status == .completed else { throw writer.error ?? NSError(domain: "SubtitleExporter", code: 4) }
+        #if DEBUG
+        await spectrum?.checkpoint(.afterFinalization)
+        #endif
         log.info("subtitle export wrote \(n) frames, reader samples \(pump.readerSamples)")
     }
 
     /// 안전성(@unchecked Sendable): 각 입력은 자기 직렬 큐에서만 쓴다. 설정은 시작 전에 끝난다.
-    struct WriterBox: @unchecked Sendable { let writer: AVAssetWriter }
+    /// Serializes finish initiation against cancellation. AVAssetWriter throws an Objective-C
+    /// exception if finishWriting is invoked after cancelWriting; Task checks alone race.
+    final class WriterFinalization: @unchecked Sendable {
+        private let writer: AVAssetWriter
+        private let lock = NSLock()
+        private var timedOut = false, finishStarted = false
+        init(writer: AVAssetWriter) { self.writer = writer }
+        var deadlineExceeded: Bool { lock.withLock { timedOut } }
+        func cancel(deadline: Bool = false) {
+            lock.withLock {
+                if deadline { timedOut = true }
+                // Cancelling a native finish already in flight can leave the writer in
+                // .writing without invoking its completion (reproduced by SP-4A-04).
+                // Drain that finish; the caller still rejects cancellation/timeout before promotion.
+                if !finishStarted && writer.status == .writing { writer.cancelWriting() }
+            }
+        }
+        func finish() async {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                lock.withLock {
+                    guard writer.status == .writing else { continuation.resume(); return }
+                    finishStarted = true
+                    writer.finishWriting { continuation.resume() }
+                }
+            }
+        }
+    }
     struct IO: @unchecked Sendable {
         let reader: AVAssetReader, vOut: AVAssetReaderVideoCompositionOutput, vIn: AVAssetWriterInput, adaptor: AVAssetWriterInputPixelBufferAdaptor
         let aOut: AVAssetReaderAudioMixOutput?, aIn: AVAssetWriterInput?
@@ -175,6 +213,9 @@ enum SubtitleExporter {
             func finish() { if !videoDone { videoDone = true; io.vIn.markAsFinished(); done() } }
             if error != nil { prepareTask?.cancel(); spectrumFootprint = nil; finish(); return }
             if videoDone || preparing { return }
+            #if DEBUG
+            if spectrum?.pausesWriter(at: k) == true { return }
+            #endif
             if !primed { primed = true; next = nextSample(io) }
             while io.vIn.isReadyForMoreMediaData && !videoDone {
                 if error != nil { finish(); return }

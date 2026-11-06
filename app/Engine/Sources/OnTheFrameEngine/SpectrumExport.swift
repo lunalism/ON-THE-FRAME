@@ -10,15 +10,26 @@ protocol ExportFrameOverlay: Sendable {
     func prepare(_ frame: Int) async throws -> SubtitleFootprint?
     func validateSources() throws
     func composed(_ frame: Int, source: CVPixelBuffer, output: CVPixelBuffer)
+    #if DEBUG
+    func checkpoint(_ point: SpectrumExportCheckpoint) async
+    func pausesWriter(at frame: Int) -> Bool
+    #endif
 }
 
 #if DEBUG
+/// Deterministic fault seams for the internal slice; never installed by ordinary export.
+enum SpectrumExportCheckpoint: Equatable, Sendable {
+    case framePreparation(Int), analysis(Int)
+    case beforeFinalization, finalizationPending, afterFinalization, promotionPreparation, promoted
+}
 /// Test controls are required at the call site; they are not product export defaults.
 struct SpectrumExportControls: Sendable {
     let stepTimeout: Double
     let jobTimeout: Double
     var composed: (@Sendable (Int, CVPixelBuffer, CVPixelBuffer) -> Void)?
     var prepared: (@Sendable (Int, [Float], SpectrumRenderedFrame?, Int) -> Void)?
+    var checkpoint: (@Sendable (SpectrumExportCheckpoint) async -> Void)?
+    var pausesWriter: (@Sendable (Int) -> Bool)?
 }
 
 /// One job owns both access and analysis until any cancelled worker has actually drained.
@@ -69,7 +80,10 @@ final class SpectrumExportFrames: ExportFrameOverlay, @unchecked Sendable {
         }
     }
     func composed(_ frame: Int, source: CVPixelBuffer, output: CVPixelBuffer) { controls.composed?(frame, source, output) }
+    func checkpoint(_ point: SpectrumExportCheckpoint) async { await controls.checkpoint?(point) }
+    func pausesWriter(at frame: Int) -> Bool { controls.pausesWriter?(frame) ?? false }
     func prepare(_ frame: Int) async throws -> SubtitleFootprint? {
+        await checkpoint(.framePreparation(frame))
         try Task.checkCancellation(); try validateSources()
         let result = try await worker.prepare(frame)
         try Task.checkCancellation(); try validateSources()
@@ -85,6 +99,7 @@ final class SpectrumExportFrames: ExportFrameOverlay, @unchecked Sendable {
             self.entry = entry; self.pieces = pieces; self.asset = asset; self.controls = controls
         }
         func prepare(_ k: Int) async throws -> SubtitleFootprint? {
+            await controls.checkpoint?(.analysis(k))
             guard k == next, k < 360 else { throw ExportFailure.export("Unexpected export frame sequence.") }
             if source == nil { source = try await SpectrumFileSource.open(url: asset.url, mediaID: asset.id) }
             guard let source, source.sampleRate == 48_000, source.channelCount == 2 else { throw ExportFailure.export("Internal slice requires stereo 48kHz analysis.") }

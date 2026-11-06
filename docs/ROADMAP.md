@@ -6,6 +6,18 @@
 
 ## S. 현재 상태 체크리스트 (정본, 2026-10-11)
 
+**2026-11-06 · SP-4A-05 — PUBLICATION READY (내부 안전성 checkpoint 감사·미커밋).** 정확한7개 후보와 SP-4A-04 소스/바이너리/출력 해시·20/20 안전성·native12/12·실패 대상19개·temp18개 증거를 대조했다. 현재 단일 finish 호출 경로의 중대한 게시 차단 결함은 발견하지 않았다. 이번에는 문서3개만 수정했고 새 빌드/기능 시험은 없다. crash−6·정지 종료−15 두 건은 보존한다.
+
+native finish 정지 시 job/temp/scope/slot도 계속 대기하므로 hard timeout·강제 회수는 보장하지 않는다. **제한된 Debug checkpoint는 게시 가능하지만 일반 출시의 bounded cancellation/복구 준비는 차단**이다. writer 정지는 전용 idle timer가 아닌 전체 job deadline이며, source 검사/open/read/promotion 사이와 마지막 취소 검사 이후에는 TOCTOU/취소 경쟁 구간이 남는다. gate/schema/합성 순서 불변, **OWNER MANUAL DEFERRED — NOT PASS**, full Release·장시간·실제 sandbox 철회·preview/export parity·Stage4 전체 미완료를 유지한다.
+
+기준 HEAD/upstream/live remote `e96b8570d286d7fb82258907e81c971cbd39dd62`, main/복구 refs/기존 사용자 파일 보존, index 비어 있음. 관리 약18.617/20GiB, 정리·staging/commit/push 없음. 다음 권고는 별도 지시에 따른7개 파일의 좁은 게시 checkpoint다. [상태 머신·single-call 가정·native 한계·TOCTOU·증거·게시 범위](diagnostics/SP-4A-04-EXPORT-SAFETY.md#sp-4a-05--finalization-안전성-게시-감사-2026-11-06)
+
+**2026-11-06 · SP-4A-04 — EXPORT SAFETY PASS (생성 fixture 자동 검증·미커밋).** finalization 취소 후 finishWriting 호출이 예외로 종료되는 경합을 재현했다(exit−6). 첫 수정의 실제 native finish/cancel 경합에서도 완료 대기가 멎는 것을 재현/보존했다(exit−15 두 건). 최종 수정은 finish 시작/취소를 직렬화하고 시작 전에는 취소, 시작 뒤에는 native 완료를 기다린 후 취소/timeout을 반환하여 승격을 막는다. native 완료 자체의 hard timeout/강제 종료 보장은 아니다.
+
+최종 코드에서 안전성20/20·native 호출 순서12/12, 정리 후 같은 프로세스 재시도360장, 정상 spectrum/일반 자막360장·12초·전체PTS·자막/합성·PCM/AAC·독립DFT·gate 회귀, 기존 읽기 도구의 오디오0–12초 확인이 새 실행으로 통과했다(exit0). 실패/취소19개 기존 출력 SHA 보존, 기록된 현재 작업 temp18개 정리 및 worker drain 확인. 성공 승격 뒤 취소는 rollback 없이 completed다. Engine Debug만 단일 job으로 빌드, 관리 약18.617/20GiB, 이전 증거/앱/캐시 정리 없음.
+
+**OWNER MANUAL DEFERRED — NOT PASS.** 일반/image/pure-audio/다중 spectrum export·공개 이미지·schema는 그대로이며 Stage4 전체/preview-export parity·full Release·장시간·실제 sandbox 철회 수락은 미완료다. 기준 HEAD/upstream/live remote `e96b8570d286d7fb82258907e81c971cbd39dd62`, main/복구 refs/사용자 파일 보존, index 비어 있음. staging/commit/push 없음. 다음 권고는 **SP-4A-05 safety checkpoint audit**다. [생명주기·두 재현 실패·최종 행렬·정확한 파일·native 한계](diagnostics/SP-4A-04-EXPORT-SAFETY.md)
+
 **2026-11-06 · SP-4A-02 — PUBLICATION READY (감사·미커밋).** SP-4A-01 후보8개와 최종 미디어/증거 해시를 대조했고 내부 첫 slice의 중대한 게시 차단 결함을 발견하지 않았다. 엔진/검사5개는 변경하지 않고 문서3개만 갱신했다. Y/Cb/Cr 오차0은 pre-encode 합성 비교이며 lossless H.264/AAC나 독립 renderer 검증이 아니다. 이전 통합2회·DFT·취소/출력보호 PASS를 재사용했고 이번에는 기존 MP4의360 PTS, 오디오0–12초/576,000 stereo sample frames, 대표 spectrum색 영역을 읽기 전용 CLI로 보강 확인했다(exit0; sandbox decoder 시작 실패2회 exit133 보존). 새 export·앱/엔진 빌드 없음.
 
 일반 spectrum·이미지-spectrum·pure audio·다중 spectrum·공개 이미지·schema gate 유지. **OWNER MANUAL DEFERRED — NOT PASS**, full Release·장시간·실제 sandbox 철회·최종 preview/export parity·Stage4 전체 수락은 미완료다. 관리 약18.430/20GiB, 기준 HEAD/upstream/live remote `a8abc89a3433918478ce3957bc71c802e2f63d7b`와 main/복구 refs/기존 파일 보존, index 비어 있음. staging/commit/push 없음. 다음 개발 권고는 기존12초 경로의 finalizing 취소/source 교체/fault matrix 강화다. [감사·비교 단계·게시 범위·한계](diagnostics/SP-4A-01-SPECTRUM-EXPORT.md#sp-4a-02--게시-체크포인트-감사-2026-11-06)
