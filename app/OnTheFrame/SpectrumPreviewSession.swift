@@ -47,6 +47,9 @@ final class SpectrumPreviewSession {
         return coordinator.request(spectrum: spectrum, frame: frame, canvasWidth: 1920, canvasHeight: 1080, priority: priority) { [weak self] outcome in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                #if DEBUG
+                SpectrumContinuityTrace.record(36, Int64(spectrum.hashValue), Int64(frame), Int64(requestedEpoch), Int64(requestedRevision), SpectrumContinuityTrace.outcome(outcome))
+                #endif
                 var accepted = outcome
                 if checkPlaybackMedia, case .ready(_, .some) = outcome {
                     if let timeline = self.playbackTimeline, let entry = timeline.spectra.first(where: { $0.id == spectrum }),
@@ -70,9 +73,15 @@ final class SpectrumPreviewSession {
                 await self.beforeDeliveryForTest?(accepted)
                 #endif
                 guard self.epoch == requestedEpoch, self.revision == requestedRevision else {
+                    #if DEBUG
+                    SpectrumContinuityTrace.record(38, Int64(spectrum.hashValue), Int64(frame), Int64(requestedEpoch), Int64(requestedRevision))
+                    #endif
                     completion(.superseded)
                     return
                 }
+                #if DEBUG
+                SpectrumContinuityTrace.record(37, Int64(spectrum.hashValue), Int64(frame), Int64(requestedEpoch), Int64(requestedRevision), SpectrumContinuityTrace.outcome(accepted))
+                #endif
                 completion(accepted)
             }
         }

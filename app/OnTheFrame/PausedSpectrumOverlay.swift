@@ -46,6 +46,11 @@ final class PausedSpectrumOverlay {
 
     @objc private func playbackTick(_ link: CADisplayLink) {
         guard link === playbackLink, let store, let view, store.previewHost === view else { return }
+        #if DEBUG
+        SpectrumContinuityTrace.tick = SpectrumContinuityTrace.next()
+        SpectrumContinuityTrace.record(20, SpectrumContinuityTrace.tick, Int64(link.targetTimestamp * 1_000_000), Int64(store.playhead))
+        let traceOld = layers.values.first.flatMap { $0.contents as AnyObject? }
+        #endif
         store.sampleSpectrumPlayback(hostTime: link.targetTimestamp)
         let controller = store.spectrumPreview.playback
         let frame = controller.currentFrame
@@ -66,6 +71,11 @@ final class PausedSpectrumOverlay {
         }
         layers = layers.filter { ordered.contains($0.value) }
         view.spectrumCanvas.sublayers = ordered
+        #if DEBUG
+        SpectrumContinuityTrace.record(40, SpectrumContinuityTrace.tick, Int64(frame ?? -1),
+            SpectrumContinuityTrace.id(traceOld), SpectrumContinuityTrace.id(ordered.first?.contents as AnyObject?),
+            Int64(ordered.count), SpectrumContinuityTrace.lease)
+        #endif
     }
 
     func attach(_ store: ProjectStore) { self.store = store; updatePlaybackLink() }

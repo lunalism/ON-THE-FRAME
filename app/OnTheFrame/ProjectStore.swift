@@ -1625,32 +1625,60 @@ final class ProjectStore {
     @ObservationIgnored private var imagePlaybackAccessSerial = 0
     @ObservationIgnored private var imagePlaybackAccessUntil: Double = 0
     @ObservationIgnored private var imagePlaybackAccessRetry: Double = 0
+    private var imagePlaybackAccessNow: Double {
+        #if DEBUG
+        if let clock = imagePlaybackAccessClockForTest { return clock }
+        #endif
+        return ProcessInfo.processInfo.systemUptime
+    }
     #if DEBUG
+    @ObservationIgnored var imagePlaybackAccessClockForTest: Double?
+    var imagePlaybackLeaseForTest: (until: Double, retry: Double, pending: Bool) {
+        (imagePlaybackAccessUntil, imagePlaybackAccessRetry, imagePlaybackAccessTask != nil)
+    }
     @ObservationIgnored var imagePlaybackAccessPreparedForTest: (() async -> Void)?
     @ObservationIgnored private(set) var imagePlaybackAccessStaleForTest = 0
     @ObservationIgnored private(set) var imagePlaybackAccessChecksForTest = 0
     var imagePlaybackAccessStateForTest: String {
         guard let item = player.currentItem,
               imagePreviewEligibility(for: item, session: projectSession, generation: generation) == .validatedAtInstallation else { return "invalidated" }
+        if imagePlaybackAccessNow < imagePlaybackAccessUntil { return "valid" }
         if imagePlaybackAccessTask != nil { return "pending" }
-        if ProcessInfo.processInfo.systemUptime < imagePlaybackAccessUntil { return "valid" }
         if imagePlaybackAccessUntil > 0 { return "expired" }
         return imagePlaybackAccessRetry > 0 ? "failed" : "unknown"
     }
     #endif
 
-    /// MainActor-only, no disk work. Pending/failed/expired evidence is never allowed.
+    /// MainActor-only, no disk work. Renewal retains only the original unexpired lease.
     /// The caller separately enforces playing, pending-seek and visual coverage rules.
-    func imagePlaybackAccessIsCurrent(for item: AVPlayerItem) -> Bool {
+    func imagePlaybackAccessIsCurrent(for item: AVPlayerItem, allowProactiveRenewal: Bool = false) -> Bool {
         guard imagePreviewEligibility(for: item, session: projectSession, generation: generation) == .validatedAtInstallation,
               let proof = appliedImagePreview else { return false }
-        let now = ProcessInfo.processInfo.systemUptime
-        if imagePlaybackAccessTask != nil { return false }
-        if now < imagePlaybackAccessUntil { return true }
-        guard now >= imagePlaybackAccessRetry else { return false }
+        let now = imagePlaybackAccessNow
+        let authorized = now < imagePlaybackAccessUntil
+        if imagePlaybackAccessTask != nil {
+            #if DEBUG
+            SpectrumContinuityTrace.record(11, SpectrumContinuityTrace.lease, authorized ? 3 : 1)
+            #endif
+            return authorized
+        }
+        // Only an active playback tick opts into periodic proactive renewal.
+        // Explicit callers may still acquire an absent/expired lease.
+        if authorized && (!allowProactiveRenewal || now < imagePlaybackAccessUntil - 0.1) { return true }
+        #if DEBUG
+        SpectrumContinuityTrace.record(11, SpectrumContinuityTrace.lease, authorized ? 4 : 2, Int64(imagePlaybackAccessUntil * 1_000_000))
+        #endif
+        guard now >= imagePlaybackAccessRetry else { return authorized }
         let serial = imagePlaybackAccessSerial, snapshot = timeline, id = projectID
         let urls = imageSourceURLs, settings = settings
-        imagePlaybackAccessRetry = now + 1
+        #if DEBUG
+        let traceLease = SpectrumContinuityTrace.next()
+        SpectrumContinuityTrace.lease = traceLease
+        SpectrumContinuityTrace.record(10, traceLease, Int64(now * 1_000_000), Int64((now + 1) * 1_000_000),
+            Int64(serial), Int64(imageAccessRevision), Int64(projectSession), Int64(generation), Int64(appliedGeneration))
+        SpectrumContinuityTrace.record(15, traceLease, SpectrumContinuityTrace.id(item), SpectrumContinuityTrace.id(proof.composition))
+        #endif
+        imagePlaybackAccessRetry = now + 0.9
         #if DEBUG
         imagePlaybackAccessChecksForTest += 1
         #endif
@@ -1676,10 +1704,17 @@ final class ProjectStore {
             }
             let valid = await withTaskCancellationHandler(operation: { await worker.value }, onCancel: { worker.cancel() })
             guard let self else { return }
+            #if DEBUG
+            SpectrumContinuityTrace.record(12, traceLease, valid ? 1 : 0, Task.isCancelled ? 1 : 0)
+            #endif
             defer { self.imagePlaybackAccessTask = nil }
             #if DEBUG
             if valid { await self.imagePlaybackAccessPreparedForTest?() }
             #endif
+            let publishedAt = self.imagePlaybackAccessNow
+            if !valid || publishedAt >= now + 1 {
+                self.imagePlaybackAccessRetry = max(self.imagePlaybackAccessRetry, now + 1)
+            }
             guard !Task.isCancelled, serial == self.imagePlaybackAccessSerial,
                   self.player.currentItem === item, self.projectSession == proof.session,
                   self.generation == proof.generation, self.imageAccessRevision == proof.accessRevision,
@@ -1687,19 +1722,38 @@ final class ProjectStore {
                   self.imagePreviewEligibility(for: item, session: proof.session, generation: proof.generation) == .validatedAtInstallation else {
                 #if DEBUG
                 self.imagePlaybackAccessStaleForTest += 1
+                SpectrumContinuityTrace.record(14, traceLease)
                 #endif
                 return
             }
-            self.imagePlaybackAccessUntil = valid ? now + 1 : 0
+            if valid && publishedAt < now + 1 {
+                self.imagePlaybackAccessUntil = now + 1
+            } else {
+                self.imagePlaybackAccessUntil = 0
+                self.clearImagePlaybackSpectrum()
+            }
+            #if DEBUG
+            SpectrumContinuityTrace.record(13, traceLease, Int64(self.imagePlaybackAccessUntil * 1_000_000))
+            #endif
         }
-        return false
+        return authorized
+    }
+
+    private func clearImagePlaybackSpectrum() {
+        spectrumPreview.playback.stop(detachTiming: false)
+        previewHost?.spectrumOverlay.invalidate()
     }
 
     private func invalidateImagePlaybackAccess() {
+        #if DEBUG
+        SpectrumContinuityTrace.record(16, SpectrumContinuityTrace.lease, Int64(imagePlaybackAccessSerial), Int64(imageAccessRevision), Int64(projectSession), Int64(generation))
+        #endif
+        let affectsImagePresentation = appliedImagePreview != nil || imagePlaybackAccessUntil > 0 || imagePlaybackAccessTask != nil
         imagePlaybackAccessSerial &+= 1
         imagePlaybackAccessUntil = 0
-        imagePlaybackAccessRetry = 0
+        // Preserve the store-wide start throttle across invalidation/replacement.
         imagePlaybackAccessTask?.cancel()
+        if affectsImagePresentation { clearImagePlaybackSpectrum() }
     }
 
     private func invalidateImageEligibility(_ state: ImagePreviewEligibility) {
@@ -1900,12 +1954,18 @@ final class ProjectStore {
 
     func togglePlay() { isPlaying ? pause() : play() }
     func play() {
+        #if DEBUG
+        SpectrumContinuityTrace.record(60, Int64(playhead), Int64(projectSession), Int64(generation))
+        #endif
         commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         guard !timeline.isEmpty, player.currentItem != nil else { return }
         if playhead >= timeline.durationFrames { seek(to: 0) }
         player.play(); setPlaying(true)
     }
     func pause() {
+        #if DEBUG
+        SpectrumContinuityTrace.record(61, Int64(playhead), Int64(projectSession), Int64(generation))
+        #endif
         let wasPlaying = isPlaying
         player.pause(); setPlaying(false)
         playhead = min(settings.frame(containing: player.currentTime()), timeline.durationFrames)
@@ -1915,6 +1975,9 @@ final class ProjectStore {
     func step(_ k: Int) { pauseForEdit(); seek(to: playhead + k) }
     @ObservationIgnored private(set) var seekToken = 0
     func seek(to frame: Int) {
+        #if DEBUG
+        SpectrumContinuityTrace.record(62, Int64(frame), Int64(projectSession), Int64(generation))
+        #endif
         if hasPendingSubtitleEdits, frame != playhead { commitInlineEditIfAny() }   // 재생 헤드를 옮기면 글 편집 확정(§44)
         let f = max(0, min(frame, timeline.durationFrames))
         // 프리뷰 자막 창에 탐색 시작·끝(완료·취소)을 번호와 함께 알린다(§49.6, Codex 검토): 탐색이 끝날 때까지 화면은 이전에 끝난 탐색의 프레임이라

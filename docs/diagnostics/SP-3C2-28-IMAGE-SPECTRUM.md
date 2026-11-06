@@ -132,3 +132,77 @@ covered 이미지/영상의 권한은 확인된 compositor PTS다. item time은 
 게시 후보는 OnTheFrameApp.swift(진입점), PlaybackSpectrumController.swift(시각/접근 gate), PreviewSelfTest.swift(검사 재사용), ProjectStore.swift(live 접근), ImageSpectrumSelfTest.swift(생성 fixture 검사), ROADMAP.md, HANDOFF.md, 이 문서의8개뿐이다. 정확한 전체 SHA-256/mode 매니페스트는 감사 최종 보고와 무시된 `app/selftest-work/sp3c229/publication-manifest.json`에 보존한다. 자체 hash 순환을 피하기 위해 이 문서에 지문을 복제하지 않는다. 모두 일반 파일100644이며 소스5개는 SP-3C2-28 지문 그대로다. 기존 미추적4개와 복구 refs, 앱/프로젝트/미디어/원시 로그/APFS 이미지는 제외·보존한다. index는 비어 있고 staging/commit/push는 하지 않았다.
 
 관리 산출물은 mount 중복을 제외한 `du -skx`로 약18.52/20GiB, 여유 약1.48GiB다. 정리/새 빌드 없음. Stage 3C-2 전체·소유자 육안/청취·대형 catalog·장기/물리 지연·실제 OS 철회 수락과 새 경로 Release 앱 검증은 남는다. Spectrum Stage4 MP4 export는 미구현이다. 다음 권장 작업은 **lease/tick/outcome/layer presence를 연결한 좁은 관찰로12개 비초기 표본의 원인과 표시 연속성을 검증**하는 것이다.
+
+
+## SP-3C2-34 — 선행 이미지 접근 갱신 (2026-11-06)
+
+**PROACTIVE RENEWAL PASS — 자동 검증 범위. OWNER MANUAL DEFERRED — NOT PASS.** 게시 기준은 `844f2e485c0873bd875a0ae865cf0e151cb166e3`이다. SP-3C2-32의 Debug 계측5개를 보존한 위에 승인된 잠정 정책을 적용했다. 아래 결과는 SP-3C2-34에서 새로 실행했으며 Stage 3C-2 전체 수락을 뜻하지 않는다.
+
+### 승인된 잠정 계약과 구현
+
+TTL은1.0초, 선행시간은100ms다. 검증 시작S의 만료는 항상S+1.0이며 완료P+1.0으로 연장하지 않는다. 실제 playback tick이 기존 만료−0.1초에 도달하면 갱신을 요청한다. 기존 lease는 원래 만료 전까지 pending worker와 독립적으로 허용된다. paused 일반 조회는 유효 lease의 주기 갱신을 시작하지 않으며, resume/replay는 실제 현재 시각을 검사한다. 새 playback clock·timer·동기 파일 I/O는 없다.
+
+완료 시 item/composition/session/generation/access revision/취소 serial/설치 eligibility를 다시 검사하고 P<S+1일 때만 대체 lease를 게시한다. 실패 또는 만료된 성공은 허용하지 않으며 현재 컨텍스트의 lease를0으로 철회하고 controller 결과와 spectrum overlay를 즉시 무효화한다. 알려진 접근 변경도 같은 방식으로 철회한다. 이미지 컨텍스트가 없는 경로에는 이 추가 표시 무효화를 적용하지 않는다. 원본 이미지 검증·선택 WAV identity/read·FFT·계보·compositor PTS 및 실제 공백/꼬리 item-time 조건은 유지했다.
+
+worker 슬롯은 취소 후 실제 종료까지 유지한다. 시작 간격은 정상 시 최소0.9초, 실패/만료 성공 뒤에는 이전 시작부터 최소1초다. 무효화·relink·project 교체에서 throttle을 초기화하지 않는다. 큐나 중첩 검증을 만들지 않는다. 외부 파일 접근 철회는 다음 검사 전까지 미감지될 수 있고, UI/OS 정체를 포함한 절대1초 감지나 지속 접근 보장은 없다. 100ms는 잠정 검증값이며 제품 SLA가 아니다.
+
+### 새 검증과 인과 증거
+
+생성 fixture와 signed Debug 앱을 사용했다. `app/selftest-work/sp3c234/`에 원시 trace, 결과, 종료 코드, 빌드 로그와 지문을 보존한다. 기존1,500MiB 상한 APFS 볼륨 안의 별도 clone 경로를 사용해 이전 앱·캐시·증거를 덮어쓰지 않았다.
+
+- 결정적 계약19/19: 실제 이미지 읽기와 Debug 제어 시각/완료 hook으로 초기 차단, 선행 시점, pending 유효 lease, 원래 만료, 시작 기준 대체 만료, seek/paused 조회, 정확한 만료 시각 차단, 만료 후 유효 대체 복구, 자기 TTL이 만료된 성공 거부, 원본 소실 실패, 재시도 제한, 취소 슬롯 유지·늦은 성공 거부를 검사했다.
+- 다섯 이미지 재생135/135, 픽셀40/40, 자막1800/1800, 선택 원본 FFT/layer1792/1800. 각 짧은 캡처에서 선행 갱신14회, 총70회. 접근 갱신에 의한 non-nil→nil model-layer 전이는0회. 모든 선택 프레임/layer 게시 이벤트가 활성 lease 만료 전임을 대조했고 worker 중첩·잘못된 슬롯 종료·만료 결과 게시도0회다. 최소 요청 간격은900.003–900.008ms다.
+- 비교 미확인8개는 각 scenario의 초기 frame0 다섯 개와 gap-image120, gap-video120, tail240이다. 이 경계 표본은 갱신 차단과 구분한다. 무음 ready-empty, seek, 초기화 및 timing/분석 대기를 무공백 증거로 바꾸지 않는다. 과거17개/18개 표본도 그대로 보존한다.
+- 접근·availability/relink·item/project 교체16/16. 이미지 소실·읽기 권한 실패·선택 WAV 소실은 계속 fail closed다.
+- 기존 Debug hook에1.1초 완료 지연을 준 합성 검사3/3: 이미 만료된 성공을 채택하지 않고 순차 재시도하며 표시 차단을 유지한다. 실제 대형 catalog 성능 시험은 아니다. 선행 갱신이 TTL을 초과하는 검증의 starvation까지 해결했다고 주장하지 않는다.
+- controller92/92, paused overlay58/58, eligibility32/32, 공개 이미지 gate-off3/3, 순수 오디오37/37, lead-in37/37, 영상 공백46/46, 오디오 꼬리23/23.
+- 변경하지 않은 보존 엔진 바이너리로 집중 Debug/Release 각각39/39를 새로 실행했다(Model12+Coordinator13+Scheduler14). spectrum export를 목적지 수정 전에 거부하는 검사 포함. 전체 Release 앱/prototype/WMO 빌드는 하지 않았다.
+
+정상 trace는8,192개/2MiB 상한 이내이며 truncation 없음. 시간 순서·lease/tick/request/완료 상관을 검사했다. 이는 model layer 결과이고 물리 화면 scan-out·청취 지연을 측정한 것이 아니다. 계측 오버헤드와 더 느린 catalog·다른 scheduling 환경은 남은 한계다.
+
+### 보존한 중간 실패와 검사 출처
+
+새 결정적 검사에서 catch 변수 이름 충돌로 첫 Debug 빌드가65로 종료됐고 수정 후 빌드는0이었다. 최초 접근 검사는15개 통과 뒤 프로젝트 교체 단계에서 대기 시간 초과였다. 기존 harness가 단발 요청 직후 작업 시작을 가정했지만 새 정책은 교체 후에도 throttle을 유지하므로 요청이 아직 시작되지 않은 상태였다. 늦은 성공 거부 단언은 그대로 보존하고, 준비 단계가 요청 가능 시점까지 재조회하게 수정했다. 최종 새 fixture에서16/16을 확인했다. 이 실패 로그를 삭제하거나 성공에 포함하지 않았다.
+
+다섯 trace·호환 회귀·합성 지연은 동일 제품 코드의 첫 signed 앱에서 실행했다. 이후 변경은 위 harness 준비 단계와 trace 주석뿐이며 첫 앱도 보존했다. 최종 signed 앱에서 계약19/19와 접근16/16을 재실행했다. 성공 실행의 launch/검사 종료는 모두0이다. launch0만으로 내부 assertion 성공을 판단하지 않고 결과 파일을 대조했다.
+
+### 자원·남은 범위
+
+관리 사용량은 mount 중복을 제외한 약19.48/20GiB(시작18.9148에서 약0.57GiB 증가, 여유 약0.52GiB)다. 기존 미추적4개와 recovery refs, 이전 signed 앱·fixture·로그는 보존했다. 정리·staging·commit·push, 공개 이미지 활성화, schema/소유자 데이터 변경, spectrum MP4 export 구현은 없다.
+
+다음 권장 작업은 선행 갱신 체크포인트의 소스·증거 감사다. 소유자 육안/청취 수락, 대형 catalog의 지연 분포, 장기 비용·실제 OS 철회·물리 A/V 지연, 전체 Release 앱 검증과 Stage 3C-2 전체 수락은 미완료이며 Stage4 spectrum export도 미구현이다.
+
+
+## SP-3C2-35 — 선행 갱신·Debug trace 게시 감사 (2026-11-06)
+
+**PUBLICATION READY — 내부 체크포인트 한정. OWNER MANUAL DEFERRED — NOT PASS.** 기준 HEAD/upstream/live remote는 `844f2e485c0873bd875a0ae865cf0e151cb166e3`, main은 `44943eadabdf5a37d5242d614e7279813126dfde`다. 전체8개 후보 diff와 실제 소스, SP-3C2-31/32/34 원시 증거 및 앱/파일 지문을 대조했다. 중대한 게시 차단 결함은 발견하지 않았다. 이번에는 문서3개만 갱신했으며 소스5개는 SP-3C2-34 지문과 동일하다. 새 빌드·앱/엔진 테스트 실행 없이 저장 결과 재집계와 읽기 전용 검사를 수행했다.
+
+### 제품 계약 판정
+
+현재 소스는 잠정 B 정책(TTL1초·선행100ms)을 구현한다. `authorized = now < until`을 worker 상태와 분리하고, playback guard를 통과한 기존 tick만 선행 갱신을 요청한다. 일반 seek는 until을 변경하지 않고 pause/end는 주기 요청을 만들지 않는다. worker 완료는 시작+1초 전에만 동일 item/composition/session/generation/access revision/취소 serial의 결과를 게시한다. 취소 worker는 완료와 Debug delivery hook까지 슬롯을 유지하며, 다음 요청은 nil 슬롯에서만 생성되어 이전 defer가 새 슬롯을 지우는 경로가 없다. throttle은 정상0.9초, 실패/만료 성공 뒤 최소1초이며 무효화에서도 유지된다.
+
+확인된 실패를 MainActor에서 처리하면 live lease를0으로 철회하고 controller/overlay를 동기적으로 무효화한다. `validatedAtInstallation`은 설치 당시의 역사적 증거이므로 live 실패와 별개이며 현재 접근을 보장하지 않는다. 알려진 변경은 기존 설치 증거도 무효화한다. 만료 판정은 실행 가능한 playback tick의 접근 조회에서 적용된다. 따라서 OS/UI scheduling 정지 중 화면까지 정확한 시각에 비워진다는 실시간 보장은 없다. 이미지 validator·실제 읽기·scope 균형, 선택 오디오 identity/read/계보 매핑, covered compositor PTS와 실제 공백/꼬리 조건, 공개 gate·schema·export 거부는 유지된다.
+
+### Debug trace 보존 판정
+
+내부 한 store/단일-spectrum fixture의 진단 기반으로 보존 가능하다. tracer 전체·호출·제어 시각은 `#if DEBUG` 안에 있고 기록은 명시적 trace 실행에서만 활성화된다. Release에 trace·합성 시각·완료 지연이 포함되지 않는다. 이는 선행 갱신 제품 코드 자체가 Release에서 제외된다는 뜻이 아니며, 기존 공개 이미지 gate는 그대로다. Debug에서 기록이 꺼져 있어도 일부 인자 계산과 임시 객체 참조 비용은 있으므로 무오버헤드를 주장하지 않는다.
+
+이벤트는80바이트 고정 구조, 사전 확보8,192개(이벤트 본체655,360바이트)로 제한된다. append 이전 상한 검사로 기록을 중지하고 truncation을 표시하며 덮어쓰지 않는다. 각 JSON row는 signed Int64 열10개뿐이어서 최대212바이트, 총1,736,704바이트와 작은 고정 header로2MiB 이내다. 저장 전 실제 data 크기도 검사한다. 직렬화의 임시 배열/JSON 버퍼는 종료 후에만 만들어지며 bounded지만 **2MiB가 전체 프로세스 heap 상한은 아니다**. callback의 recorder에는 파일 I/O·문자열 포맷·잠금·새 task가 없다. event buffer에는 media 객체나 경로를 보관하지 않는다.
+
+시각은 system uptime 기반 microseconds이며 동률 이벤트의 순서는 배열 순서다. 저장된 trace의 요청/완료/취소·lease·tick과 상한/truncation self-check를 확인했다. `lease` 표지는 최근 시작 요청을 가리킬 수 있으므로 실제 권한 기간은 event13의 성공 게시와 event16 무효화를 따라 재구성해야 한다. 70회/0회 재집계도 이 방식으로 확인했다. `imagePlaybackAccessStateForTest`의 failed 문자열은 retry가 설정됐다는 뜻도 포함하므로 확인된 파일 접근 실패의 단독 증거로 사용하지 않는다. 새 컨텍스트의 throttle 대기와 실제 실패는 작업/게시 이벤트 및 validator 결과로 구분해야 한다.
+
+진단 한계: layer event40은 `layers.values.first`와 `ordered.first`를 기록하므로 여러 spectrum의 개별 layer 동일성을 일반화할 수 없다. 객체 주소·UUID hash는 프로세스 안의 상관값이며 재실행 간 안정 ID나 충돌 없는 전역 ID가 아니다. 단일 store/단일-spectrum 시험에서는 상관이 확인됐지만 다중 store 동시 추적은 검증 범위 밖이다. 이는 recorder의 제품 안전 결함으로 판단하지 않았으며 향후 그 범위에 사용하려면 계측 확장이 필요하다. 원시 trace/로그는 게시에서 제외한다.
+
+### 증거 출처와 남은 한계
+
+앞 절의 계약19/19, 재생135/135, 픽셀40/40, 자막1800/1800, FFT/layer1792/1800, 접근16/16, 지연3/3, controller92/92, overlay58/58, eligibility32/32, gate-off3/3, 순수 오디오·lead-in 각각37/37, gap46/46, tail23/23, 엔진 Debug/Release 각각39/39는 **SP-3C2-34에서 실행한 과거 증거**다. SP-3C2-35의 새 테스트가 아니다. 엔진은 보존 바이너리의 실행이며 새 Release 앱 빌드가 아니다. 최초 compiler65 실패, 최초 접근15개 뒤 throttle 대기 timeout 및 이전 SP-3C2-32 fixture 실패도 보존한다. 최종 harness는 단언을 완화하지 않고 요청 준비 단계가 새 throttle을 존중하도록 수정됐다.
+
+8개 비교 미확인 표본은 startup frame0 다섯 개와 gap-image120(4.004034750초), gap-video120(4.003598833초), tail240(8.004018333초)다. 갱신 layer 제거0회가 이 경계 상태나 모든 표시 공백의 해결을 뜻하지 않는다. 수집기의 성공 편향·프레임당1회 관찰, 같은 FFT 구현을 이용한 참조 비교도 유지되는 한계다.
+
+1.1초 합성 완료 지연의 starvation, 대형 catalog 지연 분포, 실제 OS 접근 철회, 장기 drop-rate·물리 음성/화면 지연은 미해결/미측정이다. 전체 Release 앱/진단 prototype/WMO 빌드 차단은 재시도하지 않았으며 이 감사로 해소하지 않았다. 과거 이미지 player-layer 간헐 문제도 해결됐다고 판정하지 않는다. 소유자 수동 수락·Stage 3C-2 전체 통합 수락은 유예이며 Stage4 spectrum MP4 export는 미구현이다.
+
+### 게시 범위·자원
+
+후보는 소스/Debug 검사5개와 ROADMAP/HANDOFF/이 문서3개, 총8개다. 모든 후보는 일반 파일100644이며 최종 전체 SHA-256은 SP-3C2-35 최종 보고와 무시된 `app/selftest-work/sp3c235/publication-manifest.json`에 기록한다. 자체 hash 순환을 피하기 위해 이 문서에 지문을 복제하지 않는다. 기존 미추적4개·원시 trace·로그·fixture·signed 앱·DerivedData/cache·APFS 이미지는 제외·보존한다.
+
+관리 사용량은 mount 중복을 제외해 약19.48/20GiB, 여유 약0.52GiB다. 읽기 전용 감사에는 충분하므로 이번에 삭제 후보나 회수 가능량을 새로 확정할 필요는 없다. 향후 빌드에 충분하다는 보장은 아니며 빌드 전 별도 재측정이 필요하다. 캐시·앱·증거 이동/삭제 없음. index 비어 있음, staging/commit/push 없음. 다음 개발 권고는 공백/꼬리 경계3개 표본의 timing 선택/분석 대기를 좁게 구분하는 진단이다.

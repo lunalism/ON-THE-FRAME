@@ -77,7 +77,12 @@ final class SpectrumPlaybackTiming {
 @MainActor
 final class PlaybackSpectrumController {
     struct Key: Hashable { let spectrum: UUID; let frame: Int }
-    struct Pending { let ticket: SpectrumFrameTicket; let serial: Int; let start: Double; var cancelled = false }
+    struct Pending {
+        let ticket: SpectrumFrameTicket; let serial: Int; let start: Double; var cancelled = false
+        #if DEBUG
+        var traceRequest: Int64 = 0
+        #endif
+    }
     struct Stored { let outcome: SpectrumFrameOutcome; let bytes: Int }
     private enum CompletionState {
         case settled // retained image, stable empty result, or terminal source/analysis failure
@@ -109,6 +114,9 @@ final class PlaybackSpectrumController {
     init(session: SpectrumPreviewSession) { self.session = session }
 
     func stop(detachTiming: Bool = true) {
+        #if DEBUG
+        SpectrumContinuityTrace.record(30, Int64(currentFrame ?? -1), Int64(serial), SpectrumContinuityTrace.tick)
+        #endif
         serial &+= 1; currentFrame = nil; desired.removeAll(keepingCapacity: true)
         completed.removeAll(keepingCapacity: true); recoveryAttempted.removeAll(keepingCapacity: true)
         retained.removeAll(keepingCapacity: true); retainedBytes = 0
@@ -119,6 +127,9 @@ final class PlaybackSpectrumController {
         for key in pending.keys {
             guard var p = pending[key], !p.cancelled, !desired.contains(key) else { continue }
             p.cancelled = true; pending[key] = p; metrics.cancelled += 1
+            #if DEBUG
+            SpectrumContinuityTrace.record(35, p.traceRequest, Int64(key.frame), Int64(p.serial), Int64(key.spectrum.hashValue))
+            #endif
             session?.cancel(p.ticket)
         }
     }
@@ -141,6 +152,9 @@ final class PlaybackSpectrumController {
         guard currentFrame != frame else { metrics.reused += 1; return }
         if retained.keys.contains(where: { $0.frame == frame }) { metrics.prefetchedCurrentHits += 1 }
         currentFrame = frame
+        #if DEBUG
+        SpectrumContinuityTrace.record(31, Int64(frame), Int64(serial), SpectrumContinuityTrace.tick)
+        #endif
         desired.removeAll(keepingCapacity: true)
         // Current items precede all future items. More than 8 simultaneous items are explicitly capped.
         for offset in 0...Self.lookahead {
@@ -170,11 +184,21 @@ final class PlaybackSpectrumController {
                 recoveryAttempted.insert(key); metrics.recoveryRequests += 1
             }
             let requestSerial = serial, start = ProcessInfo.processInfo.systemUptime
+            #if DEBUG
+            let traceRequest = SpectrumContinuityTrace.next()
+            SpectrumContinuityTrace.record(32, traceRequest, Int64(key.frame), Int64(requestSerial), Int64(epoch), Int64(revision), Int64(key.spectrum.hashValue))
+            #endif
             let ticket = session.request(spectrum: key.spectrum, frame: key.frame,
                                          priority: key.frame == currentFrame ? 0 : 1, checkPlaybackMedia: true) { [weak self] outcome in
+                #if DEBUG
+                SpectrumContinuityTrace.record(33, traceRequest, Int64(key.frame), Int64(requestSerial), SpectrumContinuityTrace.outcome(outcome))
+                #endif
                 self?.finish(key, serial: requestSerial, outcome: outcome)
             }
             pending[key] = Pending(ticket: ticket, serial: requestSerial, start: start)
+            #if DEBUG
+            pending[key]?.traceRequest = traceRequest
+            #endif
             metrics.requested += 1; metrics.peakPending = max(metrics.peakPending, pending.count)
         }
     }
@@ -185,6 +209,11 @@ final class PlaybackSpectrumController {
               revision == session.revision, desired.contains(key), currentFrame != nil else {
             metrics.stale += 1; pump(); return
         }
+        #if DEBUG
+        let traceImage: Int64
+        if case let .ready(_, rendered) = outcome { traceImage = SpectrumContinuityTrace.id(rendered?.image) } else { traceImage = 0 }
+        SpectrumContinuityTrace.record(34, p.traceRequest, Int64(key.frame), Int64(requestSerial), SpectrumContinuityTrace.outcome(outcome), traceImage, Int64(key.spectrum.hashValue))
+        #endif
         completed[key] = .settled
         let latency = ProcessInfo.processInfo.systemUptime - p.start
         metrics.accepted += 1; metrics.latencyTotal += latency; metrics.latencyMax = max(metrics.latencyMax, latency)
@@ -241,12 +270,18 @@ extension ProjectStore {
         guard isPlaying, player.rate != 0, let view = previewHost, view.window != nil,
               gestureBase == nil, !view.isShowingStill, appliedGeneration == generation,
               !view.hasPendingSpectrumSeek, let item = player.currentItem else {
+            #if DEBUG
+            SpectrumContinuityTrace.record(21, SpectrumContinuityTrace.tick, 1, isPlaying ? 1 : 0, Int64(generation), Int64(appliedGeneration))
+            #endif
             playback.stop(); return
         }
         let hasImages = InternalImagePreview.containsImages(timeline)
         // Preserve composited timestamps in covered intervals. Access failure blanks
         // the spectrum even when already-decoded image textures remain displayable.
-        if hasImages && !imagePlaybackAccessIsCurrent(for: item) {
+        if hasImages && !imagePlaybackAccessIsCurrent(for: item, allowProactiveRenewal: true) {
+            #if DEBUG
+            SpectrumContinuityTrace.record(21, SpectrumContinuityTrace.tick, 2, SpectrumContinuityTrace.lease)
+            #endif
             playback.advance(frame: nil, timeline: timeline); return
         }
         playback.timing.attach(item, view: view)
@@ -254,6 +289,9 @@ extension ProjectStore {
         if frame == nil, player.timeControlStatus == .playing {
             frame = SpectrumPlaybackTiming.audioIntervalFrame(at: item.currentTime(), timeline: timeline, validatedImageAccess: hasImages)
         }
+        #if DEBUG
+        SpectrumContinuityTrace.record(22, SpectrumContinuityTrace.tick, Int64(frame ?? -1), SpectrumContinuityTrace.lease)
+        #endif
         playback.advance(frame: frame, timeline: timeline)
     }
 }
