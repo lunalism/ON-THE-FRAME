@@ -1,5 +1,17 @@
 # 인계 요약 — ON THE FRAME
 
+**2026-11-07 · SP-4A-22 — HARNESS VALIDATION PASS.** SP-4A-21 수정본의 증분 Debug 빌드와 A–J 검증을 마쳤다. 119→120과 원본 15개 정지 프레임을 다시 통과했다. 다음 단계는 여섯 후보 파일의 게시 전 재감사다. [시험 기록과 범위](diagnostics/SP-4A-10-STILL-FRAME-PARITY.md).
+
+**2026-11-07 · SP-4A-21 — PATCH READY — TESTS DEFERRED.** Debug 하네스의 교체 관찰자 설치와 result.json 검증을 수정했다. 빌드 시작 여유 부족으로 새 패치의 실행 검증과 게시 판정은 보류한다. [수정과 검증 계획](diagnostics/SP-4A-10-STILL-FRAME-PARITY.md).
+
+**2026-11-07 · SP-4A-20 — 게시 보류.** SP-4A-19의 소유 출력 정리, 필수 래스터 실패 판정, 15/15 회귀 기록을 재확인했다. 교체 시험에서 새 세션의 관찰자 슬롯을 덮어쓸 수 있는 경로와 기준 JSON 형식 오류 시 강제 캐스팅 종료가 남았다. [상세 근거](diagnostics/SP-4A-10-STILL-FRAME-PARITY.md).
+
+**2026-11-07 · SP-4A-19 — HARNESS SAFETY PASS.** 다음 작업은 수정된 소유권·종료 처리와 음성 시험 증거에 대한 게시 전 재감사다. [범위와 한계](diagnostics/SP-4A-10-STILL-FRAME-PARITY.md).
+
+**2026-11-07 · SP-4A-18 — 게시 보류.** 다음 작업은 Debug 하네스 종료 처리의 소유권 수정과 재감사다. SP-4A-16·17에서 동일 fixture의 119→120 전환과 15/15 정지 프레임, 독립 DFT 및 짧은 실행의 RSS 표본 기준을 확인했다. 프로젝트 교체 시 공유 저장소를 정리하는 종료 경로가 남았다. [결과와 게시 차단 사유](diagnostics/SP-4A-10-STILL-FRAME-PARITY.md).
+
+**2026-11-06 · SP-4A-10 — PARTIAL.** 동일 SP-4A-01 프로젝트용 Debug 정지 프레임 parity 하네스 초안을 추가했다. 원본4개 SHA는 일치하지만 격리 Debug 빌드가 scratch 여유 중지선에 도달해 exit−15로 중단됐다. 새 하네스 컴파일·앱 실행·15개 프레임 검증은 NOT RUN. 기존 export/Preview 결과를 새 parity PASS로 사용하지 않는다. 공개 gate/schema/finalization 불변, OWNER MANUAL DEFERRED — NOT PASS. [범위·중단 증거·다음 단계](diagnostics/SP-4A-10-STILL-FRAME-PARITY.md).
+
 > 새 대화·새 에이전트가 처음 읽는 짧은 요약이다(2026-10-11 작성, 기준 절 2026-10-25 갱신). 정본은 아니다: 상태는 [ROADMAP.md](ROADMAP.md) §S, 결정은 [DECISIONS.md](DECISIONS.md), 구현·검증 기록은 [app/README.md](../app/README.md), 작업 규칙은 [CLAUDE.md](../CLAUDE.md). 서로 다르면 정본 문서를 따르고 이 요약을 고친다.
 
 ## 기준

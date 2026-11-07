@@ -22,6 +22,7 @@ final class PausedSpectrumOverlay {
     private var tickets: [SpectrumFrameTicket] = []
     private(set) var layers: [UUID: CALayer] = [:]
     #if DEBUG
+    var publicationForParityTest: (owner: UUID, receive: (Int, Int, UUID, SpectrumFrameOutcome) -> Void)?
     private(set) var assignments = 0
     private(set) var latencies: [Double] = []
     private(set) var updateCosts: [Double] = []
@@ -162,6 +163,7 @@ final class PausedSpectrumOverlay {
                     }
                     CATransaction.commit()
                     #if DEBUG
+                    self.publicationForParityTest?.receive(frame, token, entry.id, accepted)
                     self.assignments += 1
                     self.latencies.append(updateStart - start)
                     self.updateCosts.append(ProcessInfo.processInfo.systemUptime - updateStart)

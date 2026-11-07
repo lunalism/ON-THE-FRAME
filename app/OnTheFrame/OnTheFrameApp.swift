@@ -188,6 +188,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
+        if args.contains("-OTFStillFrameParityTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
+            Task { await StillFrameParitySelfTest.run(folder: folder) }
+            return
+        }
         if args.contains("-OTFImageLiveAccessTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await ImageSpectrumSelfTest.runAccess(folder: folder) }
             return
