@@ -1,5 +1,13 @@
 # 인계 요약 — ON THE FRAME
 
+**SP-5B-04 · 두께·방향·모드 편집 / 6파일 커밋 승인 준비.** 기존 draft·setter에 두께 0.5–64 px(최대 소수 3자리), above/mirrored/below, digital/analog를 추가했다. Apply/Cancel·no-op·한 단계 Undo/Redo·선택/session/generation 보호·Preview 무효화를 재사용하고 다른 스타일·계보·타이밍을 보존한다. renderer·형식·entitlement·공개 export 게이트 변경은 없다. [상세 범위·증거·한계](ROADMAP.md).
+
+기존 SP-5B-02 실제 실행은 Debug 빌드 exit 0·strict signing PASS·집중 SwiftPM **7/7 PASS**, 관측 자원 위반 없음이다. SP-5B-02M/RESUME 소유자 관찰은 A–I·K PASS이며 저장 금지로 J는 당시 DEFERRED였다. 이후 승인된 별도 SP-5B-02P 파일의 저장·닫기·재열기 **지속성 PASS**를 소유자가 확인했다. 저장 검사도 thicknessMilli=3125·mirrored·analog, 높이 400·alpha 192·좌표/RGB/분석·Spectrum ID/계보/미디어 ID·형식 8 보존을 확인했다. 이번 작업에서 빌드·테스트·앱 실행·서명 검사를 재수행하지 않았다.
+
+지속성 파일은 `app/selftest-work/sp5a06-owner-manual-20261112/fixture-sp5b02p-20261112-01.ontheframe`, SHA-256 `66e047b485cbccbf37cc56ecc123c64fd78fad213d64fa30b6924332502beef8`이다. 보호 baseline `fixture.ontheframe`은 `508281c62011a9f2205db8be61979ff046bb61b1dd3012454b0601d3192fbed2`로 유지됐고 원본·미디어·역사 증거도 보존했다. 이전 높이 350→400 저장 변경 원인은 미확정이며 400은 승인된 기준이다. 아래 SP-5A의 미저장 상태는 당시 이력이며 현재 앱 메모리 관측이 아니다.
+
+남은 앱 경계 검증은 새 parser·숨은 속성 거부·stale selection/project 요청의 전체 store 자동 검사다. 전체 Preview/export·물리 display/audio parity 미검증, 공개 export 비활성, Release 준비 미승인, SP-4B 시작 공백 미해결을 유지한다. Stage 5 전체 완료가 아니다. 후보는 ContentView.swift·ProjectStore.swift·SpectrumModelTests.swift·SpectrumFrameCoordinatorTests.swift·ROADMAP.md·HANDOFF.md다. 로컬 진단·소유자 파일·시험 프로젝트/미디어·빌드·raw evidence를 제외하고 보존한다. 다음은 최종 manifest의 별도 커밋/게시 승인이다. 아래 SP-5A-11 승인 대기는 당시 기록이며 `db4390e`로 게시됐다. 이번 작업은 문서 두 개만 수정했고 프로젝트 저장·staging·commit·push는 하지 않았다.
+
 **SP-5A-11 · Spectrum 위치·높이·RGB 편집 / 최종 6파일 커밋 승인 준비.** SP-5A-10 검토 뒤 문서만 정리했다. 선택 Spectrum의 startX/startY/endX/endY/maxHeight/red/green/blue **8개 숫자 입력란**, 정확한 소수 px→milli 변환·범위 검사, draft Apply/Cancel, 선택/session/generation 보호, no-op 제외와 기존 한 단계 Undo/Redo·dirty-state·Preview 무효화·소스 계보 보존을 구현했다. 숨은 alpha·thickness·mode·sides·분석 설정, 형식·renderer·Sandbox·공개 export 게이트는 그대로다. [상세 범위·증거·한계](ROADMAP.md).
 
 기존 SP-5A-05 실제 실행은 **62/62 진단 assertions·6/6 SwiftPM 엔진 테스트 PASS**, exit 0, Xcode 27.2 matching SDK 사용·관측 자원 한도 위반 없음이다. 진단은 실제 parser/setter 추출과 commit/invalidation test double을 조합하므로 전체 UI 검증이 아니다. 성공 검증 중 제품 소스는 변경하지 않았다. 이번 문서 작업은 빌드·앱 실행·테스트를 하지 않았다.

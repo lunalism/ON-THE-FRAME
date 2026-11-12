@@ -914,6 +914,9 @@ struct AdjustmentsView: View {
 struct SpectrumStyleDraft {
     var startX: String, startY: String, endX: String, endY: String, height: String
     var red: String, green: String, blue: String
+    var thickness: String
+    var sides: SpectrumItemStyle.Sides
+    var mode: SpectrumItemStyle.Mode
     init(_ style: SpectrumItemStyle) {
         func pixels(_ value: Int) -> String {
             let magnitude = value.magnitude
@@ -923,6 +926,7 @@ struct SpectrumStyleDraft {
         startX = pixels(style.startXMilli); startY = pixels(style.startYMilli)
         endX = pixels(style.endXMilli); endY = pixels(style.endYMilli)
         height = pixels(style.maxHeightMilli)
+        thickness = pixels(style.thicknessMilli); sides = style.sides; mode = style.mode
         red = String(style.red); green = String(style.green); blue = String(style.blue)
     }
     struct Invalid: LocalizedError {
@@ -940,7 +944,7 @@ struct SpectrumStyleDraft {
             let scaled = decimal * 1000
             guard scaled >= Decimal(range.lowerBound), scaled <= Decimal(range.upperBound),
                   let value = Int(exactly: NSDecimalNumber(decimal: scaled).int64Value) else {
-                throw Invalid(message: "\(label): \(range.lowerBound / 1000)–\(range.upperBound / 1000) px 범위로 입력하세요.")
+                throw Invalid(message: "\(label): \(Double(range.lowerBound) / 1000)–\(Double(range.upperBound) / 1000) px 범위로 입력하세요.")
             }
             return value
         }
@@ -958,6 +962,8 @@ struct SpectrumStyleDraft {
         result.endXMilli = try milli(endX, "끝 X", range: -10_000_000...10_000_000)
         result.endYMilli = try milli(endY, "끝 Y", range: -10_000_000...10_000_000)
         result.maxHeightMilli = try milli(height, "최대 높이", range: 0...1_080_000)
+        result.thicknessMilli = try milli(thickness, "두께", range: 500...64_000)
+        result.sides = sides; result.mode = mode
         result.red = try color(red, "빨강"); result.green = try color(green, "초록"); result.blue = try color(blue, "파랑")
         guard hypot(Double(result.endXMilli - result.startXMilli), Double(result.endYMilli - result.startYMilli)) >= 1000 else {
             throw Invalid(message: "시작점과 끝점의 거리는 1 px 이상이어야 합니다.")
@@ -989,6 +995,18 @@ struct SpectrumStyleAdjust: View {
             field("시작 X", $draft.startX); field("시작 Y", $draft.startY)
             field("끝 X", $draft.endX); field("끝 Y", $draft.endY)
             field("최대 높이", $draft.height)
+            field("두께", $draft.thickness)
+            Picker("표시 방향", selection: $draft.sides) {
+                Text("위쪽 (above)").tag(SpectrumItemStyle.Sides.above)
+                Text("양쪽 (mirrored)").tag(SpectrumItemStyle.Sides.mirrored)
+                Text("아래쪽 (below)").tag(SpectrumItemStyle.Sides.below)
+            }
+            Text("방향은 시작점→끝점 기준선의 수직 방향 기준이며, 화면 위·아래와 다를 수 있습니다.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Picker("표시 모드", selection: $draft.mode) {
+                Text("Digital").tag(SpectrumItemStyle.Mode.digital)
+                Text("Analog").tag(SpectrumItemStyle.Mode.analog)
+            }
             field("빨강", $draft.red); field("초록", $draft.green); field("파랑", $draft.blue)
             if let message = feedback ?? validation {
                 Text(message).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)

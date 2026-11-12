@@ -933,8 +933,9 @@ final class ProjectStore {
         allowed.startXMilli = style.startXMilli; allowed.startYMilli = style.startYMilli
         allowed.endXMilli = style.endXMilli; allowed.endYMilli = style.endYMilli
         allowed.maxHeightMilli = style.maxHeightMilli
+        allowed.thicknessMilli = style.thicknessMilli; allowed.sides = style.sides; allowed.mode = style.mode
         allowed.red = style.red; allowed.green = style.green; allowed.blue = style.blue
-        guard style == allowed, style.isValid else { return "위치·높이·RGB 범위를 확인해 주세요." }
+        guard style == allowed, style.isValid else { return "위치·높이·두께·RGB 범위를 확인해 주세요." }
         guard style != original else { return nil }
         commit({ try $0.settingSpectrumStyle(id, style) }, focus: id)
         return timeline.spectrum(id)?.style == style ? nil : (statusMessage ?? "모양을 적용하지 못했습니다.")

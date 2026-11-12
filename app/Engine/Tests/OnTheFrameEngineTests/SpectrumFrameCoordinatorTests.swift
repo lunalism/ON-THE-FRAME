@@ -301,6 +301,9 @@ final class SpectrumFrameCoordinatorTests: XCTestCase {
         var style = t.spectrum(sid)!.style; style.red = 10
         var position = t.spectrum(sid)!.style; position.startXMilli += 125; position.endYMilli += 500
         var height = t.spectrum(sid)!.style; height.maxHeightMilli = 250_125
+        var thickness = t.spectrum(sid)!.style; thickness.thicknessMilli = 3_125
+        var sides = t.spectrum(sid)!.style; sides.sides = .below
+        var mode = t.spectrum(sid)!.style; mode.mode = .analog
         var analysis = t.spectrum(sid)!.style; analysis.bands = 32
         let relinked = wav.withID(steady.id)   // 같은 미디어 ID, 다른 파일(재연결)
         let cases: [(String, Timeline, [MediaAsset], String, Bool)] = [
@@ -316,6 +319,9 @@ final class SpectrumFrameCoordinatorTests: XCTestCase {
             ("모양(색)", try t.settingSpectrumStyle(sid, style), [steady], "superseded", true),
             ("모양(위치)", try t.settingSpectrumStyle(sid, position), [steady], "superseded", true),
             ("모양(높이)", try t.settingSpectrumStyle(sid, height), [steady], "superseded", true),
+            ("모양(두께)", try t.settingSpectrumStyle(sid, thickness), [steady], "superseded", true),
+            ("모양(방향)", try t.settingSpectrumStyle(sid, sides), [steady], "superseded", true),
+            ("모양(모드)", try t.settingSpectrumStyle(sid, mode), [steady], "superseded", true),
             ("분석 설정(밴드 수)", try t.settingSpectrumStyle(sid, analysis), [steady], "superseded", true),
             ("재연결(같은 ID, 다른 파일)", t, [relinked], "superseded", false),
         ]
