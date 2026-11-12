@@ -2,6 +2,7 @@
 import AppKit
 import AVFoundation
 import CryptoKit
+import Darwin
 import OnTheFrameEngine
 
 /// SP-4A-10: opt-in, generated immutable fixture only. Never saves the project or exports.
@@ -53,17 +54,91 @@ import OnTheFrameEngine
     }
     static func rect(_ r: CGRect) -> [Double] { [r.minX, r.minY, r.width, r.height].map(Double.init) }
 
+    // A dedicated launcher inherits the other end of this socket. Application logs use other FDs.
+    private static func deliver(_ report: [String: Any], trace: Data?, runID: UUID,
+                                rows: Int, mayStopChild: Bool) throws {
+        guard let raw = ProcessInfo.processInfo.environment["OTF_RESULT_FD"],
+              let fd = Int32(raw), fd > STDERR_FILENO else {
+            throw NSError(domain: "missing launcher socket", code: 1)
+        }
+        let channel = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        var noSignal: Int32 = 1
+        var timeout = timeval(tv_sec: 3, tv_usec: 0)
+        guard setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size)) == 0,
+              setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+        let result = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
+        let events = trace ?? Data()
+        try demand(rows <= 3000 && result.count <= 4 * 1024 * 1024 &&
+                   events.count <= SpectrumContinuityTrace.byteLimit, "continuous record size")
+        let passed = report["status"] as? String == "CONTINUOUS CAPTURE COMPLETE" &&
+            report["fixtureUnchanged"] as? Bool == true && report["ownedResourcesReleased"] as? Bool == true &&
+            mayStopChild && !events.isEmpty
+        let header: [String: Any] = ["protocol": "OTFContinuous", "version": 1, "runID": runID.uuidString,
+            "status": passed ? "PASS" : "FAIL", "rows": rows, "mayStopChild": mayStopChild,
+            "reportBytes": result.count, "traceBytes": events.count, "reportSHA256": sha(result), "traceSHA256": sha(events)]
+        var prefix = try JSONSerialization.data(withJSONObject: header)
+        prefix.append(10)
+        try channel.write(contentsOf: prefix)
+        try channel.write(contentsOf: result)
+        try channel.write(contentsOf: events)
+        try channel.close()
+    }
+
+    // Control messages stay on stderr; OTFContinuous v1 remains one result/trace record.
+    static func phase(_ runID: UUID, _ phase: String, fields: [String: Any] = [:]) {
+        var value = fields
+        value["runID"] = runID.uuidString; value["phase"] = phase
+        if let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) {
+            // A timed-out parent may have closed its pipe. Never turn that into SIGPIPE.
+            guard fcntl(STDERR_FILENO, F_SETNOSIGPIPE, 1) != -1 else { return }
+            try? FileHandle.standardError.write(contentsOf: Data("OTF_DEBUG ".utf8) + data + Data([10]))
+        }
+    }
+
+    private static func fixtureRead(_ root: URL, fd: Int32, name: String) throws -> Data {
+        var pinned = stat(), named = stat()
+        guard fstat(fd, &pinned) == 0, lstat(root.path, &named) == 0,
+              pinned.st_dev == named.st_dev, pinned.st_ino == named.st_ino,
+              root.resolvingSymlinksInPath().path == root.path else {
+            throw NSError(domain: "fixture directory identity changed", code: 1)
+        }
+        let file = openat(fd, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard file >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno),
+            userInfo: [NSLocalizedDescriptionKey: "fixture read: " + name]) }
+        let handle = FileHandle(fileDescriptor: file, closeOnDealloc: true)
+        defer { try? handle.close() }
+        var before = stat(), after = stat(), path = stat()
+        try demand(fstat(file, &before) == 0 && (before.st_mode & S_IFMT) == S_IFREG &&
+                   before.st_size >= 0 && before.st_size <= 16 * 1024 * 1024, "fixture regular bounded file: " + name)
+        var data = Data()
+        let limit = 16 * 1024 * 1024
+        while let chunk = try handle.read(upToCount: min(65536, limit + 1 - data.count)), !chunk.isEmpty {
+            data.append(chunk)
+            try demand(data.count <= limit, "fixture grew beyond read bound: " + name)
+        }
+        try demand(Int64(data.count) == before.st_size && fstat(file, &after) == 0 && fstatat(fd, name, &path, AT_SYMLINK_NOFOLLOW) == 0 &&
+                   before.st_dev == path.st_dev && before.st_ino == path.st_ino &&
+                   before.st_size == after.st_size && before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec &&
+                   before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec, "fixture file replaced: " + name)
+        return data
+    }
+
     private static var activeRun: UUID?
 
     @discardableResult
-    static func run(folder: URL) async -> Bool {
+    static func run(folder: URL, launcherRun: UUID? = nil) async -> Bool {
         guard activeRun == nil else { return false }
-        let runID = UUID()
+        let runID = launcherRun ?? UUID()
         activeRun = runID
         defer { if activeRun == runID { activeRun = nil } }
         let store = ProjectStore.shared
         let diagnostic = ProcessInfo.processInfo.arguments.contains("-OTFFrame120Diagnostic")
         let args = ProcessInfo.processInfo.arguments
+        let continuous = args.contains("-OTFContinuousParityTest")
+        let filename = "still-frame-parity.json"
+        guard !continuous || launcherRun != nil else { return false }
         let safety = args.contains("-OTFParityOwnershipTest")
         let missingRaster = args.contains("-OTFParityMissingRasterTest")
         let wrongObject = args.contains("-OTFParityWrongObjectTest")
@@ -75,47 +150,106 @@ import OnTheFrameEngine
         var rows = [[String: Any]]()
         var report: [String: Any] = ["task": "SP-4A-10", "status": "FAIL", "requestedFrames": requested,
             "fullScreenParity": "UNCONFIRMED", "physicalDisplay": "UNCONFIRMED"]
+        var traceData: Data?
+        if continuous { report["runID"] = runID.uuidString }
         var fixture: URL?
+        var selectedScope: URL?
+        var rootFD: Int32 = -1
+        var failureStage = "authorization"
+        // Registered first: report/final hash and all inner async cleanup run before access retires.
+        defer {
+            if rootFD >= 0 { close(rootFD) }
+            if let selectedScope { selectedScope.stopAccessingSecurityScopedResource() }
+        }
         defer {
             let mayTerminate = ownsSession() && !store.isDirty && store.exportPhase == .idle &&
                 !store.openRequested && store.openProgress == nil && store.importProgress == nil
             report["terminationAuthorized"] = mayTerminate
             if let verifyReplacement { report["replacementIntact"] = verifyReplacement() }
             if let fixture {
-                report["fixtureUnchanged"] = hashes.allSatisfy { name, expected in
-                    (try? Data(contentsOf: fixture.appendingPathComponent(name))).map(sha) == expected
+                let unchanged = hashes.allSatisfy { name, expected in
+                    let data = continuous ? try? fixtureRead(fixture, fd: rootFD, name: name)
+                        : try? Data(contentsOf: fixture.appendingPathComponent(name))
+                    return data.map(sha) == expected
+                }
+                report["fixtureUnchanged"] = unchanged
+                if continuous && !unchanged {
+                    report["status"] = "FAIL"
+                    if report["error"] == nil {
+                        report["failureStage"] = "finalHashVerification"
+                        report["error"] = "final fixture identity/read/hash verification failed"
+                    }
                 }
             }
             report["frames"] = rows
-            if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
-                try? data.write(to: folder.appendingPathComponent("still-frame-parity.json"), options: .withoutOverwriting)
+            do {
+                if continuous {
+                    report["terminationAuthorized"] = false
+                    phase(runID, "delivery")
+                    try deliver(report, trace: traceData, runID: runID, rows: rows.count, mayStopChild: mayTerminate)
+                } else {
+                    let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+                    try data.write(to: folder.appendingPathComponent(filename), options: .withoutOverwriting)
+                    if mayTerminate { NSApp.terminate(nil) }
+                }
+            } catch {
+                phase(runID, "deliveryFailure", fields: ["error": String(describing: error)])
+                NSLog("Diagnostic delivery FAIL run=%@: %@", runID.uuidString, String(describing: error))
             }
-            if mayTerminate { NSApp.terminate(nil) }
         }
         do {
-            try demand(!FileManager.default.fileExists(atPath: folder.appendingPathComponent("still-frame-parity.json").path), "fresh output folder required")
-            // Launcher supplies this small descriptor in a new test-owned folder. No project rewriting.
-            let descriptor = try String(contentsOf: folder.appendingPathComponent("fixture-path.txt"), encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
-            let root = URL(fileURLWithPath: descriptor, isDirectory: true); fixture = root
+            let root: URL
+            if continuous {
+                failureStage = "folderSelection"
+                phase(runID, "selection")
+                let panel = NSOpenPanel()
+                panel.canChooseFiles = false; panel.canChooseDirectories = true
+                panel.allowsMultipleSelection = false; panel.canCreateDirectories = false
+                panel.message = "Debug 연속 검사: 원본 sp4a01/color 폴더를 직접 선택하세요."
+                guard panel.runModal() == .OK, let selected = panel.url else {
+                    throw NSError(domain: "fixture selection cancelled", code: NSUserCancelledError)
+                }
+                failureStage = "fixtureDirectoryIdentity"
+                let fixed = "/Volumes/LunaData/dev/ON-THE-FRAME/app/selftest-work/sp4a01/color"
+                try demand(folder.standardizedFileURL.path == fixed && selected.standardizedFileURL.path == fixed &&
+                           selected.resolvingSymlinksInPath().path == fixed, "wrong fixture directory or symbolic link")
+                root = selected // Keep the actual authorized URL; never reconstruct it from the environment.
+                if selected.startAccessingSecurityScopedResource() { selectedScope = selected }
+                report["scopeStarted"] = selectedScope != nil
+                failureStage = "authorizedDirectoryRead"
+                rootFD = open(selected.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+                guard rootFD >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+                failureStage = "preflightHashes"
+                phase(runID, "preflight")
+            } else {
+                try demand(!FileManager.default.fileExists(atPath: folder.appendingPathComponent(filename).path), "fresh output folder required")
+                let descriptor = try String(contentsOf: folder.appendingPathComponent("fixture-path.txt"), encoding: .utf8)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                root = URL(fileURLWithPath: descriptor, isDirectory: true)
+            }
+            fixture = root
             for (name, expected) in hashes {
-                try demand(sha(Data(contentsOf: root.appendingPathComponent(name))) == expected, "hash " + name)
+                try demand(sha(continuous ? fixtureRead(root, fd: rootFD, name: name) : Data(contentsOf: root.appendingPathComponent(name))) == expected, "hash " + name)
             }
             report["hashes"] = hashes
+            if continuous { failureStage = "referenceRead" }
             let referenceURL = root.appendingPathComponent("result.json")
             let referenceResult: ReferenceResult
             do {
-                referenceResult = try JSONDecoder().decode(ReferenceResult.self, from: Data(contentsOf: referenceURL))
+                referenceResult = try JSONDecoder().decode(ReferenceResult.self, from: continuous ? fixtureRead(root, fd: rootFD, name: "result.json") : Data(contentsOf: referenceURL))
             } catch {
                 throw NSError(domain: "invalid result.json: " + String(describing: error), code: 1)
             }
             try referenceResult.validate()
             try demand(initialSession == 0 && store.projectURL == nil && !store.isDirty &&
                        store.timeline.isEmpty, "fresh standalone process required")
+            if continuous { failureStage = "projectOpen" }
             let opened = await store.openProject(at: root.appendingPathComponent("fixture.ontheframe"))
             try demand(opened, "project open: " + (store.alert?.message ?? store.statusMessage ?? "unknown open failure"))
             let project = store.projectID, openedSession = store.projectSession
             try demand(openedSession == initialSession + 1 && store.projectURL?.standardizedFileURL ==
                        root.appendingPathComponent("fixture.ontheframe").standardizedFileURL, "fixture session")
+            if continuous { failureStage = "previewReadiness" }
             let ready = await LaneSelfTest.waitUntil(15) {
                 store.player.currentItem?.status == .readyToPlay && store.appliedGeneration == store.generation && store.previewHost?.window != nil
             }
@@ -159,6 +293,110 @@ import OnTheFrameEngine
                 }
                 report["ownedResourcesReleased"] = !item.outputs.contains(where: { $0 === output }) &&
                     view.spectrumOverlay.publicationForParityTest?.owner != runID
+            }
+            if continuous {
+                report["task"] = "SP-4B-01"
+                report.removeValue(forKey: "requestedFrames")
+                let overlay = view.spectrumOverlay
+                guard overlay.playbackObservationForTest == nil, !SpectrumContinuityTrace.active,
+                      let media = store.mediaByID[sourceID],
+                      media.url.standardizedFileURL == root.appendingPathComponent("selected.wav").standardizedFileURL,
+                      let piece = snapshot.spectrumPieces(entry).first, piece.start == 0,
+                      piece.sourceIn == 30, piece.length == 360 else {
+                    throw NSError(domain: "continuous fixture or observer mismatch", code: 1)
+                }
+                let pieces = snapshot.spectrumPieces(entry), settings = entry.style.analysisSettings
+                try demand(pieces.count == 1, "continuous source pieces")
+                let expected = try await Task.detached {
+                    let wav = try await SpectrumFileSource.open(url: media.url)
+                    var chunks = [Int: [[Float]]](), values = [[Float]]()
+                    for k in 0..<360 {
+                        for key in try SpectrumAnalysis.chunks(frame: k, pieces: pieces, fps: 30, rate: wav.sampleRate,
+                                                              settings: settings, chunkSamples: wav.chunkSamples) where chunks[key] == nil {
+                            chunks[key] = try await wav.decodeChunk(key)
+                        }
+                        values.append(try SpectrumAnalysis.bands(frame: k, pieces: pieces, fps: 30, rate: wav.sampleRate,
+                            channelCount: wav.channelCount, chunkSamples: wav.chunkSamples, settings: settings) { chunks[$0] })
+                    }
+                    return values
+                }.value
+                try demand(ownsSession(), "session changed during reference preparation")
+                for k in frames { try demand(expected[k] == referenceResult.bands[String(k)], "export reference frame \(k)") }
+                store.seek(to: 0)
+                let token = store.seekToken
+                let primed = await LaneSelfTest.waitUntil(15) {
+                    ownsSession() && publication?.0 == 0 && publication?.1 == token && !view.hasPendingSpectrumSeek
+                }
+                guard primed, ownsSession(), case let .ready(_, rendered?) = publication?.3,
+                      image(overlay.layers[entry.id]) === rendered.image else {
+                    throw NSError(domain: "initial actual layer publication unconfirmed", code: 1)
+                }
+                try demand(!SpectrumContinuityTrace.active, "trace already active")
+                let tracing = SpectrumContinuityTrace.validate()
+                try demand(tracing && overlay.playbackObservationForTest == nil, "trace admission")
+                SpectrumContinuityTrace.begin()
+                let playback = store.spectrumPreview.playback
+                let start = ProcessInfo.processInfo.systemUptime
+                var truncated = false, lost = false
+                defer {
+                    if overlay.playbackObservationForTest?.owner == runID { overlay.playbackObservationForTest = nil }
+                    do {
+                        traceData = try SpectrumContinuityTrace.finishData(validated: tracing, runID: runID)
+                    } catch {
+                        report["status"] = "FAIL"
+                        report["traceError"] = String(describing: error)
+                    }
+                    if ownsSession() && store.isPlaying { store.pause() }
+                }
+                overlay.playbackObservationForTest = (runID, {
+                    guard ownsSession(), store.seekToken == token else { lost = true; return }
+                    guard rows.count < 3000 else { truncated = true; return }
+                    let time = item.currentTime(), f = playback.currentFrame
+                    let layer = overlay.layers[entry.id], actual = image(layer)
+                    let siblings = view.layer?.sublayers ?? []
+                    let order = [view.playerLayer, view.stageLayer, view.spectrumCanvas, view.subtitleHost]
+                    var row: [String: Any] = ["elapsed": ProcessInfo.processInfo.systemUptime - start,
+                        "tick": SpectrumContinuityTrace.tick, "itemSeconds": time.seconds,
+                        "frame": f ?? -1, "session": store.projectSession, "generation": store.appliedGeneration,
+                        "layerImage": SpectrumContinuityTrace.id(actual), "hasContents": layer?.contents != nil,
+                        "sourceMatches": store.timeline.spectrumMediaID(entry) == sourceID,
+                        "ordered": siblings.count >= 4 && zip(siblings, order).allSatisfy { $0 === $1 }]
+                    row["subtitles"] = snapshot.subtitles.map { sub -> [String: Any] in
+                        let presented = view.subtitleLayerForTest(sub.id)?.presentation()
+                        return ["id": sub.id.uuidString, "opacity": presented?.opacity ?? -1,
+                                "visible": presented.map { $0.opacity > 0.5 && $0.contents != nil && !$0.isHidden } ?? false]
+                    }
+                    if let f, expected.indices.contains(f) {
+                        let pts = playback.timing.confirmedPTSForTest
+                        row["pts"] = pts.isNumeric ? pts.seconds : -1
+                        row["ptsExact"] = CMTimeCompare(pts, CMTime(value: Int64(f), timescale: 30)) == 0
+                        row["sourceFrame"] = f - piece.start + piece.sourceIn
+                        if let outcome = playback.currentOutcome(spectrum: entry.id, frame: f) {
+                            row["status"] = SpectrumContinuityTrace.outcome(outcome)
+                            if case let .ready(bands, render) = outcome {
+                                row["bandsExact"] = bands.count == 64 && bands == expected[f]
+                                row["acceptedImage"] = SpectrumContinuityTrace.id(render?.image)
+                                row["geometryExact"] = render.map { layer?.frame == PausedSpectrumOverlay.layerRect($0.drawRect) } ?? (layer == nil)
+                            }
+                        } else { row["status"] = "waiting" }
+                    } else { row["status"] = "no selected frame" }
+                    rows.append(row)
+                })
+                failureStage = "playback"
+                phase(runID, "playback")
+                store.play()
+                let ended = await LaneSelfTest.waitUntil(17) { !ownsSession() || !store.isPlaying || truncated || lost }
+                try demand(ownsSession(), "lost continuous session")
+                report["endFrame"] = store.playhead
+                report["endSeconds"] = item.currentTime().seconds
+                report["elapsed"] = ProcessInfo.processInfo.systemUptime - start
+                report["peakPending"] = playback.metrics.peakPending
+                report["peakRetainedBytes"] = playback.metrics.peakBytes
+                report["peakRetained"] = playback.metrics.peakRetained
+                try demand(ended && !store.isPlaying && store.playhead == 360 && !rows.isEmpty &&
+                           !lost && !truncated && !SpectrumContinuityTrace.truncated, "continuous capture incomplete")
+                report["status"] = "CONTINUOUS CAPTURE COMPLETE"
+                return true
             }
             if safety {
                 let admitted = await run(folder: folder)
@@ -355,7 +593,14 @@ import OnTheFrameEngine
             }
             report["status"] = "CAPTURE PASS"
             report["decodedColorParity"] = "UNCONFIRMED; BGRA/420v conversion not equated"
-        } catch { report["error"] = String(describing: error) }
+        } catch {
+            if continuous { report["failureStage"] = failureStage }
+            report["error"] = String(describing: error)
+            if continuous {
+                report["errorDomain"] = (error as NSError).domain
+                report["errorCode"] = (error as NSError).code
+            }
+        }
         return true
     }
 }

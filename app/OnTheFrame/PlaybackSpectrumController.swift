@@ -59,6 +59,7 @@ final class SpectrumPlaybackTiming {
     }
 
     #if DEBUG
+    private(set) var confirmedPTSForTest = CMTime.invalid
     private static func traceBoundary(_ frame: Int?) -> Bool {
         guard let frame else { return true }
         return (0...2).contains(frame) || (118...122).contains(frame)
@@ -69,6 +70,13 @@ final class SpectrumPlaybackTiming {
     func sample(hostTime: CFTimeInterval, timeline: Timeline) -> Int? {
         guard hostTime.isFinite, let output, item != nil else { return nil }
         let requested = output.itemTime(forHostTime: hostTime)
+        return sample(requested: requested, timeline: timeline, hasNewBuffer: output.hasNewPixelBuffer(forItemTime: requested)) { display in
+            output.copyPixelBuffer(forItemTime: requested, itemTimeForDisplay: &display) != nil
+        }
+    }
+
+    func sample(requested: CMTime, timeline: Timeline, hasNewBuffer: @autoclosure () -> Bool,
+                copyDisplayTime: (inout CMTime) -> Bool) -> Int? {
         #if DEBUG
         var traceDisplay = CMTime.invalid, traceReason: Int64 = 1, traceSelected: Int? = nil
         defer {
@@ -83,7 +91,7 @@ final class SpectrumPlaybackTiming {
         #endif
         guard let frame = Self.frame(requested, duration: timeline.durationFrames),
               timeline.clips.contains(where: { $0.start <= frame && frame < $0.start + $0.length }) else { lastFrame = nil; return nil }
-        guard output.hasNewPixelBuffer(forItemTime: requested) else {
+        guard hasNewBuffer() else {
             #if DEBUG
             traceReason = 2; traceSelected = lastFrame == frame ? frame : nil
             #endif
@@ -91,13 +99,16 @@ final class SpectrumPlaybackTiming {
         }
         var display = CMTime.invalid
         // Acquire only to obtain its media timestamp. No readback, image copy, or retained pixel buffer.
-        guard output.copyPixelBuffer(forItemTime: requested, itemTimeForDisplay: &display) != nil else {
+        guard copyDisplayTime(&display) else {
             #if DEBUG
             traceReason = 3; traceDisplay = display
             #endif
             lastFrame = nil; return nil
         }
         lastFrame = Self.select(requested: requested, display: display, timeline: timeline)
+        #if DEBUG
+        confirmedPTSForTest = lastFrame == nil ? .invalid : display
+        #endif
         #if DEBUG
         traceReason = 4; traceDisplay = display; traceSelected = lastFrame
         #endif

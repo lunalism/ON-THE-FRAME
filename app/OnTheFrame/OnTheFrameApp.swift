@@ -139,6 +139,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Initial presentation is not a New Project transaction. If attachment is
         // still pending, retain the visibility intent for attachEditorWindow.
         store.requestInitialEditorPresentation()
+        #if DEBUG
+        let environment = ProcessInfo.processInfo.environment
+        if ProcessInfo.processInfo.arguments.contains("-OTFStartupFrameContract"),
+           let token = environment["OTF_CONTINUOUS_RUN"], let run = UUID(uuidString: token),
+           environment["OTF_DIRECT_REGRESSION"] == "1" {
+            SpectrumPlaybackSelfTest.runDirectStartupContract(runID: run)
+            return
+        }
+        if ProcessInfo.processInfo.arguments.contains("-OTFContinuousParityTest"),
+           let fixture = environment["OTF_CONTINUOUS_FIXTURE"], let token = environment["OTF_CONTINUOUS_RUN"],
+           let run = UUID(uuidString: token), environment["OTF_RESULT_FD"] != nil {
+            Task { await StillFrameParitySelfTest.run(folder: URL(fileURLWithPath: fixture, isDirectory: true), launcherRun: run) }
+        }
+        #endif
     }
     #if DEBUG
     static func traceWindowLifecycle(_ event: String) {

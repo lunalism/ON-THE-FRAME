@@ -22,6 +22,7 @@ final class PausedSpectrumOverlay {
     private var tickets: [SpectrumFrameTicket] = []
     private(set) var layers: [UUID: CALayer] = [:]
     #if DEBUG
+    var playbackObservationForTest: (owner: UUID, observe: () -> Void)?
     var publicationForParityTest: (owner: UUID, receive: (Int, Int, UUID, SpectrumFrameOutcome) -> Void)?
     private(set) var assignments = 0
     private(set) var latencies: [Double] = []
@@ -76,6 +77,7 @@ final class PausedSpectrumOverlay {
         SpectrumContinuityTrace.record(40, SpectrumContinuityTrace.tick, Int64(frame ?? -1),
             SpectrumContinuityTrace.id(traceOld), SpectrumContinuityTrace.id(ordered.first?.contents as AnyObject?),
             Int64(ordered.count), SpectrumContinuityTrace.lease)
+        playbackObservationForTest?.observe()
         #endif
     }
 

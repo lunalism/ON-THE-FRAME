@@ -1,5 +1,41 @@
 # 인계 요약 — ON THE FRAME
 
+**SP-4B-21 · 문서 정리 / 소유자 게시 승인 대기.** SP-4B-20 읽기 전용 검토는 **READY FOR OWNER COMMIT APPROVAL**로 판정했다. 후보는 Swift 6개·Python 런처 1개·문서 2개 총 9개이며, staging·commit·push에는 별도 명시적 소유자 승인이 필요하다. SP-4B-21에서는 HANDOFF/ROADMAP만 갱신하고 빌드·앱 실행·시험을 재수행하지 않았다.
+
+**기존 SP-4B-17 실행 증거.** Xcode 27.2 / macOS arm64 증분 Debug 빌드 exit 0, strict 서명 PASS, 기존 Sandbox entitlements 유지, 시작 프레임 선택 회귀 **17/17 PASS**. 회귀 직접 자식의 종료 자격·identity 확인 후 SIGTERM과 exit −15를 검증했다. 연속 검사는 선택 대기 180초 만료였으나, 소유자는 당시 선택창이 보였다고 확인했다. 이 결과는 이번 문서 작업에서 재현한 시험이 아니다.
+
+**기존 SP-4B-19 — 내부 진단 capture·transport INTEGRATION PASS.** 소유자가 원본 fixture 폴더를 직접 선택했고 `scopeStarted=true`, 프로젝트 열기와 실제 읽기가 성공했다. 프로젝트 UUID `0F3F7EFB-0FB0-4141-A049-F3BD438D9492`, session/generation 1/2, 미디어 12초·종료 frame 360·경과 12.265초·728행이다. 관측된 PTS/source/64-band/image identity/geometry 불일치는 0이며 자막 전환은 미디어 시각 4.009937초·8.009949초다. 단일 OTFContinuous v1 PASS record는 result 408,619 bytes, trace 209,562 bytes·4,405 events이고 UUID·길이·SHA-256·EOF 검증을 통과했으며 trace truncation은 없다. 원본 네 해시·과거 증거는 보존됐다. 관측자·출력 정리는 `ownedResourcesReleased=true`; 획득한 폴더 scope는 최종 해시 검사·전송 뒤 defer로 해제하는 구조다. 개별 scope-stop 호출을 별도 계측한 결과로 확대하지 않는다. 종료 자격·시작 identity 재확인 후 직접 자식에 SIGTERM을 보내 exit −15를 회수했으며 잔존 직접 자식은 없었다.
+
+**미해결 Preview 한계.** 역사적 시작 모델 레이어 공백 108.33 ms와 신규 첫 관측→첫 이미지 약 172.31 ms는 시간 정의가 같다고 가정하지 않는다. ready-empty 34행(ready 결과의 이미지 없음), no-selected-frame 12행, waiting 3행, 종료 경계 자막 관측 2행을 보존한다. 원인을 확정하지 않았으며 모델 관측은 물리 화면·오디오 수락이 아니다. 전체 Preview 시각 품질 PASS·무공백·전체 Preview/export parity·Release 준비를 주장하지 않는다. 공개 이미지·스펙트럼 export 활성화는 계속 게이트 뒤에 있다. **OWNER MANUAL ACCEPTANCE: DEFERRED — NOT PASS.**
+
+**현재 Debug 계약·제한.** 전용 런처가 직접 자식에 socket FD와 run UUID를 상속한다. 소유자는 NSOpenPanel에서 원본 `app/selftest-work/sp4a01/color` 폴더 자체를 선택해야 한다. selection 신호는 실제 패널 가시성보다 앞설 수 있으므로 소유자 관측과 구분한다. PID·PPID·UID·실행 경로·시작 identity 및 종료 자격을 확인하고, 실패·timeout에서는 bounded wait·잔존 상태를 기록하며 자동 재시도하지 않는다. 현재 경로 검사는 고정 fixture 위치·승인 관리 루트를 전제로 하므로 범용 이식성을 주장하지 않는다. 빌드에는 기존 내부 APFS `$HOME/Library/Developer/ON-THE-FRAME/DerivedData-SP4B`와 Xcode 27.2의 process-local `DEVELOPER_DIR`을 사용한다. 전역 xcode-select는 변경하지 않는다. 새 실행은 별도 승인·자원 게이트를 따른다.
+
+현재 호출 형식(이번 작업에서는 미실행): `python3 app/scripts/continuous-preview-check.py APP FIXTURE --output FRESH_DIR`; 독립 회귀는 `python3 app/scripts/continuous-preview-check.py APP --regression --output FRESH_DIR`. APP는 검증한 signed Debug 앱, FIXTURE는 원본 고정 폴더, FRESH_DIR은 승인 관리 루트 안에 미리 마련한 비어 있는 소유자 소유 고유 증거 디렉터리다. 호스트가 배타적으로 증거를 쓰며 역사적 결과·trace·실패 로그·앱·미디어를 덮어쓰거나 삭제하지 않는다. OTFContinuous v1 결과→trace 순서·bounded 길이·해시·EOF 계약을 유지한다.
+
+기존 증거(저장소 기준·Git 게시 제외): `app/selftest-work/sp4b17-20261112/`의 build-result·regression/outcome, `app/selftest-work/sp4b19-20261112/integration/`의 header·report·trace·outcome·analysis. SP-4B-19 report SHA-256 `31d3ae5edd2dc49d6ba0ef2dd9c80fb94473a7551f6481fc0ebd875cfeb8962b`, trace SHA-256 `6390462dcdf03e72f979dc213e11a9001ba28df9b6e644b75bc9136ffc3a6ca6`. 다음은 최종 9개 파일 manifest에 대한 별도 소유자 게시 승인이다. 아래 SP-4B-16 및 이전 상태·검증 계획은 각 작업 당시 이력이며 현재 실행 예시·다음 지시를 대신하지 않는다.
+
+**SP-4B-16 당시 기록 · PATCH READY — RUNTIME DEFERRED.** 연속 Debug 검사는 자식 앱의 소유자 조작 폴더 선택 후 선택 URL과 획득한 scope를 최종 해시 확인까지 유지한다. 고정 fixture 경로·해시 및 descriptor 기준 읽기 검사를 추가했다. OTFContinuous v1 결과/trace는 유지하고 stderr의 제한된 단계 메시지로 시작·선택·재생·전송 시간을 구분한다. Python 런처는 PPID/UID를 분리하고 모든 종료 경로에서 직접 자식을 제한 시간 기다리며 잔존 상태를 보고한다. `--regression`은 기존 17개 선택 검사를 새로 작성하지 않고 직접 자식에서 실행하고 호스트의 고유 폴더에 결과를 쓴다. Swift Debug/default 구문·Python AST·diff와 소유권 경로를 정적으로 검토했다. 빌드·앱 실행·새 17/17 판정은 없으며 SP-4B-14의 signed 앱·권한 실패 증거는 보존했다. 당시 계획했던 실행의 후속 결과는 위 현재 요약을 따른다. 시작 모델 공백 108.33 ms와 OWNER MANUAL DEFERRED — NOT PASS는 유지한다.
+
+**SP-4B-09 · SIMPLIFICATION PATCH READY.** Debug 연속 관측은 staging 파일과 rename 게시를 제거하고 전용 런처가 상속한 소켓으로 결과·trace를 한 번 전달한다. 런처는 디스크에 증거를 쓰지 않는다. Swift/Python 구문과 diff를 확인했다. 앱 빌드·실행은 보류했다. 과거 12초 관측의 108.33 ms 시작 모델 공백과 실제 화면 수동 판정은 미해결이다.
+
+SP-4B-09 당시 검증 계획(현재 호출에는 `--output FRESH_DIR` 필수): 전용 Debug 앱과 기존 생성 fixture로 실행한다. 먼저 수신기에 A 정상 1건, B 잘린 스트림, C 길이·개수·해시 오류, D 로그가 stdout/stderr로 섞인 경우, E 명시적 FAIL, F 중복 레코드·다른 UUID 및 세션 교체를 전달한다. G 런처 이탈 시 앱의 전송 실패와 사용자 세션 생존, H 기존 증거가 있는 위치의 해시 보존, I 소유한 PID·시작 신원과 SIGTERM 발신 주체, J 기존 시작 선택 17건을 각각 검증한다. 불완전 스트림·비정상 종료·정상 FAIL을 구분하고 기존 자원 감시와 함께 실행한다. 과거 17/17을 이번 패치 검증으로 산입하지 않는다.
+
+**SP-4B-08 · BLOCKED.** 실패 정리의 삭제는 제거됐으나 JSON 쓰기와 최종 rename은 staging 이름을 다시 해석한다. 첫 쓰기 후 이 이름이 심볼릭 링크로 교체되면 다른 디렉터리에 trace를 만들 수 있고, 게시 직전 소스가 교체되면 빈 목적지에 교체 객체를 게시할 수 있다. 캐시 삭제 전 소스 검토에서 중지했다. 빌드와 A–J·E1–E4는 미실행이며 게시 감사는 보류한다.
+
+**SP-4B-07 · PATCH READY — TESTS DEFERRED.** SP-4B-06에서 발견한 연속 진단의 실패 정리에서 JSON 삭제와 staging 디렉터리 삭제를 모두 제거했다. 배타적 게시 실패 시 stderr에 실행 UUID와 FAIL을 기록한다. staging을 만든 경우 생성 당시 이름을 가능한 잔여 위치로 보고하고 그대로 보존한다. Debug·기본 조건 Swift 구문 및 diff 검사를 수행했다. 타입 검사와 실행 검증은 보류했다. 이전 시작 계약 17/17 및 12초 관측의 108.33 ms 모델 공백은 기존 결과다.
+
+다음 집중 검증에서는 별도 생성 폴더에서 첫 JSON 작성 후 게시 직전에 중단점을 둔다. E1은 JSON을 다른 파일로, E2는 표식 파일이 든 디렉터리로 바꾼다. E3은 staging 전체를 옮기고 같은 이름에 다른 디렉터리를 둔다. E4는 그 이름에 별도 표식 디렉터리를 가리키는 심볼릭 링크를 둔다. 각 경우 최종 목적지를 선점한 뒤 재개하여 게시 실패를 유도한다. 교체 객체 종류·inode·내용 해시, 링크 문자열과 대상의 해시, 기존 증거 해시를 전후 대조한다. stderr FAIL의 실행 UUID·잔여 경로, 앱 PID·시작 시각·종료 주체·종료 방식을 확인한다. 기존 A–D 및 F–J와 E1–E4 실행 후 게시를 재감사한다.
+
+**SP-4B-06 · BLOCKED.** 연속 진단의 실패 정리는 생성한 파일의 URL만 기억한다. 게시 전 같은 경로의 항목이 교체되면 다른 항목을 재귀 삭제할 수 있다. 경로 교체 시 소유권이 불확실한 임시 항목을 보존하도록 수정하고 재감사해야 한다. 소스 검토에서 중지하여 캐시 삭제·빌드·A–J 실행은 없었다.
+
+**2026-11-08 · SP-4B-05 — PATCH READY — TESTS DEFERRED.** SP-4B-04의 두 게시 차단 경로를 Debug 소스에서 수정했다. 연속 진단은 지정 폴더의 기존 결과·trace 충돌을 거부하고 같은 실행 UUID의 결과를 새 `continuous-evidence/`에 배타적 rename으로 게시한다. 시작 계약 단독 검사는 앱 종료를 런처에 맡기며 결과 쓰기 실패를 stderr에 JSON으로 남긴다. Swift 구문 검사와 diff 검사를 마쳤다. 빌드 시작 여유가 부족해 타입 검사와 A–J 실행은 보류했다. 기존 12초 관측과 17/17 결과는 수정 전 기록이며 시작 모델 공백 108.33 ms와 실제 화면 판정은 미해결이다.
+
+집중 검증은 매번 새 생성 폴더와 전용 Debug 프로세스를 사용한다. A–C는 trace만·결과만·양쪽 모두 미리 두고 거부와 SHA-256 보존을 확인한다. D는 게시 직전 경쟁 디렉터리를 만들고 E는 staging 첫 파일 뒤 쓰기 실패를 주입해 기존 파일 보존과 staging 정리를 확인한다. F는 결과 저장 실패 시 stderr의 FAIL과 앱 생존, G는 open 이벤트에서 예약된 작업의 입장 전 프로젝트 교체 및 대기 후 소유권 거부, H는 중복 이벤트의 거부와 관찰자 소유권을 확인한다. I–J는 새 결과 17개의 이름·값·통과 여부를 확인한 다음 런처가 자신이 시작한 PID와 시작 시각을 대조해 종료한다. 각 사례에서 예상 거부·예상 밖 오류·신호 충돌·앱 자체 종료·런처 종료를 구분하고 실행 UUID, 세션, 관찰자 및 파일 해시를 전후 비교한다. 예전 런처의 자동 종료 대기와 평면 결과 경로는 이 검증에 사용할 수 없다.
+
+**SP-4B-04 · 게시 보류.** SP-4A-24 정지 프레임 비교를 게시했고, SP-4B-01은 12초 연속 재생을 관측했으며 SP-4B-03 선택 계약은 17/17 통과했다. 연속 진단의 기존 trace 덮어쓰기와 단독 검사의 세션 소유권 확인 없는 종료 요청을 수정해야 한다. 시작 모델 공백 108.33 ms, 실제 화면·오디오 제시, Preview/내보내기 전체 색상 동등성, Release 앱 전체 검증, native finishWriting 정지 복구, 장시간 스펙트럼 내보내기, 실제 sandbox 접근 철회, 공개 스펙트럼 내보내기 활성화는 미해결이다. 소유자 수동 판정은 DEFERRED — NOT PASS.
+
+**2026-11-07 · SP-4B-03 — FRAME SELECTION CONTRACT PASS.** 실제 재생 선택기에 PTS 0을 전달한 뒤 요청 −31.105, −22.772, −14.438, −6.105 ms와 새 버퍼 없는 양수 요청 8개를 재생했다. 12회 모두 선택과 소스 매핑이 비었고, PTS 2/30에서 프레임 2·소스 32로 복구했다(초기 0·30). 영상 구간 오디오 대체와 프로젝트 초기화 후 재사용도 차단했다. Debug 검사 17/17, 증분 빌드와 검사기 종료 코드 0. 기존 연속 재생 기록의 모델 공백 108.33 ms는 미해결이며 오프라인 내보내기에는 이 재생 시계가 관여하지 않는다. 실제 화면 판정은 DEFERRED — NOT PASS.
+
 **2026-11-07 · SP-4A-22 — HARNESS VALIDATION PASS.** SP-4A-21 수정본의 증분 Debug 빌드와 A–J 검증을 마쳤다. 119→120과 원본 15개 정지 프레임을 다시 통과했다. 다음 단계는 여섯 후보 파일의 게시 전 재감사다. [시험 기록과 범위](diagnostics/SP-4A-10-STILL-FRAME-PARITY.md).
 
 **2026-11-07 · SP-4A-21 — PATCH READY — TESTS DEFERRED.** Debug 하네스의 교체 관찰자 설치와 result.json 검증을 수정했다. 빌드 시작 여유 부족으로 새 패치의 실행 검증과 게시 판정은 보류한다. [수정과 검증 계획](diagnostics/SP-4A-10-STILL-FRAME-PARITY.md).

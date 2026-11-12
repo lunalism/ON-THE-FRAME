@@ -21,8 +21,103 @@ enum SpectrumPlaybackSelfTest {
         }
         func releaseAll() { let all = waiting; waiting = [:]; for c in all.values { c.resume(returning: .cancelled) } }
     }
-    static func run(folder: URL) async {
+    static func startupFrameSelection() -> [Check] {
+        let session = SpectrumPreviewSession()
+        let audio = Clip(mediaID: UUID(), start: 0, sourceIn: 30, length: 360, lane: Lane.audioID)
+        let spectrum = SpectrumItem(lane: UUID(), start: 0, length: 360, sourceKey: audio.lineageKey)
+        let video = Clip(mediaID: UUID(), start: 0, sourceIn: 0, length: 360)
+        let timeline = Timeline(clips: [video], audioClips: [audio], spectra: [spectrum], durationFrames: 360)
+        let pieces = timeline.spectrumPieces(spectrum)
         var checks: [Check] = []
+        func step(_ name: String, _ micros: Int64, pts: CMTime? = nil, expected: Int?, source: Int?) {
+            let requested = CMTime(value: micros, timescale: 1_000_000)
+            let frame = session.playback.timing.sample(requested: requested, timeline: timeline, hasNewBuffer: pts != nil) { display in
+                guard let pts else { return false }
+                display = pts
+                return true
+            }
+            let mapped = frame.flatMap { k in pieces.first { $0.start <= k && k < $0.end }.map { $0.sourceIn + k - $0.start } }
+            let fallback = SpectrumPlaybackTiming.audioIntervalFrame(at: max(.zero, requested), timeline: timeline)
+            checks.append(Check(name: name, pass: frame == expected && mapped == source && fallback == nil,
+                                detail: "requestUs=\(micros) frame=\(String(describing: frame)) source=\(String(describing: mapped)) fallback=\(String(describing: fallback))"))
+        }
+        step("before evidence", 0, expected: nil, source: nil)
+        step("confirmed zero", 0, pts: .zero, expected: 0, source: 30)
+        for micros: Int64 in [-31105, -22772, -14438, -6105, 2227, 10561, 18894, 27227, 35561, 43894, 52227, 60561] {
+            step("startup \(micros)", micros, expected: nil, source: nil)
+        }
+        step("confirmed two", 68894, pts: CMTime(value: 2, timescale: 30), expected: 2, source: 32)
+        step("same confirmed frame", 68894, expected: 2, source: 32)
+        session.resetProject()
+        step("after project reset", 68894, expected: nil, source: nil)
+        return checks
+    }
+
+    // Reuse the 17 checks; stderr completion lets the direct parent own shutdown.
+    static func runDirectStartupContract(runID: UUID) {
+        let store = ProjectStore.shared
+        func ownsEmptySession() -> Bool {
+            store.projectSession == 0 && store.projectURL == nil && store.timeline.isEmpty &&
+                !store.isDirty && !store.openRequested && store.openProgress == nil &&
+                store.importProgress == nil && store.exportPhase == .idle
+        }
+        guard admittedRun == nil, ownsEmptySession() else {
+            StillFrameParitySelfTest.phase(runID, "regressionComplete", fields: ["checks": [], "mayStopChild": false])
+            return
+        }
+        admittedRun = runID
+        let checks = startupFrameSelection()
+        let rows = checks.map { ["name": $0.name, "pass": $0.pass, "detail": $0.detail] as [String: Any] }
+        StillFrameParitySelfTest.phase(runID, "regressionComplete", fields: ["checks": rows,
+            "mayStopChild": admittedRun == runID && ownsEmptySession()])
+    }
+
+    private static var admittedRun: UUID?
+
+    static func run(folder: URL) async {
+        // One admission per dedicated process. A second open-folder event cannot take ownership.
+        let runID = UUID()
+        let shared = ProjectStore.shared
+        let admittedView = shared.previewHost
+        let admittedProject = shared.projectID, admittedGeneration = shared.generation
+        func ownsEmptySession() -> Bool {
+            shared.projectID == admittedProject && shared.projectSession == 0 &&
+                shared.generation == admittedGeneration && shared.previewHost === admittedView &&
+                shared.projectURL == nil && shared.timeline.isEmpty && !shared.isDirty &&
+                !shared.openRequested && shared.openProgress == nil && shared.importProgress == nil &&
+                shared.exportPhase == .idle
+        }
+        func failure(_ message: String) {
+            let fields = ["status": "FAIL", "runID": runID.uuidString, "error": message]
+            if let data = try? JSONEncoder().encode(fields) {
+                FileHandle.standardError.write(data + Data([10]))
+            }
+        }
+        guard admittedRun == nil, ownsEmptySession() else {
+            failure("duplicate invocation or nonempty/unavailable application session")
+            return
+        }
+        admittedRun = runID
+        var checks = startupFrameSelection()
+        func persist(_ filename: String) -> Bool {
+            guard admittedRun == runID, ownsEmptySession() else {
+                failure("application session replaced")
+                return false
+            }
+            do {
+                let data = try JSONEncoder().encode(checks)
+                try data.write(to: folder.appendingPathComponent(filename), options: .withoutOverwriting)
+                return true
+            } catch {
+                failure("result persistence failed: " + String(describing: error))
+                return false
+            }
+        }
+        if ProcessInfo.processInfo.arguments.contains("-OTFStartupFrameContract") {
+            _ = persist("startup-contract.json")
+            // The launching runner owns its child process and handles its lifetime.
+            return
+        }
         func check(_ name: String, _ pass: Bool, _ detail: String = "") {
             checks.append(Check(name: name, pass: pass, detail: detail)); LaneSelfTest.checkCountForMode = checks.count
         }
@@ -225,9 +320,9 @@ enum SpectrumPlaybackSelfTest {
         playback.advance(frame: 20, timeline: timeline); store.resetProject()
         check("project.replacementInvalidates", playback.currentFrame == nil)
         store.stopAllScopes()
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(checks) { try? data.write(to: folder.appendingPathComponent("spectrum-playback-result.json")) }
-        ProjectStore.shared.discardConfirmedForTest(); NSApp.terminate(nil)
+        if persist("spectrum-playback-result.json"), admittedRun == runID, ownsEmptySession() {
+            NSApp.terminate(nil)
+        }
     }
 
     /// Run unchanged against both the original controller and its correction.

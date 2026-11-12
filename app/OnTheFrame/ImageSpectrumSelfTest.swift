@@ -72,18 +72,29 @@ import OnTheFrameEngine
         active = false
         return valid
     }
-    static func save(_ folder: URL, validated: Bool) {
+    static func finishData(validated: Bool, runID: UUID? = nil) throws -> Data {
         active = false
         // Ten signed Int64 values need at most 212 JSON bytes/row, including delimiters.
         // 8192 rows plus this fixed header remain below 2 MiB, independently of runtime values.
-        let payload: [String: Any] = ["version": 1, "events": events.map(\.row),
+        var payload: [String: Any] = ["version": 1, "events": events.map(\.row),
             "truncated": truncated, "capacity": limit, "byteLimit": byteLimit,
             "tracerValidation": validated, "eventStride": MemoryLayout<Event>.stride]
+        if let runID {
+            payload["runID"] = runID.uuidString
+            payload["eventCount"] = events.count
+        }
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        guard data.count <= byteLimit else { throw CocoaError(.fileWriteOutOfSpace) }
+        return data
+    }
+
+    static func save(_ folder: URL, validated: Bool) {
         do {
-            let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
-            guard data.count <= byteLimit else { return }
-            try data.write(to: folder.appendingPathComponent("continuity-trace.json"))
-        } catch { /* The harness reports missing trace as a failed capture. */ }
+            try finishData(validated: validated).write(to: folder.appendingPathComponent("continuity-trace.json"),
+                                                       options: .withoutOverwriting)
+        } catch {
+            NSLog("Continuity trace persistence failed: %@", String(describing: error))
+        }
     }
 }
 
