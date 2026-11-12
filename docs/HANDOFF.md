@@ -1,5 +1,15 @@
 # 인계 요약 — ON THE FRAME
 
+**SP-5C-11 · 오늘 세션 종료 / Inspector 체크포인트 준비.** 브랜치 `feature/subtitles`, HEAD/upstream/live remote `c8935f280ff2de63ce1611b35a03115c13ec5532`. 미커밋 후보는 ContentView.swift·ROADMAP.md·HANDOFF.md 3개, index는 비워 둔다. 별도 소유자 staging/commit/push 승인이 다음 단계다. 아래 SP-5B-06 대기는 당시 기록이며 해당 체크포인트는 현재 HEAD로 게시됐다. [상세 구현·증거·한계](ROADMAP.md).
+
+구현은 소스 + 위치/크기 + 모양/색상 그룹, draft를 보존하는 접기/펼치기, 제목·화살표·빈 공간을 하나의 Button으로 토글하는 헤더다. 기존 Apply/Cancel·history·stale 선택/session/generation 보호를 유지한다. 승인된 wide-gamut 정책은 extended-sRGB 변환 성공·유한성 확인 후 채널 clipping→최근접 8-bit RGB이며 P3 외관 보존/지각적 gamut compression이 아니다. 변환 실패·비유한 성분은 거부하고 alpha·숨은 속성·계보를 보존한다. renderer/schema/게이트 변경은 없고 임시 DEBUG 계측만 제거했다(역사 로그 보존).
+
+기존 자동 실행: SP-5C-01·03·06 Debug 빌드/서명 PASS, SP-5C-06 검사 컴파일 실패 이력 후 SP-5C-07 **248/248 PASS**, compiler/executable exit 0. 소유자 SP-5C-08: P3 초록→(0,249,0), Cancel·Apply·Undo/Redo·선택 전환의 늦은 이벤트 무영향·전체 헤더 토글·draft 유지 PASS. 이는 모든 native lifecycle·전체 store 검증이 아니며 당시 hidden-field 미확인으로 전체 결과 PARTIAL, 지속성 DEFERRED다. 이번 문서 작업에서 빌드·테스트·앱 실행은 하지 않았다.
+
+현재 시험 파일 `app/selftest-work/sp5a06-owner-manual-20261112/fixture-sp5b03m-20261112-01.ontheframe`은 SP-5C-09 저장 검사에서 RGB **(0,255,0)**·alpha 192이며 다른 스타일/ID/계보/미디어 참조·형식 8을 유지했다. SHA-256 `0eed2cebb6326351bd70dd7e7c3f878b368c3c31096adb1bae37e8061d93c6ca`. 소유자는 SP-5C-11 지시문에서 직접 저장하고 앱을 닫았음을 확인했다. 이전 관찰 (0,249,0)과 저장 (0,255,0)의 차이는 여전히 미해명이다. 저장 검사로 현재 메모리를 검증한 것은 아니다. 보호 baseline/이전 지속성 파일·원본 해시는 유지됐다. 이 작업에서 프로젝트를 저장/복원하지 않았다.
+
+제외 untracked는 `.DS_Store`, `.claude/settings.json`, `app/.DS_Store`, `design/.DS_Store`, `app/diagnostics/spectrum-style-edit-check.py` 5개다. 시험 프로젝트/미디어·빌드·로그·raw evidence도 제외·보존한다. 다음 세션은 manifest 승인 후 게시, 이어 제안인 반응 강도/Audio Analysis 설계 검토(구현 별도 승인)다. 저장 RGB 차이·숨은 현재 상태, 좁은 폭/Tab/접근성/Dark-Light·모든 패널 수명 경로, 전체 Preview/export·물리 화면/오디오 parity는 미해결이다. 공개 export 비활성·Release 준비 미승인·SP-4B 시작 공백 유지이며 Stage 5 전체 완료가 아니다. 이번에는 문서 두 개만 수정하고 staging·commit·push하지 않았다.
+
 **SP-5B-06 · Native Spectrum ColorPicker / 3파일 커밋 승인 준비.** ContentView.swift의 기존 숫자 RGB draft에 SwiftUI ColorPicker(supportsOpacity: false)를 연결했다. 명시적 sRGB 변환·최근접 8-bit 양자화, 실패/비유한/색역 밖 값 거부, 무효 숫자 문자열 보존·마지막 유효 swatch·picker 비활성화를 구현했다. Apply/Cancel·no-op·한 단계 Undo/Redo·Preview 경로를 재사용하고 alpha/숨은 스타일을 보존한다. 선택/session/generation·기존 스타일·View 활성 여부로 늦은 이벤트를 거른다. renderer·형식·게이트 변경은 없다. [상세 증거·한계](ROADMAP.md).
 
 기존 SP-5B-03 실행은 Debug 빌드 exit 0·strict signing PASS·추출 변환/draft 검사 **232 PASS**, 관측 자원 위반 없음이다. 전체 ProjectStore/네이티브 패널 통합 검사는 아니다. SP-5B-03M 소유자 **A–K PASS**: 원색/숫자 동기화·무효 입력 보존·Cancel·Apply·Undo/Redo·기존 스타일 유지와 별도 새 파일 저장/재열기를 확인했다. 열린 패널의 늦은 초록 이벤트는 Spectrum→SLOW 자막 선택 후 다른 항목에 영향을 주지 않았으며, 프로젝트 교체 등 모든 경로는 미검증이다. alpha 192·분석·ID·계보·미디어 참조는 저장 파일 검사로 확인했다. 이번 작업에서 빌드·테스트·앱 실행·서명 검사를 재수행하지 않았다.

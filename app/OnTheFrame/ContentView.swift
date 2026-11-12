@@ -857,11 +857,9 @@ struct AdjustmentsView: View {
                     // 스펙트럼(SP-1A 2B-3): 오디오 소스 고르기와 소스 경고, 소스가 덮지 않는 구간 안내(2C-2). 옮기기·트림은 타임라인(2C-1·2C-2), 모양은 2C-3.
                     target(icon: "waveform.path", title: "스펙트럼",
                            subtitle: "스펙트럼 · \(laneText(sp.lane)) · \(store.settings.timecode(sp.start))–\(store.settings.timecode(sp.end))")
-                    AdjustSection(title: "오디오 소스") { SpectrumSourceAdjust(store: store, item: sp) }
-                    AdjustSection(title: "위치·높이·색상") {
-                        SpectrumStyleAdjust(store: store, item: sp)
-                            .id("\(sp.id)-\(store.projectSession)-\(store.spectrumSelectionRevision)-\(store.generation)")
-                    }
+                    AdjustSection(title: "소스") { SpectrumSourceAdjust(store: store, item: sp) }
+                    SpectrumStyleAdjust(store: store, item: sp)
+                        .id("\(sp.id)-\(store.projectSession)-\(store.spectrumSelectionRevision)-\(store.generation)")
                     Text("타임라인에서 옮기거나 길이를 바꿔도 소리 클립은 그대로입니다. 모양은 적용을 눌러 반영하고 Delete로 지웁니다.")
                         .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else if let id = store.selection, let c = store.timeline.clip(id), let kind = store.timeline.lane(of: id) {
@@ -990,14 +988,43 @@ enum SpectrumPickerRGB {
     }
     static func channels(_ color: Color) -> (Int, Int, Int)? {
         guard let rgb = NSColor(color).usingColorSpace(.extendedSRGB) else { return nil }
-        // Reject out-of-sRGB-gamut selections before a bounded conversion can clip them.
-        let components = [rgb.redComponent, rgb.greenComponent, rgb.blueComponent]
-        guard components.allSatisfy({ $0.isFinite && (0...1).contains($0) }),
-              let bounded = rgb.usingColorSpace(.sRGB) else { return nil }
-        let supported = [bounded.redComponent, bounded.greenComponent, bounded.blueComponent]
-        guard supported.allSatisfy({ $0.isFinite && (0...1).contains($0) }) else { return nil }
-        let bytes = supported.map { Int(($0 * 255).rounded()) }
+        return quantized([rgb.redComponent, rgb.greenComponent, rgb.blueComponent])
+    }
+    static func quantized(_ components: [CGFloat]?) -> (Int, Int, Int)? {
+        guard let components, components.count == 3,
+              components.allSatisfy({ $0.isFinite }) else { return nil }
+        // Owner-approved channel clipping in extended sRGB, not perceptual gamut compression.
+        // A mapped wide-gamut color need not retain its original Display P3 appearance.
+        let bytes = components.map { Int((min(1, max(0, $0)) * 255).rounded()) }
         return (bytes[0], bytes[1], bytes[2])
+    }
+}
+
+private struct SpectrumDisclosureStyle: DisclosureGroupStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                configuration.isExpanded.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: configuration.isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 12)
+                        .accessibilityHidden(true)
+                    configuration.label
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(configuration.isExpanded ? "펼침" : "접힘")
+            .accessibilityHint("섹션을 접거나 펼칩니다")
+            if configuration.isExpanded {
+                configuration.content
+            }
+        }
     }
 }
 
@@ -1009,6 +1036,8 @@ struct SpectrumStyleAdjust: View {
     @State private var feedback: String?
     @State private var pickerActive = false
     @State private var lastValidSwatch: Color
+    @State private var positionExpanded = true
+    @State private var appearanceExpanded = true
     init(store: ProjectStore, item: SpectrumItem) {
         self.store = store; self.item = item
         project = store.projectSession; selectionRevision = store.spectrumSelectionRevision; generation = store.generation
@@ -1031,7 +1060,7 @@ struct SpectrumStyleAdjust: View {
         }, set: { color in
             guard pickerContextIsCurrent, SpectrumPickerRGB.channels(draft) != nil else { return }
             guard let rgb = SpectrumPickerRGB.channels(color) else {
-                feedback = "이 색상은 8-bit sRGB로 표현할 수 없습니다. sRGB 범위의 색상을 선택하세요."
+                feedback = "색상을 sRGB로 변환하지 못했거나 유효하지 않은 성분입니다. 다른 색상을 선택하세요."
                 return
             }
             draft.red = String(rgb.0); draft.green = String(rgb.1); draft.blue = String(rgb.2)
@@ -1040,30 +1069,42 @@ struct SpectrumStyleAdjust: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("1920×1080 기준 px · 왼쪽 위가 원점 · 소수점 3자리까지")
-                .font(.caption2).foregroundStyle(.secondary)
-            field("시작 X", $draft.startX); field("시작 Y", $draft.startY)
-            field("끝 X", $draft.endX); field("끝 Y", $draft.endY)
-            field("최대 높이", $draft.height)
-            field("두께", $draft.thickness)
-            Picker("표시 방향", selection: $draft.sides) {
-                Text("위쪽 (above)").tag(SpectrumItemStyle.Sides.above)
-                Text("양쪽 (mirrored)").tag(SpectrumItemStyle.Sides.mirrored)
-                Text("아래쪽 (below)").tag(SpectrumItemStyle.Sides.below)
+            AdjustSection(title: "스타일") {
+                DisclosureGroup("위치 및 크기", isExpanded: $positionExpanded) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("1920×1080 기준 px · 왼쪽 위가 원점 · 소수점 3자리까지")
+                            .font(.caption2).foregroundStyle(.secondary)
+                        field("시작 X", $draft.startX); field("시작 Y", $draft.startY)
+                        field("끝 X", $draft.endX); field("끝 Y", $draft.endY)
+                        field("최대 높이", $draft.height)
+                    }.padding(.top, 4)
+                }
+                Divider()
+                DisclosureGroup("모양 및 색상", isExpanded: $appearanceExpanded) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Picker("표시 모드", selection: $draft.mode) {
+                            Text("Digital").tag(SpectrumItemStyle.Mode.digital)
+                            Text("Analog").tag(SpectrumItemStyle.Mode.analog)
+                        }
+                        field("두께", $draft.thickness)
+                        Picker("표시 방향", selection: $draft.sides) {
+                            Text("위쪽 (above)").tag(SpectrumItemStyle.Sides.above)
+                            Text("양쪽 (mirrored)").tag(SpectrumItemStyle.Sides.mirrored)
+                            Text("아래쪽 (below)").tag(SpectrumItemStyle.Sides.below)
+                        }
+                        Text("방향은 시작점→끝점 기준선의 수직 방향 기준이며, 화면 위·아래와 다를 수 있습니다.")
+                            .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        field("빨강", $draft.red); field("초록", $draft.green); field("파랑", $draft.blue)
+                        ColorPicker("색상", selection: pickerColor, supportsOpacity: false)
+                            .disabled(SpectrumPickerRGB.channels(draft) == nil)
+                        if SpectrumPickerRGB.channels(draft) == nil {
+                            Text("RGB 입력을 0–255 정수로 완성하면 색상 선택기를 사용할 수 있습니다.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }.padding(.top, 4)
+                }
             }
-            Text("방향은 시작점→끝점 기준선의 수직 방향 기준이며, 화면 위·아래와 다를 수 있습니다.")
-                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Picker("표시 모드", selection: $draft.mode) {
-                Text("Digital").tag(SpectrumItemStyle.Mode.digital)
-                Text("Analog").tag(SpectrumItemStyle.Mode.analog)
-            }
-            field("빨강", $draft.red); field("초록", $draft.green); field("파랑", $draft.blue)
-            ColorPicker("색상", selection: pickerColor, supportsOpacity: false)
-                .disabled(SpectrumPickerRGB.channels(draft) == nil)
-            if SpectrumPickerRGB.channels(draft) == nil {
-                Text("RGB 입력을 0–255 정수로 완성하면 색상 선택기를 사용할 수 있습니다.")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
+            .disclosureGroupStyle(SpectrumDisclosureStyle())
             if let message = feedback ?? validation {
                 Text(message).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
@@ -1089,8 +1130,8 @@ struct SpectrumStyleAdjust: View {
     }
     private func field(_ title: String, _ value: Binding<String>) -> some View {
         HStack {
-            Text(title).font(.caption)
-            Spacer()
+            Text(title).font(.caption).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
             TextField(title, text: value).textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.trailing).frame(width: 100)
                 .accessibilityLabel("스펙트럼 " + title)
