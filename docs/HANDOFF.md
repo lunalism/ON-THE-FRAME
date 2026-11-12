@@ -1,5 +1,15 @@
 # 인계 요약 — ON THE FRAME
 
+**SP-5A-11 · Spectrum 위치·높이·RGB 편집 / 최종 6파일 커밋 승인 준비.** SP-5A-10 검토 뒤 문서만 정리했다. 선택 Spectrum의 startX/startY/endX/endY/maxHeight/red/green/blue **8개 숫자 입력란**, 정확한 소수 px→milli 변환·범위 검사, draft Apply/Cancel, 선택/session/generation 보호, no-op 제외와 기존 한 단계 Undo/Redo·dirty-state·Preview 무효화·소스 계보 보존을 구현했다. 숨은 alpha·thickness·mode·sides·분석 설정, 형식·renderer·Sandbox·공개 export 게이트는 그대로다. [상세 범위·증거·한계](ROADMAP.md).
+
+기존 SP-5A-05 실제 실행은 **62/62 진단 assertions·6/6 SwiftPM 엔진 테스트 PASS**, exit 0, Xcode 27.2 matching SDK 사용·관측 자원 한도 위반 없음이다. 진단은 실제 parser/setter 추출과 commit/invalidation test double을 조합하므로 전체 UI 검증이 아니다. 성공 검증 중 제품 소스는 변경하지 않았다. 이번 문서 작업은 빌드·앱 실행·테스트를 하지 않았다.
+
+소유자 관찰은 별도다: SP-5A-08 시험 복사본 video/WAV 재연결·저장/재열기·재생 PASS, SP-5A-09 **A–K PASS**(입력란 표시, 위치/폭·높이·RGB, Cancel, Apply, 한 단계 Undo/Redo, 저장 복원, 무효 입력 거부, 선택 변경 시 draft 제거, 재생 중 Apply 일시정지·Preview 갱신). F의 dirty 표시는 이전부터 존재했고, 무효 입력 history는 독립 계측하지 않았으며 stale draft 수동 범위는 선택 변경이다. 전체 Preview/export·물리적 display/audio parity 미검증, 공개 spectrum export 비활성, Release 준비 미승인이다. SP-4B 시작 표시 공백과 아래 한계는 해결되지 않았다.
+
+시험 복사본은 `app/selftest-work/sp5a06-owner-manual-20261112/fixture.ontheframe`이며 저장된 높이 **350**, 마지막 소유자 보고의 미저장 높이 **400**, 현재 앱 메모리 상태 **unknown**이다. 이번 작업은 시험 프로젝트를 변경/저장하지 않는다. 보호 원본·미디어·역사 증거를 보존한다.
+
+최종 후보는 ContentView.swift·ProjectStore.swift·SpectrumModelTests.swift·SpectrumFrameCoordinatorTests.swift·ROADMAP.md·HANDOFF.md다. `app/diagnostics/spectrum-style-edit-check.py`는 고정 toolchain/SDK·기존 엔진 산출물 의존·취약한 소스 추출·제한된 이식성 때문에 **untracked 로컬 보존 / 체크포인트 제외**다. 삭제·수정하지 않으며 62/62 역사 증거도 보존한다. 소유자 파일·시험 프로젝트/미디어·빌드·raw evidence는 제외한다. 다음은 정확한 manifest에 대한 별도 소유자 커밋/게시 승인이다. 아래 SP-4B-21 대기 문구는 당시 이력이며 그 체크포인트는 `9a7216f`로 게시됐다.
+
 **SP-4B-21 · 문서 정리 / 소유자 게시 승인 대기.** SP-4B-20 읽기 전용 검토는 **READY FOR OWNER COMMIT APPROVAL**로 판정했다. 후보는 Swift 6개·Python 런처 1개·문서 2개 총 9개이며, staging·commit·push에는 별도 명시적 소유자 승인이 필요하다. SP-4B-21에서는 HANDOFF/ROADMAP만 갱신하고 빌드·앱 실행·시험을 재수행하지 않았다.
 
 **기존 SP-4B-17 실행 증거.** Xcode 27.2 / macOS arm64 증분 Debug 빌드 exit 0, strict 서명 PASS, 기존 Sandbox entitlements 유지, 시작 프레임 선택 회귀 **17/17 PASS**. 회귀 직접 자식의 종료 자격·identity 확인 후 SIGTERM과 exit −15를 검증했다. 연속 검사는 선택 대기 180초 만료였으나, 소유자는 당시 선택창이 보였다고 확인했다. 이 결과는 이번 문서 작업에서 재현한 시험이 아니다.

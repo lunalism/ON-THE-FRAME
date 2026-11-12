@@ -299,6 +299,8 @@ final class SpectrumFrameCoordinatorTests: XCTestCase {
         let bClip = pasted.ids[w]!, sidB = UUID(), slB = UUID()
         let t = try pasted.timeline.addingLane(.spectrum, name: "SPB", id: slB).addingSpectrum(lane: slB, at: 0, length: 300, sourceKey: pasted.timeline.clip(bClip)!.lineageKey, id: sidB)
         var style = t.spectrum(sid)!.style; style.red = 10
+        var position = t.spectrum(sid)!.style; position.startXMilli += 125; position.endYMilli += 500
+        var height = t.spectrum(sid)!.style; height.maxHeightMilli = 250_125
         var analysis = t.spectrum(sid)!.style; analysis.bands = 32
         let relinked = wav.withID(steady.id)   // 같은 미디어 ID, 다른 파일(재연결)
         let cases: [(String, Timeline, [MediaAsset], String, Bool)] = [
@@ -312,6 +314,8 @@ final class SpectrumFrameCoordinatorTests: XCTestCase {
             ("페이드", try t.settingClipAudio(clip: w, fadeOutFrames: 30), [steady], "superseded", true),
             ("클립 음소거", try t.settingClipAudio(clip: w, muted: true), [steady], "superseded", true),
             ("모양(색)", try t.settingSpectrumStyle(sid, style), [steady], "superseded", true),
+            ("모양(위치)", try t.settingSpectrumStyle(sid, position), [steady], "superseded", true),
+            ("모양(높이)", try t.settingSpectrumStyle(sid, height), [steady], "superseded", true),
             ("분석 설정(밴드 수)", try t.settingSpectrumStyle(sid, analysis), [steady], "superseded", true),
             ("재연결(같은 ID, 다른 파일)", t, [relinked], "superseded", false),
         ]

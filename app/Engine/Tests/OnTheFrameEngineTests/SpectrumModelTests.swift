@@ -233,6 +233,53 @@ final class SpectrumModelTests: XCTestCase {
 
     // MARK: 레인·편집
 
+    func testEditableSpectrumStyleHistoryAndPersistence() throws {
+        let (base, audio, _) = try base()
+        let (laned, lane) = try spectrumLane(base)
+        let timeline = try laned.addingSpectrum(lane: lane, at: 0, length: 100, sourceKey: audio)
+        let item = try XCTUnwrap(timeline.spectra.first)
+        var history = EditHistory(timeline)
+        history.apply(try timeline.settingSpectrumStyle(item.id, item.style), focus: item.id)
+        XCTAssertFalse(history.canUndo, "unchanged Apply has no history")
+        var style = item.style
+        style.startXMilli = -125; style.startYMilli = 541_125
+        style.endXMilli = 1_600_001; style.endYMilli = 600_500
+        style.maxHeightMilli = 300_250; style.red = 12; style.green = 34; style.blue = 56
+        let edited = try timeline.settingSpectrumStyle(item.id, style)
+        history.apply(edited, focus: item.id)
+        XCTAssertEqual(edited.spectrumPieces(edited.spectra[0]), timeline.spectrumPieces(item))
+        XCTAssertEqual(edited.audioClips, timeline.audioClips)
+        XCTAssertEqual(edited.spectra[0].sourceKey, item.sourceKey)
+        XCTAssertEqual(edited.spectra[0].style.alpha, item.style.alpha)
+        XCTAssertEqual(edited.spectra[0].style.analysisSettings, item.style.analysisSettings)
+        history.undo(); XCTAssertEqual(history.timeline, timeline); XCTAssertFalse(history.canUndo)
+        history.redo(); XCTAssertEqual(history.timeline, edited)
+        let id = UUID()
+        let data = try ProjectFile.encode(edited, projectID: id, settings: .m1, bookmarks: [:], projectURL: nil)
+        let restored = try ProjectFile.decode(data)
+        XCTAssertEqual(restored.timeline, edited)
+        XCTAssertEqual(restored.document.version, 8)
+        XCTAssertEqual(try ProjectFile.encode(restored.timeline, projectID: id, settings: .m1,
+                                             bookmarks: [:], projectURL: nil), data)
+    }
+
+    func testEditableSpectrumStyleRejectsInvalidUpdates() throws {
+        let (base, audio, _) = try base()
+        let (laned, lane) = try spectrumLane(base)
+        let timeline = try laned.addingSpectrum(lane: lane, at: 0, length: 100, sourceKey: audio)
+        let item = try XCTUnwrap(timeline.spectra.first)
+        var cases = [SpectrumItemStyle]()
+        var bad = item.style; bad.red = 256; cases.append(bad)
+        bad = item.style; bad.maxHeightMilli = -1; cases.append(bad)
+        bad = item.style; bad.maxHeightMilli = 1_080_001; cases.append(bad)
+        bad = item.style; bad.startXMilli = 10_000_001; cases.append(bad)
+        bad = item.style; bad.endXMilli = bad.startXMilli; bad.endYMilli = bad.startYMilli; cases.append(bad)
+        for style in cases {
+            XCTAssertThrowsError(try timeline.settingSpectrumStyle(item.id, style))
+            XCTAssertEqual(timeline.spectrum(item.id), item)
+        }
+    }
+
     func testSpectrumLanesOrderAndEditing() throws {
         var (t, w, _) = try base()
         let sub = UUID()

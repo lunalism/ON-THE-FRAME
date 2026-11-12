@@ -858,7 +858,11 @@ struct AdjustmentsView: View {
                     target(icon: "waveform.path", title: "스펙트럼",
                            subtitle: "스펙트럼 · \(laneText(sp.lane)) · \(store.settings.timecode(sp.start))–\(store.settings.timecode(sp.end))")
                     AdjustSection(title: "오디오 소스") { SpectrumSourceAdjust(store: store, item: sp) }
-                    Text("타임라인에서 끌어 옮기고(스펙트럼 레인 사이 포함), 가장자리를 끌어 길이를 바꿉니다(소리 클립은 그대로). 모양은 아직 바꿀 수 없습니다. Delete로 지웁니다.")
+                    AdjustSection(title: "위치·높이·색상") {
+                        SpectrumStyleAdjust(store: store, item: sp)
+                            .id("\(sp.id)-\(store.projectSession)-\(store.spectrumSelectionRevision)-\(store.generation)")
+                    }
+                    Text("타임라인에서 옮기거나 길이를 바꿔도 소리 클립은 그대로입니다. 모양은 적용을 눌러 반영하고 Delete로 지웁니다.")
                         .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else if let id = store.selection, let c = store.timeline.clip(id), let kind = store.timeline.lane(of: id) {
                     target(icon: kind == .video ? "film" : "waveform", title: store.mediaByID[c.mediaID]?.name ?? "클립",
@@ -903,6 +907,115 @@ struct AdjustmentsView: View {
     func laneText(_ id: UUID?) -> String {
         guard let id, let l = store.timeline.laneInfo(id) else { return "—" }
         return "\(store.timeline.laneLabel(id)) · \(l.name)"
+    }
+}
+
+// SP-5A-02: local text only until Apply. Decimal parsing avoids binary rounding of milli-pixels.
+struct SpectrumStyleDraft {
+    var startX: String, startY: String, endX: String, endY: String, height: String
+    var red: String, green: String, blue: String
+    init(_ style: SpectrumItemStyle) {
+        func pixels(_ value: Int) -> String {
+            let magnitude = value.magnitude
+            let fraction = String(format: "%03llu", UInt64(magnitude % 1000))
+            return "\(value < 0 ? "-" : "")\(magnitude / 1000).\(fraction)"
+        }
+        startX = pixels(style.startXMilli); startY = pixels(style.startYMilli)
+        endX = pixels(style.endXMilli); endY = pixels(style.endYMilli)
+        height = pixels(style.maxHeightMilli)
+        red = String(style.red); green = String(style.green); blue = String(style.blue)
+    }
+    struct Invalid: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+    func style(from base: SpectrumItemStyle) throws -> SpectrumItemStyle {
+        func milli(_ text: String, _ label: String, range: ClosedRange<Int>) throws -> Int {
+            let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard text.count <= 32,
+                  text.range(of: #"^[+-]?(?:[0-9]+(?:\.[0-9]{0,3})?|\.[0-9]{1,3})$"#, options: .regularExpression) != nil,
+                  let decimal = Decimal(string: text, locale: Locale(identifier: "en_US_POSIX")) else {
+                throw Invalid(message: "\(label): 유한한 숫자를 소수점 이하 최대 3자리로 입력하세요. 예: 192.125")
+            }
+            let scaled = decimal * 1000
+            guard scaled >= Decimal(range.lowerBound), scaled <= Decimal(range.upperBound),
+                  let value = Int(exactly: NSDecimalNumber(decimal: scaled).int64Value) else {
+                throw Invalid(message: "\(label): \(range.lowerBound / 1000)–\(range.upperBound / 1000) px 범위로 입력하세요.")
+            }
+            return value
+        }
+        func color(_ text: String, _ label: String) throws -> Int {
+            let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard text.range(of: #"^[0-9]{1,3}$"#, options: .regularExpression) != nil,
+                  let value = Int(text), (0...255).contains(value) else {
+                throw Invalid(message: "\(label): 0–255 사이 정수를 입력하세요.")
+            }
+            return value
+        }
+        var result = base
+        result.startXMilli = try milli(startX, "시작 X", range: -10_000_000...10_000_000)
+        result.startYMilli = try milli(startY, "시작 Y", range: -10_000_000...10_000_000)
+        result.endXMilli = try milli(endX, "끝 X", range: -10_000_000...10_000_000)
+        result.endYMilli = try milli(endY, "끝 Y", range: -10_000_000...10_000_000)
+        result.maxHeightMilli = try milli(height, "최대 높이", range: 0...1_080_000)
+        result.red = try color(red, "빨강"); result.green = try color(green, "초록"); result.blue = try color(blue, "파랑")
+        guard hypot(Double(result.endXMilli - result.startXMilli), Double(result.endYMilli - result.startYMilli)) >= 1000 else {
+            throw Invalid(message: "시작점과 끝점의 거리는 1 px 이상이어야 합니다.")
+        }
+        guard result.isValid else { throw Invalid(message: "기존 스펙트럼 설정을 확인해 주세요. 적용하지 않았습니다.") }
+        return result
+    }
+}
+
+struct SpectrumStyleAdjust: View {
+    @Bindable var store: ProjectStore
+    let item: SpectrumItem
+    let project: Int, selectionRevision: Int, generation: Int
+    @State private var draft: SpectrumStyleDraft
+    @State private var feedback: String?
+    init(store: ProjectStore, item: SpectrumItem) {
+        self.store = store; self.item = item
+        project = store.projectSession; selectionRevision = store.spectrumSelectionRevision; generation = store.generation
+        _draft = State(initialValue: SpectrumStyleDraft(item.style))
+    }
+    private var validation: String? {
+        do { _ = try draft.style(from: item.style); return nil }
+        catch { return error.localizedDescription }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("1920×1080 기준 px · 왼쪽 위가 원점 · 소수점 3자리까지")
+                .font(.caption2).foregroundStyle(.secondary)
+            field("시작 X", $draft.startX); field("시작 Y", $draft.startY)
+            field("끝 X", $draft.endX); field("끝 Y", $draft.endY)
+            field("최대 높이", $draft.height)
+            field("빨강", $draft.red); field("초록", $draft.green); field("파랑", $draft.blue)
+            if let message = feedback ?? validation {
+                Text(message).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Button("적용") {
+                    do {
+                        let style = try draft.style(from: item.style)
+                        feedback = store.setSpectrumStyle(item.id, style: style, from: item.style,
+                            project: project, selectionRevision: selectionRevision, generation: generation)
+                    } catch { feedback = error.localizedDescription }
+                }.disabled(validation != nil)
+                Button("취소") { draft = SpectrumStyleDraft(item.style); feedback = nil }
+            }
+            Text("입력만으로는 바뀌지 않습니다. 적용하면 재생을 멈추고 한 번에 반영합니다.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .disabled(store.gestureBase != nil || !store.fileCommandsAvailable)
+    }
+    private func field(_ title: String, _ value: Binding<String>) -> some View {
+        HStack {
+            Text(title).font(.caption)
+            Spacer()
+            TextField(title, text: value).textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing).frame(width: 100)
+                .accessibilityLabel("스펙트럼 " + title)
+        }
     }
 }
 

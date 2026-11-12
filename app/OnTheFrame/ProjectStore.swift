@@ -67,7 +67,13 @@ final class ProjectStore {
     private(set) var history = EditHistory()
     var timeline: Timeline { history.timeline }
     /// 선택한 클립(주 선택). 연결된 짝도 함께 선택된 것으로 보인다(selectedIDs).
-    var selection: UUID? { didSet { if selection == nil || selection == linkCandidate { linkCandidate = nil } } }
+    private(set) var spectrumSelectionRevision = 0
+    var selection: UUID? {
+        didSet {
+            if selection != oldValue { spectrumSelectionRevision &+= 1 }
+            if selection == nil || selection == linkCandidate { linkCandidate = nil }
+        }
+    }
     /// ⌘-클릭으로 더한 둘째 클립(연결 후보, 다른 레인). 편집 동작은 주 선택의 묶음에만 적용된다.
     var linkCandidate: UUID?
     /// 화면에 선택으로 보이는 클립: 주 선택의 묶음 + 연결 후보
@@ -907,6 +913,31 @@ final class ProjectStore {
         guard sp.sourceKey != key else { return }
         if let k = key, timeline.spectrumSource(key: k) == nil { statusMessage = EditError.spectrumUnknownSource.description; return }
         commit({ try $0.settingSpectrumSource(id, key) }, focus: id)
+    }
+
+    /// One explicit style Apply. A draft cannot survive selection/project/history changes.
+    /// Return feedback without touching history on rejection or an unchanged value.
+    func setSpectrumStyle(_ id: UUID, style: SpectrumItemStyle, from original: SpectrumItemStyle,
+                          project: Int, selectionRevision: Int, generation draftGeneration: Int) -> String? {
+        guard project == projectSession, selectionRevision == spectrumSelectionRevision,
+              draftGeneration == generation, selection == id,
+              let item = timeline.spectrum(id), item.style == original else {
+            return "프로젝트나 선택이 바뀌었습니다. 현재 스펙트럼을 다시 선택해 주세요."
+        }
+        guard gestureBase == nil, fileCommandsAvailable, !openRequested, openProgress == nil,
+              importProgress == nil, !imageImportBusy, !relinkInProgress,
+              exportPhase == .idle, !discardConfirmed, !editorClosedByUser else {
+            return "현재 작업이나 확인 창을 마친 뒤 적용해 주세요."
+        }
+        var allowed = original
+        allowed.startXMilli = style.startXMilli; allowed.startYMilli = style.startYMilli
+        allowed.endXMilli = style.endXMilli; allowed.endYMilli = style.endYMilli
+        allowed.maxHeightMilli = style.maxHeightMilli
+        allowed.red = style.red; allowed.green = style.green; allowed.blue = style.blue
+        guard style == allowed, style.isValid else { return "위치·높이·RGB 범위를 확인해 주세요." }
+        guard style != original else { return nil }
+        commit({ try $0.settingSpectrumStyle(id, style) }, focus: id)
+        return timeline.spectrum(id)?.style == style ? nil : (statusMessage ?? "모양을 적용하지 못했습니다.")
     }
 
     // MARK: 복사·붙여넣기(2026-10-11)

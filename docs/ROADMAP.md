@@ -1,5 +1,19 @@
 # 로드맵 — ON THE FRAME
 
+**SP-5A-11 · Spectrum 모양 편집 체크포인트 / 소유자 커밋 승인 준비.** SP-5A-10의 제한된 소스·증거 검토는 READY FOR CHECKPOINT PREPARATION이다. 후보는 제품 Swift 2개·엔진 테스트 2개·ROADMAP/HANDOFF 총 6개다. 구현은 미커밋이며 staging·commit·push는 별도 소유자 승인 대상이다. 이 작업에서는 두 문서만 수정하고 빌드·앱 실행·테스트를 재수행하지 않았다. 아래 SP-4B-21 게시 승인 대기 문구는 당시 기록이며, 해당 체크포인트는 이후 `9a7216f`로 게시되었다.
+
+**구현 범위 — 개별 숫자 입력란 8개.** 선택한 기존 Spectrum 클립의 startX·startY·endX·endY·maxHeight·red·green·blue를 편집한다(7개가 아니라 8개). 좌표·높이는 소수점 이하 최대 3자리 px를 기존 milli-unit에 정확히 변환한다. 좌표 ±10,000 px, 최대 높이 0–1080 px, 기준선 길이 1 px 이상, RGB 정수 0–255를 검사하며 유한하지 않은 값·잘못된 숫자·범위 밖 값을 조용히 clamp하지 않는다. alpha·thickness·mode·sides·bands·주파수 범위·window·offset·floor dB는 이 UI에서 편집하지 않고 보존한다.
+
+입력은 로컬 draft이며 Apply 전 프로젝트를 바꾸지 않는다. Cancel은 현재 스타일로 draft만 복원한다. setter는 선택 ID·선택 revision·프로젝트 session·generation·원래 스타일과 기존 alert/gesture/import/relink/export 제한을 확인한다. 유효한 변경 Apply 한 번은 기존 commit/history를 통한 Undo 거래 한 번이고, no-op Apply·Cancel은 history/dirty 상태를 변경하지 않는다. 기존 dirty-state·저장/복원·pause-for-edit·Preview 무효화 경로를 재사용한다. sourceKey·소리 계보·타이밍과 숨은 스타일을 보존하며 기존 형식 8·모델·renderer를 사용한다. renderer 수학·entitlement·공개 export 게이트는 변경하지 않았다.
+
+**기존 자동 실행 증거 — SP-5A-05.** 실제 parser/setter와 선택 observer를 추출한 진단 assertions **62/62 PASS**, syntax/compiler/assertions exit 0, 집중 SwiftPM 엔진 테스트 **6/6 PASS**·exit 0이다. Xcode 27.2와 일치하는 macOS SDK를 명시하고 충돌하는 상속 SDKROOT는 해당 프로세스에서만 제거했다. PID/시작 신원 기반 자원 관측에서 승인 임계값 위반은 관측되지 않았다. 성공 검증 작업 중 제품 구현은 바뀌지 않았다. 진단은 실제 엔진 Timeline/EditHistory를 쓰지만 ProjectStore 주변 commit/invalidation에는 test double을 사용하므로 전체 store·UI 통합 검증으로 확대하지 않는다. 기존 로그는 `app/selftest-work/sp5a05-20261112/`에 보존하며 이번 문서 작업에서 새 테스트는 실행하지 않았다.
+
+**소유자 관찰 — SP-5A-08/09, 자동 테스트와 별도.** 별도 시험 복사본의 video/WAV를 소유자가 정상 선택창에서 재연결했고 저장·재열기 후 영상·소리가 유지됐다. A–K 수동 확인 PASS: 기존 Spectrum 선택·8개 입력란 표시, 기준선 양끝/폭 변경, 최대 높이 변경, RGB 적용, Cancel 복원·Preview 유지, Apply의 Preview 변경, 한 단계 Undo/Redo, 저장·재열기 스타일/미디어 유지, 무효 입력 거부, 선택 변경 후 오래된 draft 제거, 재생 중 Apply 즉시 일시정지·Preview 갱신이다. 위치는 (192,600)–(1728,600)에서 (320,600)–(1600,600), 높이는 420→300→350, RGB는 (255,195,50)→(255,80,80)으로 확인했다. 이는 해당 시험 조건의 소유자 보고이며 전체 물리적 화면/오디오 parity 수락이 아니다.
+
+**한계·보존 상태.** F 관찰 전부터 문서 수정 표시가 존재했다. 무효 입력의 내부 history는 독립 계측하지 않았고 stale draft 수동 검증은 선택 변경 경로였다. 전체 Preview/export parity·물리적 display/audio parity는 미검증, 공개 spectrum export는 계속 게이트 뒤, Release 준비는 승인되지 않았다. 기존 SP-4B 시작 모델 공백 108.33 ms·첫 관측→첫 이미지 약 172.31 ms와 기타 아래 Preview 한계는 미해결이다. 시험 복사본의 저장된 높이는 **350**, 마지막 소유자 보고의 미저장 앱 높이는 **400**이며 현재 앱 메모리 상태는 알 수 없다. 이번 작업에서 시험 프로젝트를 저장하거나 변경하지 않았다.
+
+**진단 제외 — SP-5A-10 검토 결정.** `app/diagnostics/spectrum-style-edit-check.py`는 고정 로컬 toolchain/SDK 경로, 기존 엔진 빌드 산출물 의존, 소스 문자열 추출의 취약성과 제한된 이식성 때문에 untracked 로컬 진단으로 보존하고 체크포인트에서 제외한다. 삭제·수정·staging하지 않으며 기존 62/62 실행 증거는 유효한 역사 기록으로 유지한다. 소유자 파일·시험 프로젝트·미디어·빌드·raw evidence도 게시 대상이 아니다.
+
 **SP-4B-21 · 문서 정리 / 소유자 게시 승인 대기.** SP-4B-20 읽기 전용 검토는 **READY FOR OWNER COMMIT APPROVAL**로 판정했다. 후보는 Swift 6개·Python 런처 1개·문서 2개 총 9개이며, staging·commit·push에는 별도 명시적 소유자 승인이 필요하다. SP-4B-21에서는 HANDOFF/ROADMAP만 갱신하고 빌드·앱 실행·시험을 재수행하지 않았다.
 
 **기존 SP-4B-17 실행 증거.** Xcode 27.2 / macOS arm64 증분 Debug 빌드 exit 0, strict 서명 PASS, 기존 Sandbox entitlements 유지, 시작 프레임 선택 회귀 **17/17 PASS**. 회귀 직접 자식의 종료 자격·identity 확인 후 SIGTERM과 exit −15를 검증했다. 연속 검사는 선택 대기 180초 만료였으나, 소유자는 당시 선택창이 보였다고 확인했다. 이 결과는 이번 문서 작업에서 재현한 시험이 아니다.
