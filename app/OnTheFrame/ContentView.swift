@@ -973,20 +973,70 @@ struct SpectrumStyleDraft {
     }
 }
 
+// Valid numeric drafts are the source of truth; the view retains only the last valid swatch.
+enum SpectrumPickerRGB {
+    static func channels(_ draft: SpectrumStyleDraft) -> (Int, Int, Int)? {
+        let values = [draft.red, draft.green, draft.blue].compactMap { text -> Int? in
+            let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard text.range(of: #"^[0-9]{1,3}$"#, options: .regularExpression) != nil,
+                  let value = Int(text), (0...255).contains(value) else { return nil }
+            return value
+        }
+        guard values.count == 3 else { return nil }
+        return (values[0], values[1], values[2])
+    }
+    static func color(_ rgb: (Int, Int, Int)) -> Color {
+        Color(.sRGB, red: Double(rgb.0) / 255, green: Double(rgb.1) / 255, blue: Double(rgb.2) / 255)
+    }
+    static func channels(_ color: Color) -> (Int, Int, Int)? {
+        guard let rgb = NSColor(color).usingColorSpace(.extendedSRGB) else { return nil }
+        // Reject out-of-sRGB-gamut selections before a bounded conversion can clip them.
+        let components = [rgb.redComponent, rgb.greenComponent, rgb.blueComponent]
+        guard components.allSatisfy({ $0.isFinite && (0...1).contains($0) }),
+              let bounded = rgb.usingColorSpace(.sRGB) else { return nil }
+        let supported = [bounded.redComponent, bounded.greenComponent, bounded.blueComponent]
+        guard supported.allSatisfy({ $0.isFinite && (0...1).contains($0) }) else { return nil }
+        let bytes = supported.map { Int(($0 * 255).rounded()) }
+        return (bytes[0], bytes[1], bytes[2])
+    }
+}
+
 struct SpectrumStyleAdjust: View {
     @Bindable var store: ProjectStore
     let item: SpectrumItem
     let project: Int, selectionRevision: Int, generation: Int
     @State private var draft: SpectrumStyleDraft
     @State private var feedback: String?
+    @State private var pickerActive = false
+    @State private var lastValidSwatch: Color
     init(store: ProjectStore, item: SpectrumItem) {
         self.store = store; self.item = item
         project = store.projectSession; selectionRevision = store.spectrumSelectionRevision; generation = store.generation
         _draft = State(initialValue: SpectrumStyleDraft(item.style))
+        _lastValidSwatch = State(initialValue: SpectrumPickerRGB.color((item.style.red, item.style.green, item.style.blue)))
     }
     private var validation: String? {
         do { _ = try draft.style(from: item.style); return nil }
         catch { return error.localizedDescription }
+    }
+    private var pickerContextIsCurrent: Bool {
+        pickerActive && store.projectSession == project && store.selection == item.id &&
+        store.spectrumSelectionRevision == selectionRevision && store.generation == generation &&
+        store.timeline.spectrum(item.id)?.style == item.style &&
+        store.gestureBase == nil && store.fileCommandsAvailable
+    }
+    private var pickerColor: Binding<Color> {
+        Binding(get: {
+            SpectrumPickerRGB.channels(draft).map(SpectrumPickerRGB.color) ?? lastValidSwatch
+        }, set: { color in
+            guard pickerContextIsCurrent, SpectrumPickerRGB.channels(draft) != nil else { return }
+            guard let rgb = SpectrumPickerRGB.channels(color) else {
+                feedback = "이 색상은 8-bit sRGB로 표현할 수 없습니다. sRGB 범위의 색상을 선택하세요."
+                return
+            }
+            draft.red = String(rgb.0); draft.green = String(rgb.1); draft.blue = String(rgb.2)
+            feedback = nil
+        })
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1008,6 +1058,12 @@ struct SpectrumStyleAdjust: View {
                 Text("Analog").tag(SpectrumItemStyle.Mode.analog)
             }
             field("빨강", $draft.red); field("초록", $draft.green); field("파랑", $draft.blue)
+            ColorPicker("색상", selection: pickerColor, supportsOpacity: false)
+                .disabled(SpectrumPickerRGB.channels(draft) == nil)
+            if SpectrumPickerRGB.channels(draft) == nil {
+                Text("RGB 입력을 0–255 정수로 완성하면 색상 선택기를 사용할 수 있습니다.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             if let message = feedback ?? validation {
                 Text(message).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
@@ -1025,6 +1081,11 @@ struct SpectrumStyleAdjust: View {
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .disabled(store.gestureBase != nil || !store.fileCommandsAvailable)
+        .onAppear { pickerActive = true }
+        .onDisappear { pickerActive = false }
+        .onChange(of: [draft.red, draft.green, draft.blue]) { _, _ in
+            if let rgb = SpectrumPickerRGB.channels(draft) { lastValidSwatch = SpectrumPickerRGB.color(rgb) }
+        }
     }
     private func field(_ title: String, _ value: Binding<String>) -> some View {
         HStack {

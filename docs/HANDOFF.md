@@ -1,5 +1,13 @@
 # 인계 요약 — ON THE FRAME
 
+**SP-5B-06 · Native Spectrum ColorPicker / 3파일 커밋 승인 준비.** ContentView.swift의 기존 숫자 RGB draft에 SwiftUI ColorPicker(supportsOpacity: false)를 연결했다. 명시적 sRGB 변환·최근접 8-bit 양자화, 실패/비유한/색역 밖 값 거부, 무효 숫자 문자열 보존·마지막 유효 swatch·picker 비활성화를 구현했다. Apply/Cancel·no-op·한 단계 Undo/Redo·Preview 경로를 재사용하고 alpha/숨은 스타일을 보존한다. 선택/session/generation·기존 스타일·View 활성 여부로 늦은 이벤트를 거른다. renderer·형식·게이트 변경은 없다. [상세 증거·한계](ROADMAP.md).
+
+기존 SP-5B-03 실행은 Debug 빌드 exit 0·strict signing PASS·추출 변환/draft 검사 **232 PASS**, 관측 자원 위반 없음이다. 전체 ProjectStore/네이티브 패널 통합 검사는 아니다. SP-5B-03M 소유자 **A–K PASS**: 원색/숫자 동기화·무효 입력 보존·Cancel·Apply·Undo/Redo·기존 스타일 유지와 별도 새 파일 저장/재열기를 확인했다. 열린 패널의 늦은 초록 이벤트는 Spectrum→SLOW 자막 선택 후 다른 항목에 영향을 주지 않았으며, 프로젝트 교체 등 모든 경로는 미검증이다. alpha 192·분석·ID·계보·미디어 참조는 저장 파일 검사로 확인했다. 이번 작업에서 빌드·테스트·앱 실행·서명 검사를 재수행하지 않았다.
+
+새 시험 파일은 `app/selftest-work/sp5a06-owner-manual-20261112/fixture-sp5b03m-20261112-01.ontheframe`, SHA-256 `efa3ec5e07f87d556986ca2264109b71bd790a654c4df76499b55dc268849d68`이다. 저장 RGB는 (0,0,255), alpha 192, 높이 400·두께 3.125·mirrored/analog와 나머지 스타일/정체성이 유지됐다. 기존 지속성 파일·보호 baseline·원본/미디어는 변경하지 않았다.
+
+전체 패널 수명·모든 실패/비유한 색 입력·전체 store 경계의 자동 검증, 전체 Preview/export·물리 화면/오디오 parity는 남아 있다. 공개 Spectrum export는 게이트 뒤, Release 준비 미승인, SP-4B 시작 공백 미해결이며 Stage 5 전체 완료가 아니다. 후보는 ContentView.swift·ROADMAP.md·HANDOFF.md만이다. 로컬 진단·소유자 파일·시험 프로젝트/미디어·빌드·raw evidence는 제외·보존하며 다음은 별도 커밋/게시 승인이다. 아래 SP-5B-04 승인 대기는 당시 기록이며 `4ec6cb8`로 게시됐다. 이번 작업은 문서 두 개만 수정했고 프로젝트 저장·staging·commit·push하지 않았다.
+
 **SP-5B-04 · 두께·방향·모드 편집 / 6파일 커밋 승인 준비.** 기존 draft·setter에 두께 0.5–64 px(최대 소수 3자리), above/mirrored/below, digital/analog를 추가했다. Apply/Cancel·no-op·한 단계 Undo/Redo·선택/session/generation 보호·Preview 무효화를 재사용하고 다른 스타일·계보·타이밍을 보존한다. renderer·형식·entitlement·공개 export 게이트 변경은 없다. [상세 범위·증거·한계](ROADMAP.md).
 
 기존 SP-5B-02 실제 실행은 Debug 빌드 exit 0·strict signing PASS·집중 SwiftPM **7/7 PASS**, 관측 자원 위반 없음이다. SP-5B-02M/RESUME 소유자 관찰은 A–I·K PASS이며 저장 금지로 J는 당시 DEFERRED였다. 이후 승인된 별도 SP-5B-02P 파일의 저장·닫기·재열기 **지속성 PASS**를 소유자가 확인했다. 저장 검사도 thicknessMilli=3125·mirrored·analog, 높이 400·alpha 192·좌표/RGB/분석·Spectrum ID/계보/미디어 ID·형식 8 보존을 확인했다. 이번 작업에서 빌드·테스트·앱 실행·서명 검사를 재수행하지 않았다.
