@@ -938,6 +938,7 @@ final class ProjectStore {
         allowed.maxHeightMilli = style.maxHeightMilli
         allowed.thicknessMilli = style.thicknessMilli; allowed.sides = style.sides; allowed.mode = style.mode
         allowed.red = style.red; allowed.green = style.green; allowed.blue = style.blue
+        allowed.reactionPercent = style.reactionPercent
         guard style == allowed, style.isValid else { return "위치·높이·두께·RGB 범위를 확인해 주세요." }
         guard style != original else { return nil }
         commit({ try $0.settingSpectrumStyle(id, style) }, focus: id)
@@ -976,6 +977,7 @@ final class ProjectStore {
         allowed.maxHeightMilli = style.maxHeightMilli; allowed.thicknessMilli = style.thicknessMilli
         allowed.sides = style.sides; allowed.mode = style.mode
         allowed.red = style.red; allowed.green = style.green; allowed.blue = style.blue
+        allowed.reactionPercent = style.reactionPercent
         guard style == allowed, style.isValid else { return false }
         if let session = spectrumLiveSession, session.kind != kind { finishSpectrumLiveSession() }
         guard style != item.style else { return true }
@@ -1006,10 +1008,10 @@ final class ProjectStore {
             timelineChanged(); return
         }
         generation += 1
-        spectrumPreview.update(timeline: timeline, media: assets)
         appliedGeneration = generation
         updateWindowDocumentState()
-        previewHost?.spectrumOverlay.refresh(retainingStyleFrame: true)
+        if let overlay = previewHost?.spectrumOverlay { overlay.refresh(retainingStyleFrame: true) }
+        else { spectrumPreview.update(timeline: timeline, media: assets) }
     }
 
     // MARK: 복사·붙여넣기(2026-10-11)

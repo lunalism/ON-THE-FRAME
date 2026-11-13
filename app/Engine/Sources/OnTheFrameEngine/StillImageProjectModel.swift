@@ -103,7 +103,7 @@ enum StillImageProjectModel {
                 guard let r=e.ref.temporal else {return nil}; return .init(ref:r, relativePath:e.relativePath, bookmark:e.bookmark)
             }
             let ids=Set(temporal.map { $0.ref.id })
-            return .init(format:ProjectFile.format, version:8, projectID:projectID, settings:settings, durationFrames:durationFrames,
+            return .init(format:ProjectFile.format, version:(spectra?.isEmpty == false ? 10 : 8), projectID:projectID, settings:settings, durationFrames:durationFrames,
                          lanes:lanes, media:temporal, videoClips:videoClips.filter {ids.contains($0.mediaID)},
                          audioClips:audioClips, subtitles:subtitles, spectra:spectra)
         }

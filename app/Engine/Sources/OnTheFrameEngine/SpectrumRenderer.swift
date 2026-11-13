@@ -182,7 +182,13 @@ public final class SpectrumFrameRenderer {
     /// (알파 0, 아날로그 밴드 1개 등) 투명 1×1 프레임. 그 밖에는 칠한 부분을 16 px 단위로 자른 프레임.
     public func render(bands v: [Float], style: SpectrumItemStyle) throws -> SpectrumRenderedFrame? {
         guard v.count == style.bands else { throw SpectrumRenderError.invalidValues("count \(v.count) ≠ style bands \(style.bands)") }
-        guard let r = try canvas.render(v, style: style.renderStyle) else { return nil }
+        guard (0...200).contains(style.reactionPercent) else { throw SpectrumRenderError.invalidStyle("reactionPercent") }
+        guard v.allSatisfy({ $0.isFinite && (0...1).contains($0) }) else { throw SpectrumRenderError.invalidValues("value out of 0…1") }
+        // Retain the original bands at 100%; analysis/cache keys remain independent of visual strength.
+        let adjusted: [Float] = style.reactionPercent == 100 ? v : v.map {
+            min(1, max(0, $0 * (Float(style.reactionPercent) / 100)))
+        }
+        guard let r = try canvas.render(adjusted, style: style.renderStyle) else { return nil }
         // 화소는 내부 그림(r.image)에서 꺼내지 않고 방금 그린 캔버스에서 drawRect 부분을 직접 복사한다. 내부 그림은 보통 따로 자른 비트맵이지만
         // 비트맵을 얻지 못하면 캔버스 makeImage().cropping(행 띠)이고, 그 공급자 데이터의 원점·행 간격은 문서로 보장되지 않는다(2026-10-26 검토).
         // drawRect가 내부 그림을 그대로 설명할 때만(같은 크기, 정수, 캔버스 안) 복사하고, 아니면 실패한다.

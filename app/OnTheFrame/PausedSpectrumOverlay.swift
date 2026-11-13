@@ -20,11 +20,15 @@ final class PausedSpectrumOverlay {
     private weak var confirmedItem: AVPlayerItem?
     private var serial = 0 // view/request lifetime, not another project session
     private var tickets: [SpectrumFrameTicket] = []
+    private var styleRequestsRemaining = 0
+    private var pendingStyleRefresh = false
     private(set) var layers: [UUID: CALayer] = [:]
     #if DEBUG
     var playbackObservationForTest: (owner: UUID, observe: () -> Void)?
     var publicationForParityTest: (owner: UUID, receive: (Int, Int, UUID, SpectrumFrameOutcome) -> Void)?
     private(set) var assignments = 0
+    private(set) var styleBatches = 0
+    private(set) var coalescedStyleUpdates = 0
     private(set) var latencies: [Double] = []
     private(set) var updateCosts: [Double] = []
     #endif
@@ -86,6 +90,8 @@ final class PausedSpectrumOverlay {
 
     func invalidate(forgetFrame: Bool = false) {
         serial &+= 1
+        styleRequestsRemaining = 0
+        pendingStyleRefresh = false
         if let store { tickets.forEach { store.spectrumPreview.cancel($0) } }
         tickets = []
         CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -106,6 +112,14 @@ final class PausedSpectrumOverlay {
         // Ordinary seeks/session changes still clear immediately. Only a style update
         // of the same confirmed paused frame may keep its previously validated image.
         if retainingStyleFrame {
+            if styleRequestsRemaining > 0 {
+                pendingStyleRefresh = true
+                #if DEBUG
+                coalescedStyleUpdates += 1
+                #endif
+                return
+            }
+            if let store { store.spectrumPreview.update(timeline: store.timeline, media: store.assets) }
             serial &+= 1
             if let store { tickets.forEach { store.spectrumPreview.cancel($0) } }
             tickets = []
@@ -133,11 +147,20 @@ final class PausedSpectrumOverlay {
             view.spectrumCanvas.addSublayer(layer)
         }
         CATransaction.commit()
+        if retainingStyleFrame {
+            styleRequestsRemaining = entries.count
+            pendingStyleRefresh = false
+            #if DEBUG
+            styleBatches += 1
+            #endif
+        }
         for entry in entries {
             let start = ProcessInfo.processInfo.systemUptime
             let ticket = store.spectrumPreview.request(spectrum: entry.id, frame: frame) { [weak self, weak item] outcome in
                 Task { @MainActor [weak self, weak item] in
-                    guard let self, self.serial == generation, let currentStore = self.store,
+                    guard let self else { return }
+                    defer { if retainingStyleFrame { self.finishedStyleRequest(serial: generation) } }
+                    guard self.serial == generation, let currentStore = self.store,
                           currentStore.spectrumPreview.epoch == epoch, currentStore.spectrumPreview.revision == revision else { return }
                     var accepted = outcome
                     if case .ready(_, .some) = outcome {
@@ -188,6 +211,17 @@ final class PausedSpectrumOverlay {
                 }
             }
             tickets.append(ticket)
+        }
+    }
+
+    private func finishedStyleRequest(serial completedSerial: Int) {
+        guard serial == completedSerial, styleRequestsRemaining > 0 else { return }
+        styleRequestsRemaining -= 1
+        if styleRequestsRemaining == 0, pendingStyleRefresh {
+            pendingStyleRefresh = false
+            // One completed batch, then the newest model snapshot. No timer or
+            // display-frame skipping; seek/project invalidation still cancels all.
+            refresh(retainingStyleFrame: true)
         }
     }
 

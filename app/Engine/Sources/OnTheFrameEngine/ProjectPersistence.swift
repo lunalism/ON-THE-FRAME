@@ -1,15 +1,15 @@
 import Foundation
 import Darwin
 
-/// Application persistence boundary. The legacy ProjectFile codec stays format 1–8;
-/// format 9 uses the validated model/adapter without enabling image rendering.
+/// Application persistence boundary: legacy 1–8, images 9, Spectrum reaction 10.
+/// Version admission does not enable rendering or public export.
 public enum ProjectPersistence {
-    public static let currentVersion = 9
+    public static let currentVersion = 10
     public enum Failure: Error, CustomStringConvertible {
         case futureVersion(Int), invalid(String), sourceChanged(UUID), beforeCommit(String)
         public var description: String {
             switch self {
-            case .futureVersion(let v): return "더 새로운 프로젝트 형식(\(v))입니다. 이 앱은 형식 9까지 엽니다."
+            case .futureVersion(let v): return "더 새로운 프로젝트 형식(\(v))입니다. 이 앱은 형식 \(ProjectPersistence.currentVersion)까지 엽니다."
             case .invalid(let s): return "프로젝트를 검증하지 못했습니다: \(s)"
             case .sourceChanged: return "이미지 원본이 저장된 참조와 다릅니다. 편집 구조는 유지했습니다. 명시적인 재연결이 필요합니다."
             case .beforeCommit(let s): return "프로젝트 파일을 교체하기 전에 저장이 중단됐습니다: \(s)"
@@ -30,7 +30,7 @@ public enum ProjectPersistence {
         public let version: Int
         fileprivate init(state: OperationalProjectAdapter.State, version: Int? = nil) {
             self.state = state
-            self.version = version ?? (state.timeline.stillImageIDs.isEmpty ? ProjectFile.version(for:state.timeline) : 9)
+            self.version = version ?? (!state.timeline.spectra.isEmpty ? 10 : (state.timeline.stillImageIDs.isEmpty ? ProjectFile.version(for:state.timeline) : 9))
         }
         public var timeline: Timeline { state.timeline }
         public var projectID: UUID { state.projectID }

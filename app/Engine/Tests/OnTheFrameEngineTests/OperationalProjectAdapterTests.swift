@@ -58,7 +58,7 @@ final class OperationalProjectAdapterTests: XCTestCase {
             XCTAssertNil(r.sourceFrames);XCTAssertNil(r.still?.descriptor)
             XCTAssertEqual(r.still?.validationState,.unverified)
         }
-        XCTAssertThrowsError(try ProjectFile.decode(data)) {XCTAssertEqual($0 as? ProjectFile.LoadError,.newerVersion(9))}
+        XCTAssertThrowsError(try ProjectFile.decode(data)) {XCTAssertEqual($0 as? ProjectFile.LoadError,.invalid("image-aware document requires ProjectPersistence"))}
         XCTAssertThrowsError(try ProjectFile.encode(after.timeline,projectID:after.projectID,settings:.m1,bookmarks:[:],projectURL:nil)) {XCTAssertTrue($0 is ProductionContent.Unsupported)}
         XCTAssertThrowsError(try CompositionPlanner.layerStack(after.timeline,lanes:[],from:0,to:1,media:[:],render:CGSize(width:1920,height:1080))) {XCTAssertTrue($0 is ProductionContent.Unsupported)}
     }

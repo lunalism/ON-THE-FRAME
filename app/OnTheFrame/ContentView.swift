@@ -860,7 +860,7 @@ struct AdjustmentsView: View {
                     AdjustSection(title: "소스") { SpectrumSourceAdjust(store: store, item: sp) }
                     SpectrumStyleAdjust(store: store, item: sp)
                         .id("\(sp.id)-\(store.projectSession)-\(store.spectrumSelectionRevision)")
-                    Text("타임라인에서 옮기거나 길이를 바꿔도 소리 클립은 그대로입니다. 모양은 적용을 눌러 반영하고 Delete로 지웁니다.")
+                    Text("타임라인에서 옮기거나 길이를 바꿔도 소리 클립은 그대로입니다. 모양과 반응 강도는 조정하면 반영됩니다. Delete로 지웁니다.")
                         .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else if let id = store.selection, let c = store.timeline.clip(id), let kind = store.timeline.lane(of: id) {
                     target(icon: kind == .video ? "film" : "waveform", title: store.mediaByID[c.mediaID]?.name ?? "클립",
@@ -915,6 +915,7 @@ struct SpectrumStyleDraft {
     var endX: String { didSet { editedPixels.insert("끝 X") } }
     var endY: String { didSet { editedPixels.insert("끝 Y") } }
     var height: String { didSet { editedPixels.insert("최대 높이") } }
+    var reaction: String
     var red: String, green: String, blue: String
     var thickness: String { didSet { editedPixels.insert("두께") } }
     var sides: SpectrumItemStyle.Sides
@@ -932,6 +933,7 @@ struct SpectrumStyleDraft {
         endX = pixels(style.endXMilli); endY = pixels(style.endYMilli)
         height = pixels(style.maxHeightMilli)
         thickness = pixels(style.thicknessMilli); sides = style.sides; mode = style.mode
+        reaction = String(style.reactionPercent)
         red = String(style.red); green = String(style.green); blue = String(style.blue)
     }
     struct Invalid: LocalizedError {
@@ -962,7 +964,13 @@ struct SpectrumStyleDraft {
             }
             return value
         }
+        let reactionText = reaction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard reactionText.range(of: #"^[0-9]{1,3}$"#, options: .regularExpression) != nil,
+              let percent = Int(reactionText), (0...200).contains(percent) else {
+            throw Invalid(message: "반응 강도: 0–200 사이 정수 %를 입력하세요.")
+        }
         var result = base
+        result.reactionPercent = percent
         result.startXMilli = try milli(startX, "시작 X", original: base.startXMilli, range: -10_000_000...10_000_000)
         result.startYMilli = try milli(startY, "시작 Y", original: base.startYMilli, range: -10_000_000...10_000_000)
         result.endXMilli = try milli(endX, "끝 X", original: base.endXMilli, range: -10_000_000...10_000_000)
@@ -1045,7 +1053,6 @@ struct SpectrumStyleAdjust: View {
     @State private var draft: SpectrumStyleDraft
     @State private var feedback: String?
     @State private var pickerActive = false
-    @State private var colorEventRevision: Int
     @State private var lastValidSwatch: Color
     @State private var positionExpanded = true
     @State private var appearanceExpanded = true
@@ -1053,7 +1060,6 @@ struct SpectrumStyleAdjust: View {
         self.store = store; self.item = item
         project = store.projectSession; selectionRevision = store.spectrumSelectionRevision
         _generation = State(initialValue: store.generation)
-        _colorEventRevision = State(initialValue: store.spectrumColorEventRevision)
         _draft = State(initialValue: SpectrumStyleDraft(item.style))
         _lastValidSwatch = State(initialValue: SpectrumPickerRGB.color((item.style.red, item.style.green, item.style.blue)))
     }
@@ -1067,11 +1073,12 @@ struct SpectrumStyleAdjust: View {
         store.gestureBase == nil && store.fileCommandsAvailable
     }
     private var pickerColor: Binding<Color> {
-        Binding(get: {
+        let eventRevision = store.spectrumColorEventRevision
+        return Binding(get: {
             SpectrumPickerRGB.channels(draft).map(SpectrumPickerRGB.color) ?? lastValidSwatch
         }, set: { color in
-            guard pickerContextIsCurrent, colorEventRevision == store.spectrumColorEventRevision,
-                  NSColorPanel.shared.isVisible, SpectrumPickerRGB.channels(draft) != nil else { return }
+            guard pickerContextIsCurrent, eventRevision == store.spectrumColorEventRevision,
+                  SpectrumPickerRGB.channels(draft) != nil else { return }
             guard let rgb = SpectrumPickerRGB.channels(color) else {
                 feedback = "색상을 sRGB로 변환하지 못했거나 유효하지 않은 성분입니다. 다른 색상을 선택하세요."
                 return
@@ -1116,7 +1123,7 @@ struct SpectrumStyleAdjust: View {
                             Double(store.timeline.spectrum(item.id)?.style.thicknessMilli ?? item.style.thicknessMilli) / 1000
                         }, set: { value in
                             draft.thickness = String(Int(value.rounded()))
-                            commitLive(kind: "slider")
+                            commitLive(kind: "thickness-slider")
                         }), in: 1...64, step: 1, onEditingChanged: { editing in
                             if editing { focusedPixel = nil; store.finishSpectrumLiveSession() }
                             else { store.finishSpectrumLiveSession() }
@@ -1131,6 +1138,8 @@ struct SpectrumStyleAdjust: View {
                         Text("방향은 시작점→끝점 기준선의 수직 방향 기준이며, 화면 위·아래와 다를 수 있습니다.")
                             .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         ColorPicker("색상", selection: pickerColor, supportsOpacity: false)
+                            .id(store.spectrumColorEventRevision)
+                            .onAppear { NSColorPanel.shared.isContinuous = true }
                             .disabled(SpectrumPickerRGB.channels(draft) == nil)
                         if SpectrumPickerRGB.channels(draft) == nil {
                             Text("RGB 입력을 0–255 정수로 완성하면 색상 선택기를 사용할 수 있습니다.")
@@ -1140,6 +1149,21 @@ struct SpectrumStyleAdjust: View {
                 }
             }
             .disclosureGroupStyle(SpectrumDisclosureStyle())
+            AdjustSection(title: "오디오 분석") {
+                field("반응 강도 (%)", $draft.reaction)
+                Slider(value: Binding(get: {
+                    Double(store.timeline.spectrum(item.id)?.style.reactionPercent ?? item.style.reactionPercent)
+                }, set: { value in
+                    draft.reaction = String(Int(value.rounded()))
+                    commitLive(kind: "reaction-slider")
+                }), in: 0...200, step: 1, onEditingChanged: { editing in
+                    if editing {
+                        focusedPixel = nil
+                    }
+                    store.finishSpectrumLiveSession()
+                })
+                .accessibilityLabel("스펙트럼 반응 강도")
+            }
             if let message = feedback ?? validation {
                 Text(message).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
@@ -1147,9 +1171,6 @@ struct SpectrumStyleAdjust: View {
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .disabled(store.gestureBase != nil || !store.fileCommandsAvailable)
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification, object: NSColorPanel.shared)) { _ in
-            if pickerContextIsCurrent { colorEventRevision = store.spectrumColorEventRevision }
-        }
         .onAppear { pickerActive = true }
         .onDisappear { pickerActive = false; store.finishSpectrumLiveSession() }
         .onChange(of: focusedPixel) { old, _ in if old != nil { commitLive(kind: "numeric") } }

@@ -505,3 +505,29 @@ final class SpectrumFrameCoordinatorTests: XCTestCase {
         XCTAssertEqual(c.diagnostics.sources, 1, "옛 위치의 원본은 놓음")
     }
 }
+
+extension SpectrumFrameCoordinatorTests {
+    func testReactionOnlyEditsReuseAnalysisAndPCM() async throws {
+        let (timeline, _, id, _) = try base()
+        let pcm = TonePCM(), coordinator = coordinator(pcm)
+        coordinator.update(timeline: timeline, media: [steady])
+        let first = await get(coordinator, id, 65)
+        let raw = try XCTUnwrap(Self.bands(first))
+        let analyses = coordinator.scheduler.statistics.analyses, decodes = pcm.decodes
+        let item = try XCTUnwrap(timeline.spectrum(id))
+        for percent in [0, 1, 50, 99, 100, 101, 150, 199, 200] {
+            var style = item.style; style.reactionPercent = percent
+            let edited = try timeline.settingSpectrumStyle(id, style)
+            XCTAssertEqual(edited.spectrumPieces(edited.spectra[0]), timeline.spectrumPieces(item))
+            XCTAssertEqual(edited.audioClips, timeline.audioClips)
+            XCTAssertEqual(style.analysisSettings, item.style.analysisSettings)
+            coordinator.update(timeline: edited, media: [steady])
+            let result = await get(coordinator, id, 65)
+            XCTAssertEqual(Self.bands(result), raw)
+            XCTAssertEqual(coordinator.scheduler.statistics.analyses, analyses)
+            XCTAssertEqual(pcm.decodes, decodes)
+            guard case let .ready(_, frame) = result else { return XCTFail(Self.name(result)) }
+            if percent == 0 { XCTAssertNil(frame) } else { XCTAssertNotNil(frame) }
+        }
+    }
+}

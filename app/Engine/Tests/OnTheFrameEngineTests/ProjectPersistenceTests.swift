@@ -70,7 +70,7 @@ final class ProjectPersistenceTests: XCTestCase {
         XCTAssertEqual(back.media[0].path,model.media[0].ref.path)
         XCTAssertThrowsError(try CompositionPlanner.layerStack(back.timeline,from:0,to:1,media:[:],render:CGSize(width:1920,height:1080)))
         var raw=try JSONSerialization.jsonObject(with:bytes) as! [String:Any]
-        raw["version"]=10
+        raw["version"]=11
         XCTAssertThrowsError(try ProjectPersistence.decode(JSONSerialization.data(withJSONObject:raw)))
         raw["version"]=9;raw["media"]=[]
         XCTAssertThrowsError(try ProjectPersistence.decode(JSONSerialization.data(withJSONObject:raw)))

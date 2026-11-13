@@ -284,3 +284,42 @@ final class SpectrumFrameRendererTests: XCTestCase {
         return kr == KERN_SUCCESS ? Double(info.phys_footprint) / 1_048_576 : -1
     }
 }
+
+extension SpectrumFrameRendererTests {
+    func testReactionMappingMatchesExistingGeometry() throws {
+        let renderer = try SpectrumFrameRenderer(width: 1920, height: 1080)
+        let reference = try SpectrumCanvas(width: 1920, height: 1080)
+        let input: [Float] = [0, 0.1, 0.25, 0.5, 0.8, 1]
+        for mode in Self.modes { for sides in Self.sides {
+            for percent in [0, 1, 50, 99, 100, 101, 150, 199, 200] {
+                var st = style(mode, sides, bands: input.count)
+                st.reactionPercent = percent
+                let strength = Float(percent) / 100
+                let expectedBands = input.map { min(1, max(0, $0 * strength)) }
+                let actual = try renderer.render(bands: input, style: st)
+                let expected = try reference.render(expectedBands, style: st.renderStyle)
+                XCTAssertNil(Self.difference(actual, expected), "\(mode)/\(sides)/\(percent)%")
+                if let actual, let expected { XCTAssertEqual(Self.paintedOutside(actual, bounds: expected.bounds), 0) }
+                let zero = [Float](repeating: 0, count: input.count)
+                XCTAssertNil(Self.difference(try renderer.render(bands: zero, style: st),
+                                             try reference.render(zero, style: st.renderStyle)))
+            }
+        } }
+    }
+    func testReactionRejectsInvalidInputBeforeClipping() throws {
+        let renderer = try SpectrumFrameRenderer(width: 1920, height: 1080)
+        var st = style(.digital, .above, bands: 1)
+        for percent in [0, 100, 200] {
+            st.reactionPercent = percent
+            let invalid: [Float] = [.nan, .infinity, -.infinity, -0.1, 1.1]
+            for value in invalid {
+                XCTAssertThrowsError(try renderer.render(bands: [value], style: st))
+            }
+            XCTAssertThrowsError(try renderer.render(bands: [], style: st))
+        }
+        for percent in [-1, 201] {
+            st.reactionPercent = percent
+            XCTAssertThrowsError(try renderer.render(bands: [0.5], style: st))
+        }
+    }
+}

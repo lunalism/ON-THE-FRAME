@@ -1,5 +1,23 @@
 # 인계 요약 — ON THE FRAME
 
+**SP-6D-03 · Format 10 / 반응 강도 개발 체크포인트 준비 (2026-11-13).** `feature/subtitles`, HEAD/upstream/live remote `8c4e12f8779802b6d53fea5d00f8136478a01bb9`; main `44943eadabdf5a37d5242d614e7279813126dfde`. 제품·직접 시험16파일 + ROADMAP/HANDOFF 총 **18파일** 후보, 빈 index, 별도 소유자 게시 승인 대기다. 아래 SP-5D와 이전 대기는 당시 역사 기록이다. [상세 구현·증거·한계](ROADMAP.md).
+
+보존 범위: (A) Int0…200 reactionPercent·legacy100·형식10·엄격한 wire 검증/혼합 이미지/temporal projection, (B) 공유 renderer 강도 변환·Inspector 숫자/정수 slider·pause-for-edit/history/선택·session 보호, (C) ColorPicker revision/continuous 회귀 수정·기존 P3 clipping/alpha 보호, (D) 기존65검사를 유지하는 Debug async Scenario 분해. (E) SP-6C-02 pending-latest 병합·confirmed paused layer 유지·stale/cancellation 검사는 **잠정 유지**, smoothness 해결 아님. SP-6C-09는 임시 native profiling과 SP-6C-07 Timeline 표시 생략 실험을 제거하고 원시 실패 기록·정당한 diagnostics를 보존했다.
+
+기존 실행: SP-6B-03 **55/55 PASS**(당시 앱 빌드 RSS중지 -15 별개), SP-6B-07 signed Debug PASS, SP-6C-01 **엔진15·live723 PASS**, SP-6C-09 **엔진79·live732·Timeline57 PASS**, 단일 Debug/strict 서명 PASS. 중복 수치를 독립 coverage로 합산하지 않는다. live의 Preview/document/notification 일부는 대역이다. 최초 Timeline offscreen needsDisplay 단언 exit -5와 별도 owner 승인 수정 진단57 PASS 이력을 함께 보존한다. 이번 작업에서 재실행하지 않았다.
+
+SP-6D-01: owner가 새 `app/selftest-work/sp5a06-owner-manual-20261112/fixture-sp6d01-20261113-01.ontheframe`에서 100→150·저장·닫기·재열기, Preview/미디어·미수정·Undo 비활성을 확인했다. 파일은 **형식8→10·정수150 외 의미상 차이 없음**, 두께3.125·alpha192·ID/계보·bookmark/자막 보존. SHA-256 `c728633036bcbc0771eaeb0204578b7f946591730bf840c359e3753dea660d49`.
+
+SP-6D-02: 형식9 생성 fixture를 새 `app/selftest-work/sp3c239/replay/mixed/fixture-sp6d02-20261113-01.ontheframe`으로 복사했다. 원본 SHA-256 `928aa83e48249b103bda93e9cd5730f39f60b9850a7f48f13b58e5644c079481`. 초기 bookmark 누락으로 owner가 영상/WAV/JPEG를 재연결했고 기존 **-OTFEnableImageImport 내부 Debug 인자**가 필요했다. 준비 저장은 bookmark3개·영상/WAV 실제 modifiedNs·형식10/기본100을 기록했다(준비 SHA `e3a76fc0c75db95e817a2ceba59629b2daa95a39d63693e02dba8ad4437da769`). 이후 **150만 변경**한 저장 SHA `9cc4ee640214cfc53b1ed6d795abdbb1b30a6cf00749fd686cf4df1dce2eeed1`; 이미지 descriptor·ID/계보·bookmark·자막·기타 style 유지. owner save/reopen 후 이미지/영상/소리/Spectrum·150·미수정·재연결 불필요 PASS. 이 fixture는 두께3·alpha255이며 분수 수동 근거는 SP-6D-01이다. 일반 공개 이미지 지원/공개 Spectrum export 승인이 아니다.
+
+**미해결: 두께·반응 slider native stutter owner FAIL.** tracking 중 main queue 지연과 SwiftUI/AppKit layout은 관측했지만 원인은 미확정이다. 합성 개선을 native PASS로 바꾸지 않는다. Timeline 생략은 실제 생략에도 FAIL이 유지됐고 truncation/서로 다른 gesture 때문에 개선률을 비교할 수 없어 제거했다. 별도 bounded Preview 작업에서 조건 고정·완전한 trace·최종 값/빈화면/history 보호·소유자 실제 부드러움을 확인한다. 근거 없는 FPS/ms 합격선을 만들지 않는다.
+
+남은 한계: native old-app 형식10 거부 DEFERRED(frozen admission 자동 시험만 PASS), 전체 ColorPicker lifecycle, 전체 Preview/export·물리 화면/오디오 parity, Release readiness, 역사적 SP-4B 108.33ms model gap·약172.31ms first-image 관측. 공개 Spectrum export는 gate 뒤다. **SP-6 전체 완료가 아니다.** 다음은 18파일 게시 별도 승인 → 독립 Preview 성능 작업 범위 승인이다.
+
+읽기 관측: Debug PID15862, 새 혼합 사본 열림·편집됨 표시 없음. 앱을 실행/종료/편집/저장하지 않았다. 원본·SP-6D-01/02 증거·시험 파일·미디어·recovery ref3개를 보존한다. 제외5개는 `.DS_Store`, `.claude/settings.json`, `app/.DS_Store`, `design/.DS_Store`, `app/diagnostics/spectrum-style-edit-check.py`이며 fixture·빌드·로그·raw evidence도 제외한다. 이번 수정은 두 문서뿐이며 staging/commit/push하지 않았다.
+
+---
+
 **SP-5D-10 · Live Spectrum Inspector / 7파일 커밋 승인 준비.** `feature/subtitles`, HEAD/upstream/live remote `3573c5520879093282d6f4a86bfe383f2d61f73f`. 후보는 ContentView.swift·ProjectStore.swift·SubtitleUI.swift·KeyRouting.swift·PausedSpectrumOverlay.swift·ROADMAP.md·HANDOFF.md다. index는 비워 두고 별도 게시 승인을 기다린다. 아래 SP-5C-11 대기는 당시 기록이며 현재 HEAD로 게시됐다. [상세 구현·검증·한계](ROADMAP.md).
 
 구현: 새 픽셀 정수 입력·untouched legacy 소수 정밀도 보존·변환 버튼 제거, 두께 1–64 정수 slider, RGB 숫자/Apply/Cancel 없는 Spectrum live 편집이다. 숫자는 Return/포커스 이탈, 방향/mode는 즉시, slider/color는 유효 변경마다 Preview 갱신한다. slider 한 드래그=한 Undo, color는 패널 닫힘/키 포커스 이탈·다른 편집/선택/Undo/저장 경계=한 세션이다(timer 없음, native drag 종료 추정 아님). 기존 그룹·전체 헤더·8pt 간격·P3 clipping·alpha/숨은 스타일·ID/계보·형식 8을 유지한다.

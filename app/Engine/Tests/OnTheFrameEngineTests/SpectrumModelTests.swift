@@ -219,7 +219,7 @@ final class SpectrumModelTests: XCTestCase {
         XCTAssertEqual(t.spectrumSourceState(s), .ok); XCTAssertEqual(t.spectrumExportBlockers(), [])
         XCTAssertEqual(try t1.addingSpectrum(fromAudioClip: r, newLaneName: "SP").spectra[0].sourceKey, w, "조각에서 만들어도 같은 소스")
         let (back, doc) = try ProjectFile.decode(try ProjectFile.encode(t, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil))
-        XCTAssertEqual(doc.version, 8); XCTAssertEqual(back, t)
+        XCTAssertEqual(doc.version, 10); XCTAssertEqual(back, t)
         let bs = back.spectrum(s.id)!
         XCTAssertEqual(bs.sourceKey, w); XCTAssertEqual(back.spectrumSourceState(bs), .ok)
         XCTAssertEqual(back.spectrumSource(key: w)!.pieces.map(\.id), [l, r])
@@ -258,7 +258,7 @@ final class SpectrumModelTests: XCTestCase {
         let data = try ProjectFile.encode(edited, projectID: id, settings: .m1, bookmarks: [:], projectURL: nil)
         let restored = try ProjectFile.decode(data)
         XCTAssertEqual(restored.timeline, edited)
-        XCTAssertEqual(restored.document.version, 8)
+        XCTAssertEqual(restored.document.version, 10)
         XCTAssertEqual(try ProjectFile.encode(restored.timeline, projectID: id, settings: .m1,
                                              bookmarks: [:], projectURL: nil), data)
     }
@@ -291,7 +291,7 @@ final class SpectrumModelTests: XCTestCase {
                     let data = try ProjectFile.encode(edited, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)
                     let restored = try ProjectFile.decode(data)
                     XCTAssertEqual(restored.timeline, edited)
-                    XCTAssertEqual(restored.document.version, 8)
+                    XCTAssertEqual(restored.document.version, 10)
                 }
             }
         }
@@ -554,10 +554,10 @@ final class SpectrumModelTests: XCTestCase {
         XCTAssertTrue(split.audioClips.filter { $0.mediaID == wav.id }.allSatisfy { $0.lineageKey == w })
         var style = SpectrumItemStyle.provisionalDefault; style.mode = .analog; style.sides = .above; style.bands = 48; style.offsetMs = -20
         let withSpec = try split.addingSpectrum(lane: sl, at: 5, length: 70, sourceKey: w, style: style)
-        XCTAssertEqual(ProjectFile.version(for: withSpec), 8)
+        XCTAssertEqual(ProjectFile.version(for: withSpec), 10)
         let d1 = try ProjectFile.encode(withSpec, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)
         let r1 = try ProjectFile.decode(d1)
-        XCTAssertEqual(r1.document.version, 8); XCTAssertEqual(r1.timeline, withSpec)
+        XCTAssertEqual(r1.document.version, 10); XCTAssertEqual(r1.timeline, withSpec)
         // 스펙트럼 레인만(스펙트럼 0개)도 형식 8
         XCTAssertEqual(ProjectFile.version(for: t1), 8)
         // 스펙트럼 레인을 지워도 계보가 남아 있으면 형식 8 그대로(버리지 않음), 왕복 같음
@@ -580,7 +580,7 @@ final class SpectrumModelTests: XCTestCase {
             var a = j["audioClips"] as! [[String: Any]]; a[0]["origin"] = UUID().uuidString; j["audioClips"] = a
         }
         XCTAssertThrowsError(try ProjectFile.decode(injected)) { e in guard case .invalid = e as? ProjectFile.LoadError else { return XCTFail("\(e)") } }
-        XCTAssertThrowsError(try ProjectFile.decode(mutated(d1) { $0["version"] = 9 })) { XCTAssertEqual($0 as? ProjectFile.LoadError, .newerVersion(9)) }
+        XCTAssertThrowsError(try ProjectFile.decode(mutated(d1) { $0["version"] = 11 })) { XCTAssertEqual($0 as? ProjectFile.LoadError, .newerVersion(11)) }
         // 형식 8 안의 잘못된 값: 스펙트럼 모양, 영상 클립 계보, 스펙트럼이 다른 종류 레인에
         XCTAssertThrowsError(try ProjectFile.decode(mutated(d1) { j in
             var s = j["spectra"] as! [[String: Any]]; var st = s[0]["style"] as! [String: Any]; st["thicknessMilli"] = 0; s[0]["style"] = st; j["spectra"] = s

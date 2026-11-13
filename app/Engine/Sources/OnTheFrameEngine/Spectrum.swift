@@ -13,10 +13,11 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
     public var startXMilli: Int, startYMilli: Int, endXMilli: Int, endYMilli: Int
     public var maxHeightMilli: Int, thicknessMilli: Int
     public var red: Int, green: Int, blue: Int, alpha: Int
+    public var reactionPercent: Int
     public var bands: Int, lowHz: Int, highHz: Int, windowMs: Int, offsetMs: Int, floorDB: Int
     public init(mode: Mode, sides: Sides, startXMilli: Int, startYMilli: Int, endXMilli: Int, endYMilli: Int, maxHeightMilli: Int, thicknessMilli: Int,
-                red: Int, green: Int, blue: Int, alpha: Int, bands: Int, lowHz: Int, highHz: Int, windowMs: Int, offsetMs: Int, floorDB: Int) {
-        self.mode = mode; self.sides = sides
+                red: Int, green: Int, blue: Int, alpha: Int, bands: Int, lowHz: Int, highHz: Int, windowMs: Int, offsetMs: Int, floorDB: Int, reactionPercent: Int = 100) {
+        self.mode = mode; self.sides = sides; self.reactionPercent = reactionPercent
         self.startXMilli = startXMilli; self.startYMilli = startYMilli; self.endXMilli = endXMilli; self.endYMilli = endYMilli
         self.maxHeightMilli = maxHeightMilli; self.thicknessMilli = thicknessMilli
         self.red = red; self.green = green; self.blue = blue; self.alpha = alpha
@@ -29,6 +30,7 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
                                                               bands: 64, lowHz: 20, highHz: 2000, windowMs: 90, offsetMs: 0, floorDB: -60)
     /// 분석 표본율(엔진 분석 기본 48 kHz)에서 쓸 수 있는가
     public var isValid: Bool {
+        guard (0...200).contains(reactionPercent) else { return false }
         guard [red, green, blue, alpha].allSatisfy({ (0...255).contains($0) }) else { return false }
         guard renderStyle.validationError() == nil else { return false }
         return analysisSettings.validationError(rate: 48_000) == nil

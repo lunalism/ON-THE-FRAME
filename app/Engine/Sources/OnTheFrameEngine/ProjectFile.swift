@@ -26,7 +26,10 @@ public enum ProjectFile {
     /// 소리를 자른 보통 프로젝트도 형식 8이고, 형식 7까지만 읽는 이전 앱은 그 파일을 "더 새 버전"으로 열지 않는다. 계보도 스펙트럼도 없으면 지금처럼 7/6/5.
     /// 형식 7 이하에 스펙트럼 레인·`spectra`·`origin`이 있으면 잘못된 파일로 거부한다(형식 7을 읽는 이전 빌드는 모르는 키를 버린 채 다시 저장할 수 있으므로
     /// 그 값들은 형식 8에만 둔다). 이전 파일의 조각 사이 계보는 추측해 만들지 않는다(소유자 결정 2026-10-25).
-    public static let currentVersion = 8
+    /// Format 10: actual Spectrum items persist an explicit reactionPercent.
+    /// Empty Spectrum lanes / lineage retain format 8; images use the image-aware codec.
+    public static let currentVersion = 10
+    public static let reactionVersion = 10
     public static let spectrumVersion = 8
     /// 켜진 자막 효과(외곽선·그림자·배경)가 있을 때의 형식(2026-10-23, D-040)
     public static let subtitleEffectsVersion = 7
@@ -65,6 +68,7 @@ public enum ProjectFile {
     /// 꺼진 효과의 설정 값(enabled = false)은 형식 6에도 그대로 적는다 — 형식 6을 읽는 이전 빌드는 모르는 키를 무시하고(효과 없음),
     /// 이 빌드는 다시 읽어 설정을 되살린다. 이전 빌드가 그 파일을 다시 저장하면 꺼진 설정 값은 없어진다(효과가 꺼져 있으므로 그림은 같다).
     public static func version(for t: Timeline) -> Int {
+        if !t.spectra.isEmpty { return reactionVersion }
         if t.needsSpectrumFormat || t.audioClips.contains(where: { $0.origin != nil }) { return spectrumVersion }
         if t.subtitles.contains(where: { $0.style.hasEnabledEffects }) { return subtitleEffectsVersion }
         return t.needsSubtitleFormat ? subtitleVersion : subtitleFreeVersion
@@ -121,9 +125,15 @@ public enum ProjectFile {
         guard h.format == format else { throw LoadError.notAProject }
         guard let v = h.version else { throw LoadError.malformed("version 없음") }
         if v > currentVersion { throw LoadError.newerVersion(v) }
+        if v == 9 { throw LoadError.unsupportedVersion(v) }
         guard v >= oldestReadableVersion else { throw LoadError.unsupportedVersion(v) }
+        if let raw = try JSONSerialization.jsonObject(with: data) as? [String:Any],
+           let entries = raw["media"] as? [[String:Any]],
+           entries.contains(where: { let ref = $0["ref"] as? [String:Any]; return ref?["kind"] != nil || ref?["image"] != nil }) {
+            throw LoadError.invalid("image-aware document requires ProjectPersistence")
+        }
         let doc: Document
-        do { doc = try dec.decode(Document.self, from: data) } catch let e as DecodingError { throw LoadError.malformed(describe(e)) }
+        do { doc = try dec.decode(Document.self, from: reactionDocument(data, version: v)) } catch let e as DecodingError { throw LoadError.malformed(describe(e)) }
         // 렌더 설정: 1920×1080 30 fps만
         guard doc.settings == Settings(width: supported.width, height: supported.height, fps: Int(supported.fps)) else {
             throw LoadError.invalid("지원하지 않는 렌더 설정 \(doc.settings.width)×\(doc.settings.height) \(doc.settings.fps) fps")
@@ -204,5 +214,50 @@ public enum ProjectFile {
         case .typeMismatch(_, let c), .valueNotFound(_, let c), .dataCorrupted(let c): return c.codingPath.map(\.stringValue).joined(separator: ".") + " 값 오류"
         @unknown default: return "알 수 없는 오류"
         }
+    }
+}
+
+extension ProjectFile {
+    /// Version-aware wire validation. Legacy defaults are injected only after rejecting
+    /// contradictory fields. This creates temporary bytes; it never writes a source file.
+    static func reactionDocument(_ data: Data, version: Int) throws -> Data {
+        guard var raw = try JSONSerialization.jsonObject(with: data) as? [String:Any] else {
+            throw LoadError.malformed("document object")
+        }
+        // JSONDecoder accepts e.g. 100.0 as Int. Check original JSON tokens so the
+        // new field's wire contract is an integer, including escaped JSON key names.
+        let text = String(decoding: data, as: UTF8.self)
+        let expression = try NSRegularExpression(pattern: #""(?:[^"\\]|\\.)*"|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null|[{}\[\]:,]"#)
+        let ns = text as NSString
+        let tokens = expression.matches(in: text, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range) }
+        var count = 0
+        for i in tokens.indices where tokens[i].hasPrefix("\"") && i + 2 < tokens.count && tokens[i + 1] == ":" {
+            guard (try? JSONDecoder().decode(String.self, from: Data(tokens[i].utf8))) == "reactionPercent" else { continue }
+            guard version == reactionVersion else { throw LoadError.invalid("reactionPercent requires format 10") }
+            let token = tokens[i + 2]
+            guard token.range(of: #"^(0|[1-9][0-9]*)$"#, options: .regularExpression) != nil,
+                  let value = Int(token), (0...200).contains(value) else {
+                throw LoadError.invalid("reactionPercent must be an integer in 0...200")
+            }
+            count += 1
+        }
+        var spectra = raw["spectra"] as? [[String:Any]] ?? []
+        if version == reactionVersion {
+            try StillImageProjectCodec.validateSchema(raw, version: version)
+            guard count == spectra.count else { throw LoadError.invalid("required reactionPercent / duplicate field") }
+            for spectrum in spectra {
+                guard let style = spectrum["style"] as? [String:Any], style["reactionPercent"] != nil else {
+                    throw LoadError.invalid("missing reactionPercent")
+                }
+            }
+            return data
+        }
+        for i in spectra.indices {
+            guard var style = spectra[i]["style"] as? [String:Any] else { throw LoadError.invalid("spectrum style") }
+            style["reactionPercent"] = 100
+            spectra[i]["style"] = style
+        }
+        if raw["spectra"] is [[String:Any]] { raw["spectra"] = spectra }
+        return try JSONSerialization.data(withJSONObject: raw, options: [.sortedKeys])
     }
 }
