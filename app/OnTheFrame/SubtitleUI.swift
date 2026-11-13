@@ -63,6 +63,7 @@ extension ProjectStore {
     /// 진행 중인 글 편집·색 조정을 지금 값으로 확정한다(재생·탐색·도구 바꿈·다른 편집·저장·내보내기·프로젝트 교체·닫기 앞).
     /// 편집 칸이 있으면 그 칸이 글자를 읽어 끝내고(조합 중 글자 포함), 없으면 그대로 둔다.
     func commitInlineEditIfAny() {
+        finishSpectrumLiveSession()
         finishColorSession()
         if let f = panelTextCommit { panelTextCommit = nil; f() }   // 정보 패널 글 칸
         guard inlineEdit != nil, !inlineFinishing else { return }

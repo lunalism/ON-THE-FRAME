@@ -859,7 +859,7 @@ struct AdjustmentsView: View {
                            subtitle: "스펙트럼 · \(laneText(sp.lane)) · \(store.settings.timecode(sp.start))–\(store.settings.timecode(sp.end))")
                     AdjustSection(title: "소스") { SpectrumSourceAdjust(store: store, item: sp) }
                     SpectrumStyleAdjust(store: store, item: sp)
-                        .id("\(sp.id)-\(store.projectSession)-\(store.spectrumSelectionRevision)-\(store.generation)")
+                        .id("\(sp.id)-\(store.projectSession)-\(store.spectrumSelectionRevision)")
                     Text("타임라인에서 옮기거나 길이를 바꿔도 소리 클립은 그대로입니다. 모양은 적용을 눌러 반영하고 Delete로 지웁니다.")
                         .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else if let id = store.selection, let c = store.timeline.clip(id), let kind = store.timeline.lane(of: id) {
@@ -910,17 +910,24 @@ struct AdjustmentsView: View {
 
 // SP-5A-02: local text only until Apply. Decimal parsing avoids binary rounding of milli-pixels.
 struct SpectrumStyleDraft {
-    var startX: String, startY: String, endX: String, endY: String, height: String
+    var startX: String { didSet { editedPixels.insert("시작 X") } }
+    var startY: String { didSet { editedPixels.insert("시작 Y") } }
+    var endX: String { didSet { editedPixels.insert("끝 X") } }
+    var endY: String { didSet { editedPixels.insert("끝 Y") } }
+    var height: String { didSet { editedPixels.insert("최대 높이") } }
     var red: String, green: String, blue: String
-    var thickness: String
+    var thickness: String { didSet { editedPixels.insert("두께") } }
     var sides: SpectrumItemStyle.Sides
     var mode: SpectrumItemStyle.Mode
+    private(set) var editedPixels: Set<String> = []
+    static func pixels(_ value: Int) -> String {
+        if value % 1000 == 0 { return String(value / 1000) }
+        let magnitude = value.magnitude
+        let fraction = String(format: "%03llu", UInt64(magnitude % 1000))
+        return "\(value < 0 ? "-" : "")\(magnitude / 1000).\(fraction)"
+    }
     init(_ style: SpectrumItemStyle) {
-        func pixels(_ value: Int) -> String {
-            let magnitude = value.magnitude
-            let fraction = String(format: "%03llu", UInt64(magnitude % 1000))
-            return "\(value < 0 ? "-" : "")\(magnitude / 1000).\(fraction)"
-        }
+        let pixels = Self.pixels
         startX = pixels(style.startXMilli); startY = pixels(style.startYMilli)
         endX = pixels(style.endXMilli); endY = pixels(style.endYMilli)
         height = pixels(style.maxHeightMilli)
@@ -932,17 +939,18 @@ struct SpectrumStyleDraft {
         var errorDescription: String? { message }
     }
     func style(from base: SpectrumItemStyle) throws -> SpectrumItemStyle {
-        func milli(_ text: String, _ label: String, range: ClosedRange<Int>) throws -> Int {
+        func milli(_ text: String, _ label: String, original: Int, range: ClosedRange<Int>) throws -> Int {
+            // Selecting a clip does not count as editing; typed legacy decimals are still rejected.
+            if original % 1000 != 0 && !editedPixels.contains(label) { return original }
             let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard text.count <= 32,
-                  text.range(of: #"^[+-]?(?:[0-9]+(?:\.[0-9]{0,3})?|\.[0-9]{1,3})$"#, options: .regularExpression) != nil,
-                  let decimal = Decimal(string: text, locale: Locale(identifier: "en_US_POSIX")) else {
-                throw Invalid(message: "\(label): 유한한 숫자를 소수점 이하 최대 3자리로 입력하세요. 예: 192.125")
+            guard text.count <= 20,
+                  text.range(of: #"^[+-]?[0-9]+$"#, options: .regularExpression) != nil,
+                  let integer = Int(text) else {
+                throw Invalid(message: "\(label): 소수점 없이 정수 px를 입력하세요.")
             }
-            let scaled = decimal * 1000
-            guard scaled >= Decimal(range.lowerBound), scaled <= Decimal(range.upperBound),
-                  let value = Int(exactly: NSDecimalNumber(decimal: scaled).int64Value) else {
-                throw Invalid(message: "\(label): \(Double(range.lowerBound) / 1000)–\(Double(range.upperBound) / 1000) px 범위로 입력하세요.")
+            let (value, overflow) = integer.multipliedReportingOverflow(by: 1000)
+            guard !overflow, range.contains(value) else {
+                throw Invalid(message: "\(label): \(Double(range.lowerBound) / 1000)–\(Double(range.upperBound) / 1000) px 범위의 정수를 입력하세요.")
             }
             return value
         }
@@ -955,12 +963,12 @@ struct SpectrumStyleDraft {
             return value
         }
         var result = base
-        result.startXMilli = try milli(startX, "시작 X", range: -10_000_000...10_000_000)
-        result.startYMilli = try milli(startY, "시작 Y", range: -10_000_000...10_000_000)
-        result.endXMilli = try milli(endX, "끝 X", range: -10_000_000...10_000_000)
-        result.endYMilli = try milli(endY, "끝 Y", range: -10_000_000...10_000_000)
-        result.maxHeightMilli = try milli(height, "최대 높이", range: 0...1_080_000)
-        result.thicknessMilli = try milli(thickness, "두께", range: 500...64_000)
+        result.startXMilli = try milli(startX, "시작 X", original: base.startXMilli, range: -10_000_000...10_000_000)
+        result.startYMilli = try milli(startY, "시작 Y", original: base.startYMilli, range: -10_000_000...10_000_000)
+        result.endXMilli = try milli(endX, "끝 X", original: base.endXMilli, range: -10_000_000...10_000_000)
+        result.endYMilli = try milli(endY, "끝 Y", original: base.endYMilli, range: -10_000_000...10_000_000)
+        result.maxHeightMilli = try milli(height, "최대 높이", original: base.maxHeightMilli, range: 0...1_080_000)
+        result.thicknessMilli = try milli(thickness, "두께", original: base.thicknessMilli, range: 500...64_000)
         result.sides = sides; result.mode = mode
         result.red = try color(red, "빨강"); result.green = try color(green, "초록"); result.blue = try color(blue, "파랑")
         guard hypot(Double(result.endXMilli - result.startXMilli), Double(result.endYMilli - result.startYMilli)) >= 1000 else {
@@ -1031,16 +1039,21 @@ private struct SpectrumDisclosureStyle: DisclosureGroupStyle {
 struct SpectrumStyleAdjust: View {
     @Bindable var store: ProjectStore
     let item: SpectrumItem
-    let project: Int, selectionRevision: Int, generation: Int
+    let project: Int, selectionRevision: Int
+    @State private var generation: Int
+    @FocusState private var focusedPixel: String?
     @State private var draft: SpectrumStyleDraft
     @State private var feedback: String?
     @State private var pickerActive = false
+    @State private var colorEventRevision: Int
     @State private var lastValidSwatch: Color
     @State private var positionExpanded = true
     @State private var appearanceExpanded = true
     init(store: ProjectStore, item: SpectrumItem) {
         self.store = store; self.item = item
-        project = store.projectSession; selectionRevision = store.spectrumSelectionRevision; generation = store.generation
+        project = store.projectSession; selectionRevision = store.spectrumSelectionRevision
+        _generation = State(initialValue: store.generation)
+        _colorEventRevision = State(initialValue: store.spectrumColorEventRevision)
         _draft = State(initialValue: SpectrumStyleDraft(item.style))
         _lastValidSwatch = State(initialValue: SpectrumPickerRGB.color((item.style.red, item.style.green, item.style.blue)))
     }
@@ -1051,28 +1064,40 @@ struct SpectrumStyleAdjust: View {
     private var pickerContextIsCurrent: Bool {
         pickerActive && store.projectSession == project && store.selection == item.id &&
         store.spectrumSelectionRevision == selectionRevision && store.generation == generation &&
-        store.timeline.spectrum(item.id)?.style == item.style &&
         store.gestureBase == nil && store.fileCommandsAvailable
     }
     private var pickerColor: Binding<Color> {
         Binding(get: {
             SpectrumPickerRGB.channels(draft).map(SpectrumPickerRGB.color) ?? lastValidSwatch
         }, set: { color in
-            guard pickerContextIsCurrent, SpectrumPickerRGB.channels(draft) != nil else { return }
+            guard pickerContextIsCurrent, colorEventRevision == store.spectrumColorEventRevision,
+                  NSColorPanel.shared.isVisible, SpectrumPickerRGB.channels(draft) != nil else { return }
             guard let rgb = SpectrumPickerRGB.channels(color) else {
                 feedback = "색상을 sRGB로 변환하지 못했거나 유효하지 않은 성분입니다. 다른 색상을 선택하세요."
                 return
             }
             draft.red = String(rgb.0); draft.green = String(rgb.1); draft.blue = String(rgb.2)
             feedback = nil
+            commitLive(kind: "color")
         })
+    }
+    private func commitLive(kind: String) {
+        guard pickerContextIsCurrent, let current = store.timeline.spectrum(item.id) else { return }
+        do {
+            let style = try draft.style(from: current.style)
+            if store.updateSpectrumLiveStyle(item.id, style: style, project: project, revision: selectionRevision, expectedGeneration: generation, kind: kind) {
+                generation = store.generation
+                draft = SpectrumStyleDraft(store.timeline.spectrum(item.id)!.style)
+                feedback = nil
+            }
+        } catch { feedback = error.localizedDescription }
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             AdjustSection(title: "스타일") {
                 DisclosureGroup("위치 및 크기", isExpanded: $positionExpanded) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("1920×1080 기준 px · 왼쪽 위가 원점 · 소수점 3자리까지")
+                        Text("1920×1080 기준 정수 px · 왼쪽 위가 원점")
                             .font(.caption2).foregroundStyle(.secondary)
                         field("시작 X", $draft.startX); field("시작 Y", $draft.startY)
                         field("끝 X", $draft.endX); field("끝 Y", $draft.endY)
@@ -1087,6 +1112,17 @@ struct SpectrumStyleAdjust: View {
                             Text("Analog").tag(SpectrumItemStyle.Mode.analog)
                         }
                         field("두께", $draft.thickness)
+                        Slider(value: Binding(get: {
+                            Double(store.timeline.spectrum(item.id)?.style.thicknessMilli ?? item.style.thicknessMilli) / 1000
+                        }, set: { value in
+                            draft.thickness = String(Int(value.rounded()))
+                            commitLive(kind: "slider")
+                        }), in: 1...64, step: 1, onEditingChanged: { editing in
+                            if editing { focusedPixel = nil; store.finishSpectrumLiveSession() }
+                            else { store.finishSpectrumLiveSession() }
+                        })
+                        .accessibilityLabel("스펙트럼 두께")
+                        .padding(.bottom, 8)
                         Picker("표시 방향", selection: $draft.sides) {
                             Text("위쪽 (above)").tag(SpectrumItemStyle.Sides.above)
                             Text("양쪽 (mirrored)").tag(SpectrumItemStyle.Sides.mirrored)
@@ -1094,7 +1130,6 @@ struct SpectrumStyleAdjust: View {
                         }
                         Text("방향은 시작점→끝점 기준선의 수직 방향 기준이며, 화면 위·아래와 다를 수 있습니다.")
                             .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        field("빨강", $draft.red); field("초록", $draft.green); field("파랑", $draft.blue)
                         ColorPicker("색상", selection: pickerColor, supportsOpacity: false)
                             .disabled(SpectrumPickerRGB.channels(draft) == nil)
                         if SpectrumPickerRGB.channels(draft) == nil {
@@ -1108,22 +1143,23 @@ struct SpectrumStyleAdjust: View {
             if let message = feedback ?? validation {
                 Text(message).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
-            HStack {
-                Button("적용") {
-                    do {
-                        let style = try draft.style(from: item.style)
-                        feedback = store.setSpectrumStyle(item.id, style: style, from: item.style,
-                            project: project, selectionRevision: selectionRevision, generation: generation)
-                    } catch { feedback = error.localizedDescription }
-                }.disabled(validation != nil)
-                Button("취소") { draft = SpectrumStyleDraft(item.style); feedback = nil }
-            }
-            Text("입력만으로는 바뀌지 않습니다. 적용하면 재생을 멈추고 한 번에 반영합니다.")
-                .font(.caption2).foregroundStyle(.secondary)
+            Text("숫자는 Return 또는 입력란을 떠날 때 반영됩니다. 슬라이더는 한 번의 드래그, 색상은 패널 닫힘·다른 편집 전까지 한 단계로 묶습니다.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .disabled(store.gestureBase != nil || !store.fileCommandsAvailable)
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification, object: NSColorPanel.shared)) { _ in
+            if pickerContextIsCurrent { colorEventRevision = store.spectrumColorEventRevision }
+        }
         .onAppear { pickerActive = true }
-        .onDisappear { pickerActive = false }
+        .onDisappear { pickerActive = false; store.finishSpectrumLiveSession() }
+        .onChange(of: focusedPixel) { old, _ in if old != nil { commitLive(kind: "numeric") } }
+        .onChange(of: draft.sides) { _, _ in commitLive(kind: "discrete") }
+        .onChange(of: draft.mode) { _, _ in commitLive(kind: "discrete") }
+        .onChange(of: store.generation) { _, value in
+            if generation != value, let current = store.timeline.spectrum(item.id) {
+                generation = value; draft = SpectrumStyleDraft(current.style); feedback = nil
+            }
+        }
         .onChange(of: [draft.red, draft.green, draft.blue]) { _, _ in
             if let rgb = SpectrumPickerRGB.channels(draft) { lastValidSwatch = SpectrumPickerRGB.color(rgb) }
         }
@@ -1135,6 +1171,8 @@ struct SpectrumStyleAdjust: View {
             TextField(title, text: value).textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.trailing).frame(width: 100)
                 .accessibilityLabel("스펙트럼 " + title)
+                .focused($focusedPixel, equals: title)
+                .onSubmit { commitLive(kind: "numeric") }
         }
     }
 }

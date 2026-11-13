@@ -174,7 +174,7 @@ enum KeyRouting {
         switch cmd {
         // 초점은 위에서 실제 상태로 확인했다. 캐시된 editorFocused(store.canSplit)는 키 창 변화 알림이 늦으면 낡을 수 있어 쓰지 않는다.
         case .split: if !store.timeline.isEmpty, store.alert == nil, store.gestureBase == nil { store.splitAtPlayhead(); done = true }
-        case .undo: if store.gestureBase == nil, store.history.canUndo || store.colorSession != nil { store.undo(); done = true }   // 색 조정 세션: 끝내고 되돌림(D-039)
+        case .undo: if store.gestureBase == nil, store.history.canUndo || store.colorSession != nil || store.spectrumLiveSession != nil { store.undo(); done = true }   // 색 조정 세션: 끝내고 되돌림(D-039)
         case .redo: if store.gestureBase == nil, store.history.canRedo { store.redo(); done = true }
         case .export: if store.gestureBase == nil, store.exportBlockReason != nil || store.canExport { store.presentExportPanel(); done = true }
         // 프로젝트 파일(A-013): 한국어 입력 소스에서도 한 번만 동작하도록 라우터가 처리한다

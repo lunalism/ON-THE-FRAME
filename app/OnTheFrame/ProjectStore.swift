@@ -69,6 +69,7 @@ final class ProjectStore {
     /// 선택한 클립(주 선택). 연결된 짝도 함께 선택된 것으로 보인다(selectedIDs).
     private(set) var spectrumSelectionRevision = 0
     var selection: UUID? {
+        willSet { if newValue != selection { finishSpectrumLiveSession() } }
         didSet {
             if selection != oldValue { spectrumSelectionRevision &+= 1 }
             if selection == nil || selection == linkCandidate { linkCandidate = nil }
@@ -362,7 +363,7 @@ final class ProjectStore {
         guard KeyRouting.menuTargetsEditor(self), gestureBase == nil else { return }
         splitAtPlayhead()
     }
-    var undoMenuEnabled: Bool { !editorFocused || ((history.canUndo || colorSession != nil) && alert == nil) }   // 색 조정 세션은 끝내고 되돌림
+    var undoMenuEnabled: Bool { !editorFocused || ((history.canUndo || colorSession != nil || spectrumLiveSession != nil) && alert == nil) }   // 색 조정 세션은 끝내고 되돌림
     var redoMenuEnabled: Bool { !editorFocused || (history.canRedo && alert == nil) }
 
     var mediaByID: [UUID: MediaAsset] { Dictionary(uniqueKeysWithValues: assets.map { ($0.id, $0) }) }
@@ -712,6 +713,7 @@ final class ProjectStore {
     }
 
     func undo() {
+        spectrumColorEventRevision &+= 1
         commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         guard history.canUndo else { return }
         cancelPendingPress()
@@ -721,6 +723,7 @@ final class ProjectStore {
         timelineChanged()
     }
     func redo() {
+        spectrumColorEventRevision &+= 1
         commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         guard history.canRedo else { return }
         cancelPendingPress()
@@ -939,6 +942,74 @@ final class ProjectStore {
         guard style != original else { return nil }
         commit({ try $0.settingSpectrumStyle(id, style) }, focus: id)
         return timeline.spectrum(id)?.style == style ? nil : (statusMessage ?? "모양을 적용하지 못했습니다.")
+    }
+
+    // Spectrum-only live history session. Updates use the existing current Timeline;
+    // finalization records exactly one transition from the original Timeline.
+    struct SpectrumLiveSession {
+        let id: UUID, project: Int, revision: Int, kind: String, base: Timeline
+    }
+    var spectrumLiveSession: SpectrumLiveSession?
+    private(set) var spectrumColorEventRevision = 0
+    @ObservationIgnored var spectrumColorPanelObserver: NSObjectProtocol?
+    @ObservationIgnored var spectrumColorFocusObserver: NSObjectProtocol?
+    func finishSpectrumLiveSession() {
+        guard let session = spectrumLiveSession else { return }
+        spectrumLiveSession = nil
+        guard session.project == projectSession else { return }
+        let final = timeline
+        history.replaceWithoutUndo(session.base)
+        history.apply(final, focus: session.id)
+        updateWindowDocumentState()
+    }
+    @discardableResult
+    func updateSpectrumLiveStyle(_ id: UUID, style: SpectrumItemStyle, project: Int,
+                                 revision: Int, expectedGeneration: Int, kind: String) -> Bool {
+        guard project == projectSession, revision == spectrumSelectionRevision,
+              expectedGeneration == generation, selection == id, let item = timeline.spectrum(id),
+              gestureBase == nil, fileCommandsAvailable, !openRequested, openProgress == nil,
+              importProgress == nil, !imageImportBusy, !relinkInProgress,
+              exportPhase == .idle, !discardConfirmed, !editorClosedByUser else { return false }
+        var allowed = item.style
+        allowed.startXMilli = style.startXMilli; allowed.startYMilli = style.startYMilli
+        allowed.endXMilli = style.endXMilli; allowed.endYMilli = style.endYMilli
+        allowed.maxHeightMilli = style.maxHeightMilli; allowed.thicknessMilli = style.thicknessMilli
+        allowed.sides = style.sides; allowed.mode = style.mode
+        allowed.red = style.red; allowed.green = style.green; allowed.blue = style.blue
+        guard style == allowed, style.isValid else { return false }
+        if let session = spectrumLiveSession, session.kind != kind { finishSpectrumLiveSession() }
+        guard style != item.style else { return true }
+        guard let changed = try? timeline.settingSpectrumStyle(id, style) else { return false }
+        if spectrumLiveSession == nil {
+            commitInlineEditIfAny()
+            pauseForEdit()
+            spectrumLiveSession = SpectrumLiveSession(id: id, project: project, revision: revision, kind: kind, base: timeline)
+            if kind == "color", spectrumColorPanelObserver == nil {
+                spectrumColorPanelObserver = NotificationCenter.default.addObserver(forName: NSColorPanel.willCloseNotification, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.finishSpectrumLiveSession() }
+                }
+                spectrumColorFocusObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: NSColorPanel.shared, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.finishSpectrumLiveSession() }
+                }
+            }
+        }
+        history.replaceWithoutUndo(changed)
+        publishSpectrumStylePreview()
+        if kind == "discrete" || kind == "numeric" { finishSpectrumLiveSession() }
+        return true
+    }
+
+    /// Style-only publication keeps the current player item, seek proof and subtitles.
+    /// Retain only the current paused frame while replacement geometry is computed.
+    private func publishSpectrumStylePreview() {
+        guard player.currentItem != nil, appliedGeneration == generation else {
+            timelineChanged(); return
+        }
+        generation += 1
+        spectrumPreview.update(timeline: timeline, media: assets)
+        appliedGeneration = generation
+        updateWindowDocumentState()
+        previewHost?.spectrumOverlay.refresh(retainingStyleFrame: true)
     }
 
     // MARK: 복사·붙여넣기(2026-10-11)
@@ -2501,6 +2572,7 @@ extension ProjectStore {
         pauseForEdit()
         interruptGesture(reason: "replaceProject", clearViewDrags: true)   // 끌기 중이면 취소하고 보기의 끌기 상태(옮기기 누름 대기 포함)도 지운다(D-031)
         inlineEdit = nil   // 남은 글 편집은 이 프로젝트에 넣지 않고 버린다(교체 요청 앞에서 이미 확정했다, §44)
+        spectrumLiveSession = nil
         colorSession = nil   // 색 조정 세션도 버린다(회차 확인으로 늦은 패널 값이 새 프로젝트를 바꾸지 않음)
         SubtitleRenderer.shared.removeAll()   // 이전 프로젝트의 자막 그림을 놓는다(§49: 캐시는 상한 안이지만 프로젝트를 바꾸면 쓸 일이 없다)
         panelTextCommit = nil   // 정보 패널 글 칸도(칸이 늦게 초점을 잃어도 회차 확인으로 넣지 않음)

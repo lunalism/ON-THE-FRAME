@@ -1,5 +1,17 @@
 # 인계 요약 — ON THE FRAME
 
+**SP-5D-10 · Live Spectrum Inspector / 7파일 커밋 승인 준비.** `feature/subtitles`, HEAD/upstream/live remote `3573c5520879093282d6f4a86bfe383f2d61f73f`. 후보는 ContentView.swift·ProjectStore.swift·SubtitleUI.swift·KeyRouting.swift·PausedSpectrumOverlay.swift·ROADMAP.md·HANDOFF.md다. index는 비워 두고 별도 게시 승인을 기다린다. 아래 SP-5C-11 대기는 당시 기록이며 현재 HEAD로 게시됐다. [상세 구현·검증·한계](ROADMAP.md).
+
+구현: 새 픽셀 정수 입력·untouched legacy 소수 정밀도 보존·변환 버튼 제거, 두께 1–64 정수 slider, RGB 숫자/Apply/Cancel 없는 Spectrum live 편집이다. 숫자는 Return/포커스 이탈, 방향/mode는 즉시, slider/color는 유효 변경마다 Preview 갱신한다. slider 한 드래그=한 Undo, color는 패널 닫힘/키 포커스 이탈·다른 편집/선택/Undo/저장 경계=한 세션이다(timer 없음, native drag 종료 추정 아님). 기존 그룹·전체 헤더·8pt 간격·P3 clipping·alpha/숨은 스타일·ID/계보·형식 8을 유지한다.
+
+기존 실행: SP-5D-03 72 PASS, 이전 MainActor 대역 실패 뒤 SP-5D-08 161 PASS, SP-5D-09 291 PASS와 signed 증분 Debug 빌드 PASS. 291은 161 + renderer/CALayer 128 + 라우팅 조건 2이며 전체 물리 화면·native 키/패널 검사가 아니다. 상태/notification·Preview 일부는 대역이다. 기존 로그·실패 증거를 보존하고 이번 작업에서 재실행하지 않았다.
+
+소유자 관찰: slider live/Undo·숫자 commit·ColorPicker live·선택 전환·간격 PASS 뒤 실제 color Undo 초기 FAIL와 slider flicker를 보고했다. SP-5D-09는 Undo 라우팅에 Spectrum 세션을 포함하고 종료/늦은 이벤트 보호를 보강했으며, paused refresh의 선행 레이어 삭제를 동일 confirmed frame의 style 갱신에서 유지/교체하도록 수정했다. 소유자 재시험은 color Undo/Redo·Preview/swatch 일치, 깜빡임 없는 두께 변화, 한 drag의 Undo/Redo·다른 값 유지·오류 없음 PASS다. tested conditions의 관찰이며 전체 parity 보장은 아니다.
+
+데이터/인계: 마지막 소유자는 저장하지 않았다고 보고했다. 이번 읽기 점검에서 앱 프로세스는 없었으며 정확한 마지막 메모리 색/두께는 알 수 없다. 격리 시험 파일 `app/selftest-work/sp5a06-owner-manual-20261112/fixture-sp5d02-20261113-01.ontheframe` 저장 해시 `0eed2cebb6326351bd70dd7e7c3f878b368c3c31096adb1bae37e8061d93c6ca`는 유지됐다. live 편집의 새 파일 수동 저장/재열기·현재 hidden-field·모든 focus/panel/project/non-Spectrum 경로는 미완료다. 원본·기존 프로젝트·미디어·진단·owner 파일·recovery refs를 보존한다. 이번에는 앱을 실행/종료/저장하지 않았다.
+
+다음: 별도 승인 후 7파일 게시, 이후 제안인 Audio Analysis·Spectrum 반응 강도 설계 검토(구현 별도 승인). 공개 Spectrum export는 게이트 뒤, 전체 Preview/export·물리 screen/audio parity 미검증, Release 준비 미승인·SP-4B 시작 공백 미해결이다. Stage 5 전체 완료가 아니다. 제외 untracked는 `.DS_Store`, `.claude/settings.json`, `app/.DS_Store`, `design/.DS_Store`, `app/diagnostics/spectrum-style-edit-check.py`이며 프로젝트/미디어·빌드·로그·raw evidence도 제외한다. 이번 문서 작업은 staging·commit·push하지 않았다.
+
 **SP-5C-11 · 오늘 세션 종료 / Inspector 체크포인트 준비.** 브랜치 `feature/subtitles`, HEAD/upstream/live remote `c8935f280ff2de63ce1611b35a03115c13ec5532`. 미커밋 후보는 ContentView.swift·ROADMAP.md·HANDOFF.md 3개, index는 비워 둔다. 별도 소유자 staging/commit/push 승인이 다음 단계다. 아래 SP-5B-06 대기는 당시 기록이며 해당 체크포인트는 현재 HEAD로 게시됐다. [상세 구현·증거·한계](ROADMAP.md).
 
 구현은 소스 + 위치/크기 + 모양/색상 그룹, draft를 보존하는 접기/펼치기, 제목·화살표·빈 공간을 하나의 Button으로 토글하는 헤더다. 기존 Apply/Cancel·history·stale 선택/session/generation 보호를 유지한다. 승인된 wide-gamut 정책은 extended-sRGB 변환 성공·유한성 확인 후 채널 clipping→최근접 8-bit RGB이며 P3 외관 보존/지각적 gamut compression이 아니다. 변환 실패·비유한 성분은 거부하고 alpha·숨은 속성·계보를 보존한다. renderer/schema/게이트 변경은 없고 임시 DEBUG 계측만 제거했다(역사 로그 보존).

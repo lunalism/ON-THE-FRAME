@@ -102,18 +102,31 @@ final class PausedSpectrumOverlay {
         refresh()
     }
 
-    func refresh() {
-        invalidate()
+    func refresh(retainingStyleFrame: Bool = false) {
+        // Ordinary seeks/session changes still clear immediately. Only a style update
+        // of the same confirmed paused frame may keep its previously validated image.
+        if retainingStyleFrame {
+            serial &+= 1
+            if let store { tickets.forEach { store.spectrumPreview.cancel($0) } }
+            tickets = []
+        } else { invalidate() }
         guard let store, let view, view.window != nil, store.previewHost === view,
               !store.isPlaying, store.gestureBase == nil, !view.isShowingStill, store.appliedGeneration == store.generation,
               let frame = confirmedFrame, let token = confirmedToken, token == store.seekToken,
-              let item = confirmedItem, store.player.currentItem === item else { return }
+              let item = confirmedItem, store.player.currentItem === item else {
+            if retainingStyleFrame { invalidate() }
+            return
+        }
         let generation = serial
         let epoch = store.spectrumPreview.epoch, revision = store.spectrumPreview.revision
         // Timeline stores top lanes first; CA paints bottom lanes first, as subtitles do.
         let entries = store.timeline.spectra.reversed().filter { $0.visible(atFrame: frame) }
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        for entry in entries {
+        let visibleIDs = Set(entries.map(\.id))
+        for id in Array(layers.keys) where !visibleIDs.contains(id) {
+            layers.removeValue(forKey: id)?.removeFromSuperlayer()
+        }
+        for entry in entries where layers[entry.id] == nil {
             let layer = CALayer(); layer.actions = PlayerNSView.noActions
             layer.magnificationFilter = .linear; layer.minificationFilter = .linear
             layers[entry.id] = layer
@@ -154,8 +167,9 @@ final class PausedSpectrumOverlay {
                     case let .ready(_, rendered):
                         layer.contents = rendered?.image
                         layer.frame = rendered.map { Self.layerRect($0.drawRect) } ?? .zero
-                    case .notVisible, .itemMissing, .unsetSource, .missingSource, .overlap, .mediaUnavailable,
-                         .cancelled, .superseded, .dropped:
+                    case .cancelled, .superseded, .dropped:
+                        if !retainingStyleFrame { layer.contents = nil; layer.frame = .zero }
+                    case .notVisible, .itemMissing, .unsetSource, .missingSource, .overlap, .mediaUnavailable:
                         layer.contents = nil; layer.frame = .zero
                     case let .failed(error):
                         layer.contents = nil; layer.frame = .zero
