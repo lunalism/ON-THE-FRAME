@@ -88,6 +88,17 @@ final class PausedSpectrumOverlay {
     func attach(_ store: ProjectStore) { self.store = store; updatePlaybackLink() }
     func detach() { stopPlaybackLink(); invalidate(forgetFrame: true); store = nil }
 
+    /// Seek/resume immediately invalidates the paused batch. Publish its newest
+    /// coalesced model first so cancellation cannot discard the final style.
+    /// No frame/image is carried into the new transition, and an already-current
+    /// batch needs no extra session revision or coordinator update.
+    func flushPendingStyleBeforeTransition() {
+        guard pendingStyleRefresh else { return }
+        pendingStyleRefresh = false
+        guard let store else { return }
+        store.spectrumPreview.update(timeline: store.timeline, media: store.assets)
+    }
+
     func invalidate(forgetFrame: Bool = false) {
         serial &+= 1
         styleRequestsRemaining = 0

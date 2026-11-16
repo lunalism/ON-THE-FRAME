@@ -255,7 +255,7 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
             add("위로", #selector(upFromMenu(_:)), l.id, enabled: store.canMoveLane(l.id, by: -1))
             add("아래로", #selector(downFromMenu(_:)), l.id, enabled: store.canMoveLane(l.id, by: 1))
             if l.kind == .audio { add(l.muted ? "음소거 해제" : "음소거", #selector(muteFromMenu(_:)), l.id) }
-            add("레인 삭제…", #selector(deleteFromMenu(_:)), l.id, enabled: store.canRemoveLane(l))
+            add(l.kind == .spectrum ? "레인 삭제" : "레인 삭제…", #selector(deleteFromMenu(_:)), l.id, enabled: store.canRemoveLane(l))
             m.addItem(.separator())
         }
         add("영상 레인 추가", #selector(addVideoFromMenu(_:)), nil)

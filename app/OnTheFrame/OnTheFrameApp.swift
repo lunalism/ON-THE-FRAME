@@ -33,11 +33,9 @@ struct OnTheFrameApp: App {
                     Button("목록 지우기") { store.clearRecents() }.disabled(store.recentProjects.isEmpty)
                 }
                 Divider()
-                Button("가져오기…") { store.presentImportPanel() }.keyboardShortcut("i").disabled(!store.fileCommandsAvailable)
-                if ProjectStore.imageImportEnabled {
-                    Button("내부 시험 이미지 가져오기…") { store.presentStillImageImportPanel() }
-                        .disabled(!store.fileCommandsAvailable || store.imageImportBusy)
-                    Button("내부 이미지 가져오기 취소") { store.cancelImageImport() }.disabled(!store.imageImportBusy)
+                Button("미디어 가져오기…") { store.presentImportPanel() }.keyboardShortcut("i").disabled(!store.fileCommandsAvailable)
+                if store.imageImportBusy {
+                    Button("미디어 가져오기 취소") { store.cancelImport() }
                 }
                 Button("내보내기…") { store.presentExportPanel() }.keyboardShortcut("e")
                     .disabled(!store.fileCommandsAvailable || (!store.canExport && store.exportBlockReason == nil))
@@ -193,11 +191,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if projects.count > 1 { ProjectStore.shared.statusMessage = "프로젝트는 한 번에 하나만 엽니다: \(p.lastPathComponent)" }
             let rest = urls.filter { $0.pathExtension.lowercased() != ProjectFile.fileExtension && !$0.hasDirectoryPath }
             if !rest.isEmpty { ProjectStore.shared.importFiles(rest) }
-            return
-        }
-        if ProjectStore.imageImportEnabled, urls.count == 1, let image = urls.first,
-           ["jpg", "jpeg", "png"].contains(image.pathExtension.lowercased()) {
-            ProjectStore.shared.requestStillImageImport(image)
             return
         }
         #if DEBUG

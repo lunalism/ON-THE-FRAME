@@ -33,6 +33,34 @@ enum ImageModelFixture {
 
 final class StillImageProjectModelTests: XCTestCase {
     typealias M = StillImageProjectModel
+    func testDisplayP3ProfilePersistsInExistingFormat10Fields() async throws {
+        let generated=try await ImageModelFixture.image("jpg"),url=generated.url.deletingLastPathComponent().appendingPathComponent("p3-generated.jpg")
+        try autoreleasepool {
+            let context=try XCTUnwrap(CGContext(data:nil,width:4,height:2,bitsPerComponent:8,bytesPerRow:16,space:CGColorSpace(name:CGColorSpace.displayP3)!,bitmapInfo:CGImageAlphaInfo.noneSkipLast.rawValue))
+            context.setFillColor(CGColor(red:0.7,green:0.1,blue:0.2,alpha:1));context.fill(CGRect(x:0,y:0,width:4,height:2))
+            let writer=try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL,"public.jpeg" as CFString,1,nil))
+            CGImageDestinationAddImage(writer,try XCTUnwrap(context.makeImage()),nil);XCTAssertTrue(CGImageDestinationFinalize(writer))
+        }
+        let source=try await M.ValidatedImage.inspect(url),before=try Data(contentsOf:url)
+        XCTAssertEqual(source.descriptor.profileDisposition,"embedded-Display-P3-ICC")
+        XCTAssertEqual(source.encodedSHA256.count,64)
+        var project=try ImageModelFixture.project(source)
+        let audio=ImageModelFixture.temporal(video:false),origin=UUID(),lane=UUID()
+        project.media.append(.init(ref:.audio(audio),relativePath:nil,bookmark:nil))
+        project.audioClips=[Clip(mediaID:audio.id,start:0,sourceIn:0,length:300,lane:Lane.audioID,origin:origin)]
+        project.lanes.insert(Lane(id:lane,kind:.spectrum,name:"SP"),at:0)
+        var style=SpectrumItemStyle.provisionalDefault;style.reactionPercent=150
+        project.spectra=[SpectrumItem(lane:lane,start:0,length:300,sourceKey:origin,style:style)]
+        try project.validate()
+        XCTAssertEqual(try StillImageProjectCodec.version(for:project),10)
+        let encoded=try StillImageProjectCodec.encode(project),decoded=try StillImageProjectCodec.decode(encoded)
+        XCTAssertEqual(decoded,project)
+        XCTAssertEqual(decoded.media[0].ref.still?.image.profileDisposition,"embedded-Display-P3-ICC")
+        XCTAssertEqual(decoded.media[0].ref.still?.image.profileSHA256,source.descriptor.profileSHA256)
+        let text=String(decoding:encoded,as:UTF8.self)
+        XCTAssertFalse(text.contains("encodedSHA256"));XCTAssertFalse(text.contains("normalizedRGBABytes"))
+        XCTAssertEqual(try Data(contentsOf:url),before)
+    }
     func testCancelledValidationCannotCreateRelinkCapability() async throws {
         let source=try await ImageModelFixture.image()
         let canceled=Task { () -> Bool in

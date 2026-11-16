@@ -33,7 +33,10 @@ enum ImageExportSelfTest {
                 if case .failed = outcome { rows["runtime-off engine export rejected"] = !FileManager.default.fileExists(atPath:forbidden.path) }
                 else { rows["runtime-off engine export rejected"] = false }
             } else {
-                rows["normal import"] = imported && store.timeline.clips.first?.length == 150
+                rows["normal import"] = imported && store.timeline.clips.isEmpty && ProjectPersistence.references(store.timeline).contains(where: { $0.kind == .stillImage })
+                guard let imageID = ProjectPersistence.references(store.timeline).first(where: { $0.kind == .stillImage })?.id else { throw CocoaError(.fileReadCorruptFile) }
+                store.addToTimeline(imageID)
+                rows["explicit image insertion"] = store.timeline.clips.first?.mediaID == imageID && store.timeline.clips.first?.length == 150
                 rows["export eligibility"] = store.canExport && store.exportBlockReason == nil
                 let snapshot = store.timeline, output = root.appendingPathComponent("normal-app.mp4")
                 store.startExport(.fromSavePanel(output))
@@ -103,6 +106,9 @@ extension ImageExportSelfTest {
                 image=URL(fileURLWithPath:record.path)
             } else {
                 guard await store.importStillImage(at:image) else { throw CocoaError(.fileReadCorruptFile) }
+                guard let imageID = ProjectPersistence.references(store.timeline).first(where: { $0.kind == .stillImage })?.id else { throw CocoaError(.fileReadCorruptFile) }
+                store.addToTimeline(imageID)
+                guard store.timeline.clips.first?.mediaID == imageID else { throw CocoaError(.fileReadCorruptFile) }
             }
             let sourceHash = try hash(image), sentinelHash = try hash(sentinel)
             let original = store.timeline, project = store.projectID, scopeCount = store.scopedURLs.count

@@ -53,6 +53,95 @@ enum SpectrumPlaybackSelfTest {
         return checks
     }
 
+    /// Deterministic transport/approval contract. Injected PTS values exercise the
+    /// existing selector; this is not a native display-continuity measurement.
+    static func transitionTransportChecks() async -> [Check] {
+        var checks: [Check] = []
+        func check(_ name: String, _ pass: Bool) {
+            checks.append(Check(name: "transition." + name, pass: pass,
+                detail: "transport identity and exact-frame approval; no old image carry"))
+        }
+        let media = UUID()
+        let audio = Clip(mediaID: media, start: 0, sourceIn: 0, length: 120, lane: Lane.audioID)
+        let entry = SpectrumItem(lane: UUID(), start: 0, length: 120, sourceKey: audio.lineageKey)
+        let timeline = Timeline(clips: [Clip(mediaID: media, start: 0, sourceIn: 0, length: 120)],
+                                audioClips: [audio], spectra: [entry], durationFrames: 120)
+        let session = SpectrumPreviewSession(), controller = session.playback
+        let view = PlayerNSView(), firstItem = AVPlayerItem(asset: AVMutableComposition())
+        controller.prepareForTransition(item: firstItem, view: view)
+        let output = controller.timing.output
+        let time = CMTime(value: 30, timescale: 30)
+        func approve(_ display: CMTime) -> Int? {
+            controller.timing.sample(requested: time, timeline: timeline, hasNewBuffer: true) { value in
+                value = display; return true
+            }
+        }
+        check("matchingPTSInitiallyApproved", approve(time) == 30 && controller.timing.confirmedPTSForTest == time)
+        controller.advance(frame: 30, timeline: timeline)
+        controller.prepareForTransition(item: firstItem, view: view)
+        check("sameItemKeepsSingleOutput", output != nil && controller.timing.output === output && firstItem.outputs.count == 1)
+        check("prepareRevokesAllPresentationAndApproval", controller.currentFrame == nil && controller.retainedCount == 0 &&
+              controller.retainedBytes == 0 && !controller.timing.confirmedPTSForTest.isNumeric)
+        let reused = controller.timing.sample(requested: time, timeline: timeline, hasNewBuffer: false) { _ in false }
+        check("priorFrameIsNotReapprovedWithoutBuffer", reused == nil)
+        check("wrongDisplayPTSStillRejected", approve(CMTime(value: 29, timescale: 30)) == nil)
+        check("newMatchingBufferCanApprove", approve(time) == 30)
+        session.update(timeline: timeline, media: [])
+        check("sessionRevisionKeepsTransportButRevokesApproval", controller.timing.output === output &&
+              controller.currentFrame == nil && controller.retainedCount == 0 && !controller.timing.confirmedPTSForTest.isNumeric)
+        var unavailable: SpectrumFrameOutcome?
+        _ = session.request(spectrum: entry.id, frame: 30, checkPlaybackMedia: true) { unavailable = $0 }
+        let delivered = await LaneSelfTest.waitUntil(10) { unavailable != nil }
+        if case let .mediaUnavailable(id)? = unavailable { check("unavailableSourceStillRejected", delivered && id == media) }
+        else { check("unavailableSourceStillRejected", false) }
+        let secondItem = AVPlayerItem(asset: AVMutableComposition())
+        controller.prepareForTransition(item: secondItem, view: view)
+        check("differentItemRetiresPriorOutput", !firstItem.outputs.contains { $0 === output } &&
+              controller.timing.item === secondItem && secondItem.outputs.count == 1)
+        session.resetProject()
+        check("projectResetDetachesTransport", secondItem.outputs.isEmpty && controller.timing.output == nil &&
+              controller.timing.item == nil && !controller.timing.confirmedPTSForTest.isNumeric)
+
+        let store = ProjectStore(), host = PlayerNSView(frame: NSRect(x: 0, y: 0, width: 320, height: 180))
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = host; store.previewHost = host
+        let item = AVPlayerItem(asset: AVMutableComposition()), playback = store.spectrumPreview.playback
+        store.player.replaceCurrentItem(with: item)
+        playback.prepareForTransition(item: item, view: host)
+        let pendingOutput = playback.timing.output
+        host.subtitleSeekRequested(token: store.seekToken, frame: 30)
+        playback.advance(frame: 30, timeline: timeline)
+        store.sampleSpectrumPlayback(hostTime: ProcessInfo.processInfo.systemUptime)
+        check("pendingSeekRetiresTransportAndApproval", host.hasPendingSpectrumSeek &&
+              pendingOutput != nil && playback.timing.output == nil && playback.timing.item == nil &&
+              item.outputs.isEmpty && playback.currentFrame == nil &&
+              playback.retainedCount == 0 && !playback.timing.confirmedPTSForTest.isNumeric && host.spectrumOverlay.layers.isEmpty)
+        host.subtitleSeekFinished(token: store.seekToken, frame: 30, finished: false)
+        playback.prepareForTransition(item: item, view: host)
+        let nilReplacementHadOutput = playback.timing.output != nil && item.outputs.count == 1
+        store.player.replaceCurrentItem(with: nil)
+        store.sampleSpectrumPlayback(hostTime: ProcessInfo.processInfo.systemUptime)
+        check("nilCurrentItemDetachesOldTransport", nilReplacementHadOutput && item.outputs.isEmpty && playback.timing.output == nil)
+        store.previewHost = nil; store.resetProject(); window.close()
+
+        let heldSession = SpectrumPreviewSession(), held = heldSession.playback, delivery = Delivery()
+        let heldItem = AVPlayerItem(asset: AVMutableComposition())
+        held.prepareForTransition(item: heldItem, view: view)
+        let heldOutput = held.timing.output
+        heldSession.transformOutcomeForTest = { id, frame, _ in await delivery.hold(id, frame) }
+        held.advance(frame: 30, timeline: timeline)
+        let waiting = await LaneSelfTest.waitUntil(10) { delivery.waiting.count == 3 }
+        heldSession.update(timeline: timeline, media: [])
+        delivery.release(entry.id, 30, .ready(bands: [], frame: nil))
+        heldSession.transformOutcomeForTest = nil; delivery.releaseAll()
+        let drained = await LaneSelfTest.waitUntil(10) { held.pendingCount == 0 }
+        check("sourceRevisionRejectsHeldReadyWhileKeepingTransport", waiting && drained &&
+              held.currentFrame == nil && held.retainedCount == 0 && held.metrics.stale > 0 && held.timing.output === heldOutput)
+        heldSession.resetProject()
+        check("heldSessionResetReleasesOutput", heldItem.outputs.isEmpty && held.timing.output == nil)
+        return checks
+    }
+
     // Reuse the 17 checks; stderr completion lets the direct parent own shutdown.
     static func runDirectStartupContract(runID: UUID) {
         let store = ProjectStore.shared
@@ -118,6 +207,7 @@ enum SpectrumPlaybackSelfTest {
             // The launching runner owns its child process and handles its lifetime.
             return
         }
+        checks.append(contentsOf: await transitionTransportChecks())
         func check(_ name: String, _ pass: Bool, _ detail: String = "") {
             checks.append(Check(name: name, pass: pass, detail: detail)); LaneSelfTest.checkCountForMode = checks.count
         }

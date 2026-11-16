@@ -863,6 +863,16 @@ public struct Timeline: Sendable, Equatable {
         guard out.isValid else { throw dLen < 0 ? EditError.crossingContent : EditError.overlap }
         return out
     }
+    /// Still-image right-edge duration edit: no source-duration cap and no ripple of other content.
+    /// Keeps the clip's start/source/identity and the existing timeline tail; same-lane overlap is rejected.
+    public func resizingStillImage(clip id: UUID, length: Int) throws -> Timeline {
+        guard let c = clip(id) else { throw EditError.unknownClip }
+        guard isStillImage(c.mediaID) else { throw EditError.unknownMedia }
+        guard length >= 1 else { throw EditError.tooShort }
+        guard length <= Self.maxFrames, c.start <= Self.maxFrames - length else { throw EditError.frameLimit }
+        return try checked(rebuilt(video: clips.map { $0.id == id ? $0.with(length: length) : $0 }))
+    }
+
     /// 왼쪽 가장자리를 delta 프레임 옮긴다(양수 = 안쪽으로). 묶음 모두의 원본 범위·최소 1프레임 안으로 제한한다.
     public func trimmingStart(clip id: UUID, by delta: Int) throws -> Timeline {
         guard let c = clip(id) else { throw EditError.unknownClip }

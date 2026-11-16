@@ -161,10 +161,19 @@ enum SpectrumLaneSelfTest {
         s.setTool(.cut); await click(onItem); s.setTool(.selection)
         check("item.selectableNoEditBelowThreshold", s.selection == spID && s.timeline == t2 && s.history.undoDepth == dI && s.gestureBase == nil,
               "selection \(String(describing: s.selection)) depth \(s.history.undoDepth - dI)")
-        // 스펙트럼이 있는 레인은 지우지 않음(2A: 스펙트럼 삭제 UI 없음)
+        // SP-7A-01: 내용이 있는 스펙트럼 레인도 확인 없이 한 단계로 지우고, Undo로 원래 항목을 복원한다.
         s.requestRemoveLane(sl); await LaneSelfTest.settle()
-        check("item.laneNotRemovable", t2.laneInfo(sl).map { !s.canRemoveLane($0) } == true && s.timeline == t2 && !s.alerts.isShowing && (s.statusMessage ?? "").contains("스펙트럼"),
-              s.statusMessage ?? "")
+        let occupiedRemoved = t2.laneInfo(sl).map { s.canRemoveLane($0) } == true
+            && s.timeline.laneInfo(sl) == nil && s.timeline.spectrum(spID) == nil
+            && s.selection == nil && !s.alerts.isShowing && s.history.undoDepth == dI + 1
+            && s.timeline.audioClips == t2.audioClips && s.timeline.clips == t2.clips
+        s.undo(); await LaneSelfTest.settle()
+        let occupiedRestored = s.timeline == t2 && s.selection == spID && s.history.undoDepth == dI
+        s.redo(); await LaneSelfTest.settle()
+        let occupiedRedone = s.timeline.laneInfo(sl) == nil && !s.alerts.isShowing && s.history.undoDepth == dI + 1
+        s.undo(); await LaneSelfTest.settle()
+        check("item.laneImmediateDeleteUndoRedo", occupiedRemoved && occupiedRestored && occupiedRedone && s.timeline == t2,
+              "removed \(occupiedRemoved) restored \(occupiedRestored) redone \(occupiedRedone)")
 
         // 7. 안전 장치: 스펙트럼이 든 계획은 내보내지 않음(대상 없음), 스펙트럼이 든 프로젝트는 열지 않음(파일 그대로)
         let out = folder.appendingPathComponent("out"); try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
@@ -216,7 +225,7 @@ enum SpectrumLaneSelfTest {
         check("open.richRestored", o1 && o1Alert == nil && r1 == rich && Self.states(r1) == Self.richStates && r1.spectra.map(\.sourceKey) == rich.spectra.map(\.sourceKey)
               && r1.spectra.map(\.style) == rich.spectra.map(\.style) && r1.lanes == rich.lanes && lineageOK(r1) && !s.isDirty && s.missingMedia.isEmpty && s.history.undoDepth == 0,
               "opened \(o1) alert '\(o1Alert ?? "")' states \(Self.states(r1))")
-        // 연 뒤: 항목을 누르면 고르기만(2B-2), 4 pt 아래 끌기는 아무것도 바꾸지 않고(옮기기는 12절), 항목이 든 레인은 지우지 않음(Delete 삭제는 10절)
+        // 연 뒤: 항목 선택·4 pt 아래 끌기는 편집하지 않는다. 레인 삭제·Undo는 ID·스타일·소스를 그대로 복원한다.
         await LaneSelfTest.settle()
         guard let item = r1.spectra.first else { return finish(folder, checks) }   // 열지 못했으면 위 검사가 실패로 남는다
         let itemLane = item.lane
@@ -225,9 +234,13 @@ enum SpectrumLaneSelfTest {
         await LaneSelfTest.mouse(.leftMouseDown, win(onR), w)
         await LaneSelfTest.mouse(.leftMouseDragged, win(NSPoint(x: onR.x + 3, y: onR.y)), w)
         await LaneSelfTest.mouse(.leftMouseUp, win(NSPoint(x: onR.x + 3, y: onR.y)), w)
-        s.requestRemoveLane(itemLane); await LaneSelfTest.settle()
         check("open.selectNoEditBelowThreshold", tv.clipHit(onR) == nil && s.selection == item.id && s.timeline == rich && s.history.undoDepth == 0 && !s.alerts.isShowing
               && s.timeline.laneInfo(itemLane) != nil, "selection \(String(describing: s.selection)) depth \(s.history.undoDepth)")
+        s.requestRemoveLane(itemLane); await LaneSelfTest.settle()
+        let richRemoved = s.timeline.laneInfo(itemLane) == nil && s.timeline.spectra(inLane: itemLane).isEmpty
+            && s.history.undoDepth == 1 && !s.alerts.isShowing
+        s.undo(); await LaneSelfTest.settle()
+        check("open.laneImmediateDeleteRestoresAll", richRemoved && s.timeline == rich && s.selection == item.id && s.history.undoDepth == 0)
         // 9b. 다시 저장(같은 위치, ⌘S가 부르는 writeProject) → 같은 문서. 바이트가 같은지도 본다(북마크를 다시 만들어 다를 수 있음 — 기록만)
         let resaved = s.writeProject(to: pR)
         let resavedBytes = try? Data(contentsOf: pR)

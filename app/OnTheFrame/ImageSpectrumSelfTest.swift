@@ -302,22 +302,22 @@ import OnTheFrameEngine
             try await wait { !s.imagePlaybackLeaseForTest.pending }
             try check("initial expiry is start plus TTL", s.imagePlaybackLeaseForTest.until == 1001)
             let initialCount = s.imagePlaybackAccessChecksForTest
-            s.imagePlaybackAccessClockForTest = 1000.89
+            s.imagePlaybackAccessClockForTest = 1000.74
             try check("before lead no renewal", s.imagePlaybackAccessIsCurrent(for: item, allowProactiveRenewal: true) && s.imagePlaybackAccessChecksForTest == initialCount)
             s.imagePlaybackAccessPreparedForTest = { await withCheckedContinuation { release = $0 } }
-            s.imagePlaybackAccessClockForTest = 1000.9
+            s.imagePlaybackAccessClockForTest = 1000.75
             try check("renewal start preserves old lease", s.imagePlaybackAccessIsCurrent(for: item, allowProactiveRenewal: true))
             try await wait { release != nil }
             for _ in 0..<1000 { _ = s.imagePlaybackAccessIsCurrent(for: item, allowProactiveRenewal: true) }
             try check("pending retains original expiry and single worker", s.imagePlaybackLeaseForTest.until == 1001 && s.imagePlaybackAccessChecksForTest == initialCount + 1)
-            s.imagePlaybackAccessClockForTest = 1000.95
+            s.imagePlaybackAccessClockForTest = 1000.8
             release?.resume(); release = nil
             try await wait { !s.imagePlaybackLeaseForTest.pending }
-            try check("replacement uses request start not completion", abs(s.imagePlaybackLeaseForTest.until - 1001.9) < 0.000001)
+            try check("replacement uses request start not completion", abs(s.imagePlaybackLeaseForTest.until - 1001.75) < 0.000001)
             let beforeSeek = s.imagePlaybackLeaseForTest.until
             s.seek(to: 180)
             try check("ordinary seek never extends lease", s.imagePlaybackLeaseForTest.until == beforeSeek)
-            s.imagePlaybackAccessClockForTest = max(beforeSeek - 0.1, s.imagePlaybackLeaseForTest.retry)
+            s.imagePlaybackAccessClockForTest = max(beforeSeek - 0.25, s.imagePlaybackLeaseForTest.retry)
             let beforePaused = s.imagePlaybackAccessChecksForTest
             try check("paused query does not renew valid lease", s.imagePlaybackAccessIsCurrent(for: item) && s.imagePlaybackAccessChecksForTest == beforePaused)
             _ = s.imagePlaybackAccessIsCurrent(for: item, allowProactiveRenewal: true)
@@ -329,7 +329,7 @@ import OnTheFrameEngine
             try await wait { !s.imagePlaybackLeaseForTest.pending }
             try check("fresh replacement can recover after old expiry", s.imagePlaybackAccessIsCurrent(for: item))
             let fresh = s.imagePlaybackLeaseForTest.until
-            s.imagePlaybackAccessClockForTest = max(fresh - 0.1, s.imagePlaybackLeaseForTest.retry)
+            s.imagePlaybackAccessClockForTest = max(fresh - 0.25, s.imagePlaybackLeaseForTest.retry)
             _ = s.imagePlaybackAccessIsCurrent(for: item, allowProactiveRenewal: true)
             try await wait { release != nil }
             let slowStart = s.imagePlaybackAccessClockForTest!
@@ -346,19 +346,19 @@ import OnTheFrameEngine
             try FileManager.default.moveItem(at: source, to: moved)
             defer { if FileManager.default.fileExists(atPath: moved.path) { try? FileManager.default.moveItem(at: moved, to: source) } }
             let oldExpiry = s.imagePlaybackLeaseForTest.until
-            s.imagePlaybackAccessClockForTest = max(oldExpiry - 0.1, s.imagePlaybackLeaseForTest.retry)
+            s.imagePlaybackAccessClockForTest = max(oldExpiry - 0.25, s.imagePlaybackLeaseForTest.retry)
             try check("old lease allowed until failure confirmed", s.imagePlaybackAccessIsCurrent(for: item, allowProactiveRenewal: true))
             try await wait { !s.imagePlaybackLeaseForTest.pending }
             try check("failure immediately revokes unexpired lease and presentation", s.imagePlaybackLeaseForTest.until == 0 && s.previewHost?.spectrumOverlay.layers.isEmpty == true && s.spectrumPreview.playback.currentFrame == nil)
             let failedCount = s.imagePlaybackAccessChecksForTest, throttle = s.imagePlaybackLeaseForTest.retry
             for _ in 0..<1000 { _ = s.imagePlaybackAccessIsCurrent(for: item) }
-            try check("failure polling cannot bypass throttle", s.imagePlaybackAccessChecksForTest == failedCount && throttle >= oldExpiry + 0.9 - 0.000001)
+            try check("failure polling cannot bypass throttle", s.imagePlaybackAccessChecksForTest == failedCount && throttle >= oldExpiry + 0.75 - 0.000001)
             try FileManager.default.moveItem(at: moved, to: source)
             s.imagePlaybackAccessClockForTest = throttle
             _ = s.imagePlaybackAccessIsCurrent(for: item)
             try await wait { !s.imagePlaybackLeaseForTest.pending }
             s.imagePlaybackAccessPreparedForTest = { await withCheckedContinuation { release = $0 } }
-            s.imagePlaybackAccessClockForTest = max(s.imagePlaybackLeaseForTest.until - 0.1, s.imagePlaybackLeaseForTest.retry)
+            s.imagePlaybackAccessClockForTest = max(s.imagePlaybackLeaseForTest.until - 0.25, s.imagePlaybackLeaseForTest.retry)
             _ = s.imagePlaybackAccessIsCurrent(for: item, allowProactiveRenewal: true)
             try await wait { release != nil }
             let retry = s.imagePlaybackLeaseForTest.retry, calls = s.imagePlaybackAccessChecksForTest, stale = s.imagePlaybackAccessStaleForTest

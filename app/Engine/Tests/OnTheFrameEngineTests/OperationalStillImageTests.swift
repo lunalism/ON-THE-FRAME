@@ -3,6 +3,59 @@ import AVFoundation
 @testable import OnTheFrameEngine
 
 final class OperationalStillImageTests: XCTestCase {
+    func testRightEdgeResizeAcrossWholeSongDoesNotRipple() async throws {
+        let source = try await ImageModelFixture.image(), imageID = UUID(), audioID = UUID(), subtitleLane = UUID()
+        let bytes = try Data(contentsOf: source.url)
+        let audio = MediaRef(id: audioID, name: "generated music", path: "/generated/music.wav", frameCount: 7316,
+                            hasAudio: true, size: 100, modifiedNs: 42, codec: "pcm", width: 0, height: 0,
+                            hasVideo: false, sampleRate: 48000, sampleCount: 11704320, channels: 2)
+        let original = try Timeline(media: [audio], mediaFrames: [audioID: 7316], mediaHasAudio: [audioID: true], mediaHasVideo: [audioID: false])
+            .registeringImage(source, id: imageID).placingImage(media: imageID, at: 0, lane: Lane.videoID)
+            .placing(media: audioID, at: 0, videoLane: nil, audioLane: Lane.audioID)
+        let clip = original.clips[0], sound = original.audioClips[0]
+        let t = try original.addingSpectrum(fromAudioClip: sound.id, newLaneName: "SP1")
+            .addingLane(.subtitle, name: "S1", id: subtitleLane)
+            .addingSubtitle(lane: subtitleLane, at: 60, length: 150, text: "test")
+        // The former UI route is a ripple operation and rejects the overlapping music.
+        XCTAssertThrowsError(try t.trimmingEnd(clip: clip.id, by: 7316 - clip.length))
+        let resized = try t.resizingStillImage(clip: clip.id, length: 7316)
+        XCTAssertEqual(resized.clips[0].start, 0); XCTAssertEqual(resized.clips[0].sourceIn, 0)
+        XCTAssertEqual(resized.clips[0].id, clip.id); XCTAssertEqual(resized.clips[0].length, sound.length)
+        XCTAssertEqual(resized.durationFrames, 7316); XCTAssertTrue(resized.isValid)
+        XCTAssertEqual(resized.audioClips, t.audioClips); XCTAssertEqual(resized.spectra, t.spectra)
+        XCTAssertEqual(resized.subtitles, t.subtitles); XCTAssertEqual(resized.lanes, t.lanes)
+        XCTAssertEqual(resized.mediaCatalog, t.mediaCatalog)
+        var h = EditHistory(t); h.beginGesture()
+        h.updateGesture(try t.resizingStillImage(clip: clip.id, length: 3600), focus: clip.id)
+        h.updateGesture(resized, focus: clip.id); h.commitGesture()
+        XCTAssertEqual(h.undoDepth, 1); h.undo(); XCTAssertEqual(h.timeline, t)
+        h.redo(); XCTAssertEqual(h.timeline, resized)
+        let project = try ProjectPersistence.make(timeline: resized, projectID: UUID())
+        let saved = source.url.deletingLastPathComponent().appendingPathComponent("resized.ontheframe")
+        _ = try ProjectPersistence.write(project, to: saved)
+        let reopened = try ProjectPersistence.decode(Data(contentsOf: saved))
+        XCTAssertEqual(reopened.version, 10); XCTAssertEqual(reopened.timeline.clips, resized.clips)
+        XCTAssertEqual(reopened.timeline.audioClips, resized.audioClips); XCTAssertEqual(reopened.timeline.spectra, resized.spectra)
+        XCTAssertEqual(reopened.timeline.subtitles, resized.subtitles)
+        XCTAssertEqual(try Data(contentsOf: source.url), bytes)
+    }
+
+    func testRightEdgeResizeBoundsAndSameLaneOverlap() async throws {
+        let (base, id) = try await base(), t = try base.placingImage(media: id, at: 20, lane: Lane.videoID)
+        let clip = t.clips[0]
+        for length in [0, -1, Int.max, Timeline.maxFrames] {
+            XCTAssertThrowsError(try t.resizingStillImage(clip: clip.id, length: length))
+        }
+        XCTAssertThrowsError(try t.resizingStillImage(clip: UUID(), length: 20))
+        let minimum = try t.resizingStillImage(clip: clip.id, length: 1)
+        XCTAssertEqual(minimum.clips[0].start, 20); XCTAssertEqual(minimum.clips[0].length, 1)
+        let neighbor = try t.placingImage(media: id, at: 200, lane: Lane.videoID)
+        XCTAssertEqual(try neighbor.resizingStillImage(clip: clip.id, length: 180).clips[1], neighbor.clips[1])
+        XCTAssertThrowsError(try neighbor.resizingStillImage(clip: clip.id, length: 181))
+        let moved = try minimum.relocating(clip: clip.id, toStart: 30)
+        XCTAssertEqual(moved.clips[0].start, 30); XCTAssertEqual(moved.clips[0].sourceIn, 0)
+    }
+
     func base() async throws -> (Timeline,UUID) {
         let id=UUID()
         return (try Timeline().registeringImage(await ImageModelFixture.image(),id:id),id)

@@ -48,6 +48,10 @@ import OnTheFrameEngine
                 let a = try image("original"), b = try image("replacement")
                 let imported = await s.importStillImage(at: a)
                 try check("fixture import", imported)
+                try check("fixture import only registers",s.timeline.clips.isEmpty && s.player.currentItem == nil && s.imagePreviewError == nil)
+                let imageID = ProjectPersistence.references(s.timeline).first!.id
+                s.addToTimeline(imageID)
+                try check("fixture explicitly inserted",s.timeline.clips.first?.mediaID == imageID && s.timeline.clips.first?.length == 150)
                 try await wait { state() == .validatedAtInstallation }
                 let item = s.player.currentItem!, session = s.projectSession, generation = s.generation
                 try check("B exact installed image mode", s.currentPlan?.isImagePreviewOnly == true &&

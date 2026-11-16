@@ -9,6 +9,66 @@ import Metal
 public enum InternalImagePreview {
     public typealias SourceAvailability = @MainActor @Sendable (UUID, Bool) -> Void
 
+    /// One project owns one cache. Entries contain only immutable, oriented sRGB
+    /// representations, never project state, layers, access grants or GPU objects.
+    /// The actor performs a miss synchronously so concurrent callers cannot decode
+    /// the same source twice or accumulate simultaneous proxy decodes in this cache.
+    public actor Cache {
+        public struct Statistics: Sendable {
+            public let hits, misses, decodes, evictions, invalidations: Int
+            public let entries, retainedBytes, peakBytes, maxBytes, maxEntries: Int
+        }
+        struct Representation: @unchecked Sendable { let image: CGImage }
+        private struct Key: Equatable {
+            let url: URL
+            let descriptor: StillImageDescriptor
+            let encodedSHA256: String
+        }
+        private struct Entry { let key: Key; let value: Representation; let bytes: Int }
+        private var entries: [Entry] = [] // least recently used first; at most eight
+        private var bytes = 0, peakBytes = 0
+        private var hits = 0, misses = 0, decodes = 0, evictions = 0, invalidations = 0
+        private let byteLimit: Int, entryLimit: Int
+        public init() { byteLimit = 64 * 1024 * 1024; entryLimit = 8 }
+        // Smaller budgets make eviction and rejection deterministic in focused tests.
+        init(byteLimit: Int, entryLimit: Int) {
+            precondition((1...(64 * 1024 * 1024)).contains(byteLimit) && (1...8).contains(entryLimit))
+            self.byteLimit = byteLimit; self.entryLimit = entryLimit
+        }
+        public var statistics: Statistics {
+            .init(hits: hits, misses: misses, decodes: decodes, evictions: evictions,
+                  invalidations: invalidations, entries: entries.count, retainedBytes: bytes,
+                  peakBytes: peakBytes, maxBytes: byteLimit, maxEntries: entryLimit)
+        }
+        func image(at url: URL, descriptor: StillImageDescriptor, encodedSHA256: String) throws -> Representation {
+            try Task.checkCancellation()
+            // A cached image is never evidence that the original is still accessible.
+            // The planner has already fully validated the current encoded bytes; this
+            // additional open/fstat retains the second-read race and permission fence.
+            try InternalImagePreview.requireReadable(at: url, expected: descriptor.identity)
+            let key = Key(url: url.standardizedFileURL, descriptor: descriptor, encodedSHA256: encodedSHA256)
+            for index in entries.indices.reversed() where entries[index].key.url == key.url && entries[index].key != key {
+                bytes -= entries.remove(at: index).bytes; invalidations += 1
+            }
+            if let index = entries.firstIndex(where: { $0.key == key }) {
+                let entry = entries.remove(at: index); entries.append(entry); hits += 1
+                try Task.checkCancellation()
+                return entry.value
+            }
+            misses += 1; decodes += 1
+            let value = Representation(image: try InternalImagePreview.proxyImage(at: url, descriptor: descriptor))
+            try Task.checkCancellation()
+            let cost = value.image.bytesPerRow * value.image.height
+            guard cost > 0, cost <= byteLimit else { throw SecondReadFailure.resources }
+            while entries.count >= entryLimit || cost > byteLimit - bytes {
+                bytes -= entries.removeFirst().bytes; evictions += 1
+            }
+            entries.append(Entry(key: key, value: value, bytes: cost)); bytes += cost
+            peakBytes = max(peakBytes, bytes)
+            return value
+        }
+    }
+
     static func error(_ s: String) -> NSError { NSError(domain:"OTFInternalImagePreview",code:1,userInfo:[NSLocalizedDescriptionKey:s]) }
     public static func containsImages(_ t: Timeline) -> Bool { !t.stillImageIDs.isEmpty }
 
@@ -16,9 +76,10 @@ public enum InternalImagePreview {
     /// persisted descriptor is compared against a fresh full probe under source access.
     public static func plan(_ t: Timeline, media: [UUID:MediaAsset], enabled: Bool,
                             settings: RenderSettings = .m1, resolvedImages:[UUID:URL] = [:],
+                            cache: Cache? = nil,
                             onSourceAvailability: SourceAvailability? = nil) async throws -> PlannedComposition {
-        guard enabled else { throw error("내부 이미지 프리뷰가 꺼져 있습니다.") }
-        let work=Task.detached { try await build(t,media:media,settings:settings,resolvedImages:resolvedImages,onSourceAvailability:onSourceAvailability) }
+        guard enabled else { throw error("이 빌드에서는 이미지 프리뷰를 사용할 수 없습니다.") }
+        let work=Task.detached { try await build(t,media:media,settings:settings,resolvedImages:resolvedImages,cache:cache,onSourceAvailability:onSourceAvailability) }
         return try await withTaskCancellationHandler(operation:{let result=try await work.value;try Task.checkCancellation();return result},onCancel:{work.cancel()})
     }
     enum SecondReadFailure: Error, Equatable, CustomStringConvertible {
@@ -63,10 +124,47 @@ public enum InternalImagePreview {
 
     private static func thumbnail(at url: URL, maxSize: Int) -> CGImage? {
         guard let src = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
-        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
-                                        kCGImageSourceCreateThumbnailWithTransform: true,
-                                        kCGImageSourceThumbnailMaxPixelSize: maxSize]
+        var options = StillImageProbe.sdrDecodeOptions
+        options[kCGImageSourceCreateThumbnailFromImageAlways] = true
+        options[kCGImageSourceCreateThumbnailWithTransform] = true
+        options[kCGImageSourceThumbnailMaxPixelSize] = maxSize
         return CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary)
+    }
+
+    private static func requireReadable(at url: URL, expected: FileIdentity) throws {
+        let fd = Darwin.open(url.path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else { throw SecondReadFailure.fromErrno(errno) }
+        defer { _ = Darwin.close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0 else { throw SecondReadFailure.unverified(errno) }
+        guard FileIdentity.fromStat(info) == expected else { throw SecondReadFailure.changed }
+    }
+
+    static func proxyImage(at url: URL, descriptor: StillImageDescriptor,
+                           read: (URL, Int) -> CGImage? = thumbnail) throws -> CGImage {
+        try Task.checkCancellation()
+        return try autoreleasepool {
+            let limit = StillImageProbe.validationProxyMaxDimension
+            let expected = StillImageProbe.proxySize(for: descriptor, maxDimension: limit)
+            guard let image = read(url, limit), image.width > 0, image.height > 0,
+                  image.width <= limit, image.height <= limit,
+                  image.width <= descriptor.displayWidth, image.height <= descriptor.displayHeight,
+                  abs(image.width - expected.width) <= 1, abs(image.height - expected.height) <= 1 else {
+                throw classifyReadFailure(at: url, expected: descriptor.identity)
+            }
+            guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+                  let context = CGContext(data: nil, width: image.width, height: image.height,
+                    bitsPerComponent: 8, bytesPerRow: image.width * 4, space: space,
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw SecondReadFailure.resources }
+            // ColorSync converts tagged Display P3 into the existing SDR sRGB
+            // working representation; alpha stays premultiplied. No source rewrite.
+            context.interpolationQuality = .none
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            try Task.checkCancellation()
+            try requireReadable(at: url, expected: descriptor.identity)
+            guard let normalized = context.makeImage() else { throw SecondReadFailure.resources }
+            return normalized
+        }
     }
 
     static func decodedImage(at url: URL, descriptor: StillImageDescriptor,
@@ -78,12 +176,12 @@ public enum InternalImagePreview {
         return image
     }
 
-    private static func build(_ t:Timeline,media:[UUID:MediaAsset],settings:RenderSettings,resolvedImages:[UUID:URL],
+    private static func build(_ t:Timeline,media:[UUID:MediaAsset],settings:RenderSettings,resolvedImages:[UUID:URL],cache:Cache?,
                               onSourceAvailability: SourceAvailability?) async throws -> PlannedComposition {
-        guard settings.renderSize==CGSize(width:1920,height:1080),settings.fps==30,t.durationFrames>0 else {throw error("내부 이미지 프리뷰는 FHD 30fps만 검증합니다.")}
+        guard settings.renderSize==CGSize(width:1920,height:1080),settings.fps==30,t.durationFrames>0 else {throw error("이미지 프리뷰는 FHD 30fps 프로젝트에서 사용할 수 있습니다.")}
         try Task.checkCancellation()
         let renderer=try ImagePreviewMetal()
-        var images=[UUID:MTLTexture](),sizes=[UUID:CGSize](),decodedBytes=0
+        var images=[UUID:MTLTexture](),sizes=[UUID:CGSize](),originalSizes=[UUID:CGSize](),decodedBytes=0
         // Includes hidden and unused catalog images: never silently omit invalid sources.
         for entry in t.mediaCatalog {
             guard let source=entry.still else {continue}
@@ -108,11 +206,19 @@ public enum InternalImagePreview {
             }
             await onSourceAvailability?(entry.id, true)
             let d=proof.descriptor
-            let count=d.displayWidth*d.displayHeight*4
-            guard count<=64*1024*1024-decodedBytes else {throw error("내부 이미지 프리뷰의 64 MiB 이미지 예산을 초과했습니다.")}
+            // The nil-cache path remains the existing original-resolution internal
+            // export path. Only the app's explicit project cache opts into proxies.
+            if cache == nil {
+                guard d.displayWidth*d.displayHeight*4<=64*1024*1024-decodedBytes else {throw error("이미지 프리뷰의 디코딩된 이미지 합계가 64 MiB 제한을 초과했습니다.")}
+            }
             do {
                 try Task.checkCancellation()
-                let im = try decodedImage(at: url, descriptor: d)
+                let im: CGImage
+                if let cache {
+                    im = try await cache.image(at: url, descriptor: d, encodedSHA256: proof.encodedSHA256).image
+                } else { im = try decodedImage(at: url, descriptor: d) }
+                let count = im.width * im.height * 4
+                guard count<=64*1024*1024-decodedBytes else {throw error("이미지 프리뷰의 디코딩된 이미지 합계가 64 MiB 제한을 초과했습니다.")}
                 guard let space=CGColorSpace(name:CGColorSpace.sRGB),
                       let c=CGContext(data:nil,width:im.width,height:im.height,bitsPerComponent:8,bytesPerRow:im.width*4,space:space,bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue),let bytes=c.data else {throw SecondReadFailure.resources}
                 c.interpolationQuality = .none;c.draw(im,in:CGRect(x:0,y:0,width:im.width,height:im.height))
@@ -121,13 +227,14 @@ public enum InternalImagePreview {
                 guard stat(url.path, &current) == 0 else { throw SecondReadFailure.fromErrno(errno) }
                 guard FileIdentity.fromStat(current) == d.identity else { throw SecondReadFailure.changed }
                 images[entry.id]=try renderer.upload(width:im.width,height:im.height,bytes:bytes)
+                sizes[entry.id] = CGSize(width: im.width, height: im.height)
+                originalSizes[entry.id] = CGSize(width: d.displayWidth, height: d.displayHeight)
+                decodedBytes += count
             } catch let failure as SecondReadFailure {
                 try Task.checkCancellation()
                 if failure.sourceUnavailable { await onSourceAvailability?(entry.id, false) }
                 throw failure
             }
-            sizes[entry.id] = CGSize(width: d.displayWidth, height: d.displayHeight)
-            decodedBytes += count
         }
         // Explicit AUDIO-ONLY projection. It never becomes model/session state and
         // is never used for eligibility or image visibility. Reuse exact native audio
@@ -167,8 +274,10 @@ public enum InternalImagePreview {
                 guard let clip=t.clips.first(where:{$0.lane==lane.id && $0.start<=lo && $0.end>=hi}) else {continue}
                 let transform:CGAffineTransform
                 if let size=sizes[clip.mediaID] {
+                    let natural = originalSizes[clip.mediaID]!
                     let x=clip.effectiveTransform,cx=settings.renderSize.width/2,cy=settings.renderSize.height/2
-                    transform=CompositionPlanner.fitTransform(natural:size,preferred:.identity,render:settings.renderSize)
+                    transform=CGAffineTransform(scaleX: natural.width / size.width, y: natural.height / size.height)
+                        .concatenating(CompositionPlanner.fitTransform(natural:natural,preferred:.identity,render:settings.renderSize))
                         .concatenating(CGAffineTransform(translationX:-cx,y:-cy))
                         .concatenating(CGAffineTransform(scaleX:x.scale,y:x.scale))
                         .concatenating(CGAffineTransform(translationX:cx+x.x,y:cy+x.y))
@@ -178,7 +287,7 @@ public enum InternalImagePreview {
                 }
                 layers.append(.init(image:images[clip.mediaID],track:videoTracks[clip.id],inverse:transform.inverted()))
             }
-            guard layers.count<=8 else {throw error("내부 이미지 프리뷰는 동시 시각 레이어 8개까지 검증합니다.")}
+            guard layers.count<=8 else {throw error("이미지 프리뷰는 동시에 표시하는 시각 레이어를 8개까지 지원합니다.")}
             instructions.append(ImagePreviewInstruction(range:CMTimeRange(start:settings.time(lo),duration:settings.time(hi-lo)),carrier:carrier.trackID,layers:layers,renderer:renderer,projectEnd:settings.time(t.durationFrames)))
         }
         guard CMTimeCompare(comp.duration,settings.time(t.durationFrames))==0 else {throw error("프리뷰 시계 길이가 프로젝트와 다릅니다.")}

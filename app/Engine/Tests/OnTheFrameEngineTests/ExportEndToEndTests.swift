@@ -10,7 +10,8 @@ import XCTest
 /// 비샌드박스 프로세스에서의 엔진 검증이다. 샌드박스 앱 검증은 app/scripts/selftest.sh(앱 자체 검사)가 맡는다.
 /// 작업 디렉터리: app/.build/test-work(Git 무시). fixture는 재사용하고 출력은 테스트마다 지운다.
 final class ExportEndToEndTests: XCTestCase {
-    static let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../.build/test-work").standardizedFileURL
+    static let root = ProcessInfo.processInfo.environment["OTF_ENGINE_TEST_ROOT"].map { URL(fileURLWithPath: $0) }
+        ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../.build/test-work").standardizedFileURL
     var fixtures: URL { Self.root.appendingPathComponent("fixtures") }
     var out: URL!
 

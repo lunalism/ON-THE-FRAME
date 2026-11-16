@@ -4,6 +4,27 @@ import ImageIO
 @testable import OnTheFrameEngine
 
 final class StillImageImportTests: XCTestCase {
+    func testRegistrationIsIndependentOfOccupiedTimelineAndExplicitInsertion() async throws {
+        let source = try await ImageModelFixture.image(), first = UUID(), second = UUID()
+        let prepared = try await StillImageImport.prepare(source.url), bytes = try Data(contentsOf: source.url)
+        let catalog = try StillImageImport.registering(prepared,into:Timeline(),mediaID:first)
+        XCTAssertTrue(catalog.clips.isEmpty);XCTAssertTrue(catalog.audioClips.isEmpty)
+        XCTAssertEqual(catalog.durationFrames,0);XCTAssertTrue(catalog.isValid)
+        XCTAssertThrowsError(try StillImageImport.registering(prepared,into:catalog,mediaID:first))
+        let occupied = try catalog.appending(media:first,videoLane:Lane.videoID,audioLane:nil)
+        let registered = try StillImageImport.registering(prepared,into:occupied,mediaID:second)
+        XCTAssertEqual(registered.clips,occupied.clips);XCTAssertEqual(registered.audioClips,occupied.audioClips)
+        XCTAssertEqual(registered.durationFrames,occupied.durationFrames);XCTAssertEqual(registered.stillImageIDs,[first,second])
+        let inserted = try registered.appending(media:second,videoLane:Lane.videoID,audioLane:nil)
+        XCTAssertEqual(inserted.clips.map(\.start),[0,150]);XCTAssertEqual(inserted.clips.map(\.length),[150,150])
+        XCTAssertEqual(inserted.clips.map(\.sourceIn),[0,0]);XCTAssertTrue(inserted.audioClips.isEmpty)
+        XCTAssertThrowsError(try registered.placing(media:second,at:0,videoLane:Lane.videoID,audioLane:nil))
+        let persisted = try ProjectPersistence.make(timeline:registered,projectID:UUID())
+        let reopened = try ProjectPersistence.decode(ProjectPersistence.encode(persisted,at:source.url.deletingLastPathComponent().appendingPathComponent("catalog.ontheframe")))
+        XCTAssertEqual(reopened.timeline.clips,occupied.clips);XCTAssertEqual(reopened.timeline.stillImageIDs,[first,second])
+        XCTAssertEqual(try Data(contentsOf:source.url),bytes)
+    }
+
     func testProbeToAtomicOperationalInsertion() async throws {
         let root=URL(fileURLWithPath:ProcessInfo.processInfo.environment["OTF_MODEL03_RUN"]!).appendingPathComponent("public-import")
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)

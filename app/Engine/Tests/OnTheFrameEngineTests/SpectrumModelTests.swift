@@ -367,6 +367,80 @@ final class SpectrumModelTests: XCTestCase {
         XCTAssertEqual(made.spectra[0].start, 20); XCTAssertEqual(made.spectra[0].length, 60); XCTAssertEqual(made.spectra[0].sourceKey, w2)
     }
 
+    /// SP-7A-01: lane removal is one snapshot edit, including rich clips and a shared source.
+    func testSpectrumLaneRemovalHistoryAndFormat10Persistence() async throws {
+        var (t, audio, _) = try base()
+        let removedLane = UUID(), keptLane = UUID(), subLane = UUID(), imageLane = UUID()
+        t = try t.addingLane(.spectrum, name: "remove", id: removedLane)
+            .addingLane(.spectrum, name: "keep", id: keptLane, outward: true)
+            .addingLane(.subtitle, name: "subtitle", id: subLane)
+            .addingSubtitle(lane: subLane, at: 20, length: 45, text: "preserved")
+            .addingLane(.video, name: "image", id: imageLane, outward: true)
+        let image = try await ImageModelFixture.image(), imageID = UUID()
+        t = try t.registeringImage(image, id: imageID).placingImage(media: imageID, at: 0, lane: imageLane, length: 120, clipID: UUID())
+        let key = try XCTUnwrap(t.clip(audio)).lineageKey
+        var style = SpectrumItemStyle.provisionalDefault
+        style.thicknessMilli = 3125; style.reactionPercent = 150
+        style.red = 15; style.green = 249; style.blue = 27; style.alpha = 192
+        let ids = [UUID(), UUID(), UUID()]
+        t = try t.addingSpectrum(lane: removedLane, at: 20, length: 20, sourceKey: key, style: style, id: ids[0])
+        style.mode = .analog; style.sides = .above; style.reactionPercent = 39
+        t = try t.addingSpectrum(lane: removedLane, at: 45, length: 30, sourceKey: key, style: style, id: ids[1])
+            .addingSpectrum(lane: keptLane, at: 20, length: 60, sourceKey: key, style: style, id: ids[2])
+        let original = t, audioBytes = try Data(contentsOf: wav.url), imageBytes = try Data(contentsOf: image.url)
+        var history = EditHistory(original)
+        let removed = try original.removingLane(removedLane)
+        history.apply(removed, focus: ids[0])
+        XCTAssertEqual(history.undoDepth, 1)
+        XCTAssertNil(removed.laneInfo(removedLane)); XCTAssertTrue(removed.spectra(inLane: removedLane).isEmpty)
+        XCTAssertEqual(removed.spectra, original.spectra.filter { $0.lane != removedLane })
+        XCTAssertEqual(removed.lanes, original.lanes.filter { $0.id != removedLane })
+        XCTAssertEqual(removed.clips, original.clips); XCTAssertEqual(removed.audioClips, original.audioClips)
+        XCTAssertEqual(removed.subtitles, original.subtitles); XCTAssertEqual(removed.mediaCatalog, original.mediaCatalog)
+        XCTAssertEqual(removed.spectrumSourceState(try XCTUnwrap(removed.spectrum(ids[2]))), .ok)
+        XCTAssertTrue(removed.isValid)
+        let parent = URL(fileURLWithPath: try XCTUnwrap(ProcessInfo.processInfo.environment["OTF_MODEL03_RUN"]))
+        let dir = parent.appendingPathComponent("lane-delete-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        func saveAndReopen(_ timeline: Timeline, _ name: String) throws {
+            let url = dir.appendingPathComponent(name + ".ontheframe")
+            let project = try ProjectPersistence.make(timeline: timeline, projectID: UUID())
+            _ = try ProjectPersistence.write(project, to: url)
+            let reopened = try ProjectPersistence.decode(Data(contentsOf: url))
+            XCTAssertEqual(reopened.version, 10)
+            XCTAssertEqual(reopened.timeline.lanes, timeline.lanes)
+            XCTAssertEqual(reopened.timeline.spectra, timeline.spectra)
+            XCTAssertEqual(reopened.timeline.clips, timeline.clips)
+            XCTAssertEqual(reopened.timeline.audioClips, timeline.audioClips)
+            XCTAssertEqual(reopened.timeline.subtitles, timeline.subtitles)
+            XCTAssertEqual(reopened.timeline.mediaCatalog.map(\.id), timeline.mediaCatalog.map(\.id))
+        }
+        try saveAndReopen(history.timeline, "deleted")
+        XCTAssertEqual(history.undo(), ids[0]); XCTAssertEqual(history.timeline, original)
+        XCTAssertEqual(history.undoDepth, 0); XCTAssertFalse(history.canUndo)
+        try saveAndReopen(history.timeline, "undone")
+        history.redo(); XCTAssertEqual(history.timeline, removed); XCTAssertEqual(history.undoDepth, 1)
+        XCTAssertEqual(try Data(contentsOf: wav.url), audioBytes)
+        XCTAssertEqual(try Data(contentsOf: image.url), imageBytes)
+    }
+
+    func testEmptyAndSingleSpectrumLaneRemovalHistory() throws {
+        for count in [0, 1] {
+            let (baseTimeline, audio, _) = try base(), lane = UUID()
+            var original = try baseTimeline.addingLane(.spectrum, name: "SP", id: lane)
+            if count == 1 { original = try original.addingSpectrum(lane: lane, at: 20, length: 30, sourceKey: original.clip(audio)!.lineageKey) }
+            var history = EditHistory(original)
+            let removed = try original.removingLane(lane)
+            history.apply(removed, focus: original.spectra.first?.id)
+            XCTAssertTrue(removed.isValid); XCTAssertTrue(removed.spectra.isEmpty)
+            XCTAssertEqual(removed.audioClips, original.audioClips)
+            XCTAssertEqual(removed.clips, original.clips); XCTAssertEqual(removed.mediaCatalog, original.mediaCatalog)
+            XCTAssertEqual(history.undoDepth, 1)
+            history.undo(); XCTAssertEqual(history.timeline, original); XCTAssertFalse(history.canUndo)
+            history.redo(); XCTAssertEqual(history.timeline, removed)
+        }
+    }
+
     /// 리플 편집이 스펙트럼도 민다·당기고, 스펙트럼에 걸친 지점에서는 리플을 거부한다
     /// 2C-1(2026-10-26): 스펙트럼 끌어 옮기기 붙음(snappedSpectrumDelta)과 옮기기(relocatingSpectrum) — 0·클립·다른 스펙트럼 경계, 같은 거리, 음수·넘침,
     /// 자막 경계는 대상 아님, 다른 종류의 붙음은 스펙트럼 경계에 붙지 않음, 옮겨도 ID·소스·모양·다른 내용 그대로

@@ -33,7 +33,8 @@ final class SpectrumPreviewSession {
     }
 
     func update(timeline: Timeline, media: [MediaAsset]) {
-        playback.stop()
+        playback.stop(detachTiming: false)
+        playback.timing.invalidateApproval()
         revision &+= 1
         playbackTimeline = timeline
         playbackAssets = Dictionary(uniqueKeysWithValues: media.map { ($0.id, $0) })

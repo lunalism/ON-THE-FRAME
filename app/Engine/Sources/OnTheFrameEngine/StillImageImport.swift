@@ -15,6 +15,10 @@ public enum StillImageImport {
             return value
         }, onCancel: { work.cancel() })
     }
+    /// Register a validated source without choosing a timeline position or creating a clip.
+    public static func registering(_ image: Prepared, into timeline: Timeline, mediaID: UUID) throws -> Timeline {
+        try timeline.registeringImage(image.source,id:mediaID)
+    }
     /// Both values are built locally; failed placement never registers orphan media.
     public static func inserting(_ image: Prepared, into timeline: Timeline, at start: Int,
                                  lane: UUID, mediaID: UUID, clipID: UUID) throws -> Timeline {

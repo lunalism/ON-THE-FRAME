@@ -45,6 +45,9 @@ import ImageIO
                 let imported=await s.importStillImage(at:a)
                 try check("generated import",imported)
                 let id=ProjectPersistence.references(s.timeline)[0].id,projectID=s.projectID
+                try check("generated import registers without placement",s.timeline.clips.isEmpty)
+                s.addToTimeline(id)
+                try check("generated image explicitly inserted",s.timeline.clips.first?.mediaID == id && s.timeline.clips.first?.length == 150)
                 let original=s.timeline
                 func captureRow(_ phase: String) async throws {
                     try await Task.sleep(nanoseconds: 200_000_000)
@@ -306,11 +309,15 @@ import ImageIO
                 try await checkRow("reopen", missing: false, source: b)
                 s.applyImageAvailability(false, id: id, snapshot: s.timeline, session: linkedSession, generation: s.generation)
                 try check("previous session cannot mark reopened source missing", s.missingMedia[id] == nil)
-                let importedSecond = await s.importStillImage(at: c, atFrame: s.durationFrames)
+                let beforeSecond = s.timeline
+                let importedSecond = await s.importStillImage(at: c)
                 try check("second image available", importedSecond)
+                try check("second import preserves occupied timeline",s.timeline.clips == beforeSecond.clips && s.timeline.durationFrames == beforeSecond.durationFrames)
                 guard let second = ProjectPersistence.references(s.timeline).first(where: { $0.id != id }) else {
                     throw Failure(name: "second image reference")
                 }
+                s.addToTimeline(second.id)
+                try check("second image explicitly appended",s.timeline.clips.first(where: { $0.mediaID == second.id })?.start == (beforeSecond.clips.map(\.end).max() ?? 0))
                 try FileManager.default.moveItem(at: c, to: folder.appendingPathComponent("second-moved.png"))
                 s.timelineChanged()
                 try await waitForPreview(true)

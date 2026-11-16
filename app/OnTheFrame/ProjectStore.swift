@@ -188,7 +188,7 @@ final class ProjectStore {
     static let trace = Logger(subsystem: "dev.ontheframe.app", category: "trace")
     private(set) var importProgress: ImportProgress?
     /// 아직 결과가 나지 않은 파일 수(진행 중 묶음의 남은 파일 + 대기 중 묶음). 검사·자체 검사용.
-    var importing: Int { (importProgress.map { $0.total - $0.completed } ?? 0) + pendingOps.reduce(0) { if case .importFiles(let u) = $1 { return $0 + u.count }; return $0 } }
+    var importing: Int { (importProgress.map { $0.total - $0.completed } ?? 0) + (imageImportTask != nil || imageImportBusy ? 1 : 0) + pendingOps.reduce(0) { if case .importFiles(let u) = $1 { return $0 + u.count }; return $0 } }
     /// 가져오기·내보내기는 겹치지 않게 차례로 한다(카드 하나, 같은 미디어 목록을 동시에 바꾸지 않음). 진행 중이면 대기열에 넣는다.
     enum PendingOp { case importFiles([URL]), export(ExportDestination) }
     private(set) var pendingOps: [PendingOp] = []
@@ -368,7 +368,7 @@ final class ProjectStore {
 
     var mediaByID: [UUID: MediaAsset] { Dictionary(uniqueKeysWithValues: assets.map { ($0.id, $0) }) }
     var durationFrames: Int { timeline.durationFrames }
-    var canExport: Bool { !timeline.isEmpty && exportPhase == .idle && importProgress == nil && pendingOps.isEmpty && exportBlockReason == nil && openProgress == nil && !openRequested }
+    var canExport: Bool { !timeline.isEmpty && exportPhase == .idle && importProgress == nil && !imageImportBusy && imageImportTask == nil && pendingOps.isEmpty && exportBlockReason == nil && openProgress == nil && !openRequested }
 
     // MARK: 가져오기
 
@@ -380,19 +380,56 @@ final class ProjectStore {
     ///   (묶음 반영 전이므로). 앞서 가져온 영상과 편집은 그대로다. 대기 중인 가져오기 묶음도 함께 버린다.
     /// - 취소·버리기·창 닫기 뒤에 도착한 결과는 회차 번호로 버린다.
     /// - 내보내는 중이면 끝난 뒤 시작한다(대기열).
+    /// - 이미지가 섞인 선택은 연속된 영상·소리 묶음과 개별 이미지로 나눠 같은 대기열에서 처리한다.
+    ///   이미지는 영상·소리와 같이 목록에만 등록한다. 타임라인 배치는 미디어의 + 단추로 따로 한다.
+    ///   취소하면 아직 반영하지 않은 부분만 버린다.
     func importFiles(_ urls: [URL]) {
         guard !urls.isEmpty, !discardConfirmed, !editorClosedByUser else { return }
+        // 메뉴·미디어 목록·Finder 모두 같은 대기열을 쓴다. 이미지는 기존 이미지 검증으로,
+        // 영상·소리는 기존 묶음 검사로 보내며, 섞어 고른 파일도 선택 순서대로 처리한다.
         pendingOps.append(.importFiles(urls))
         runNextOp()
     }
 
     /// 대기열에서 다음 작업을 시작한다(가져오기·내보내기 중 하나만 진행).
     private func runNextOp() {
-        guard openProgress == nil, !openRequested, importProgress == nil, importTask == nil, exportPhase == .idle, exportTask == nil, !imageImportBusy, !pendingOps.isEmpty else { return }
+        guard openProgress == nil, !openRequested, importProgress == nil, importTask == nil, exportPhase == .idle, exportTask == nil, !imageImportBusy, imageImportTask == nil, !pendingOps.isEmpty, fileCommandsAvailable else { return }
         clearImportDone()
         switch pendingOps.removeFirst() {
-        case .importFiles(let urls): runImport(urls)
+        case .importFiles(let urls):
+            guard !urls.isEmpty else { runNextOp(); return }
+            if Self.isEnabledImageImport(urls[0]) {
+                if urls.count > 1 { pendingOps.insert(.importFiles(Array(urls.dropFirst())), at: 0) }
+                runImageImport(urls[0])
+            } else {
+                let end = urls.firstIndex(where: Self.isEnabledImageImport) ?? urls.endIndex
+                if end < urls.endIndex { pendingOps.insert(.importFiles(Array(urls[end...])), at: 0) }
+                runImport(Array(urls[..<end]))
+            }
         case .export(let d): beginExport(d)
+        }
+    }
+
+    private static func isEnabledImageImport(_ url: URL) -> Bool {
+        imageImportEnabled && ["jpg", "jpeg", "png"].contains(url.pathExtension.lowercased())
+    }
+
+    private func runImageImport(_ url: URL) {
+        let session = projectSession
+        imageImportTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.imageImportTask = nil; self.runNextOp() }
+            let imported = await self.importStillImage(at: url)
+            if !imported, !Task.isCancelled, !self.discardConfirmed, !self.editorClosedByUser,
+               self.projectSession == session {
+                let message: String
+                if let failure = self.statusMessage, failure.hasPrefix("\(url.lastPathComponent)을(를) 가져오지 못했습니다:") {
+                    message = failure
+                } else {
+                    message = "\(url.lastPathComponent)을(를) 가져오지 못했습니다. 편집 내용이 바뀌었거나 미디어를 등록할 수 없는 상태입니다. 진행 중인 작업을 마친 뒤 다시 시도하세요."
+                }
+                self.presentAlert(AlertInfo(title: Self.rejectTitle, message: message))
+            }
         }
     }
 
@@ -488,6 +525,7 @@ final class ProjectStore {
     /// 가져오기 취소(진행 중 묶음과 대기 중 가져오기 묶음). 결과는 버리고, 카드는 검사가 멈출 때까지 "취소하는 중"을 보인다.
     func cancelImport() {
         pendingOps.removeAll { if case .importFiles = $0 { return true }; return false }
+        cancelImageImport()
         guard importTask != nil else { return }
         importEpoch += 1
         importProgress?.cancelling = true
@@ -504,6 +542,7 @@ final class ProjectStore {
             self?.shownAlerts.removeFirst()
             self?.alert = self?.shownAlerts.first
             a.onButton?(i)
+            self?.runNextOp()
         }
         shownAlerts.append(a)
         if alert == nil { alert = a }
@@ -523,7 +562,7 @@ final class ProjectStore {
 
     /// Internal import requires BOTH a custom build and an explicit launch argument.
     static var imageImportEnabled: Bool {
-        #if OTF_IMAGE_IMPORT
+        #if DEBUG && OTF_IMAGE_IMPORT
         return ProcessInfo.processInfo.arguments.contains("-OTFEnableImageImport")
         #else
         return false
@@ -539,52 +578,40 @@ final class ProjectStore {
     #endif
 
     func presentStillImageImportPanel() {
-        guard Self.imageImportEnabled else { statusMessage = "내부 이미지 가져오기가 꺼져 있습니다."; return }
-        guard !fileCommandBlocked(), !imageImportBusy else { return }
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.jpeg, .png]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.message = "내부 시험용 JPEG/PNG: 최대 8 MiB·2048 px. 공개 이미지 기능이 아닙니다."
-        guard runPanel(panel) == .OK, let url = panel.url else { return }
-        requestStillImageImport(url)
+        // Compatibility for existing callers; the owner has one normal import operation.
+        presentImportPanel()
     }
     /// Also used for a single JPEG/PNG Finder-open event in the explicitly gated build.
     func requestStillImageImport(_ url: URL) {
-        guard Self.imageImportEnabled, !fileCommandBlocked(), !imageImportBusy, imageImportTask == nil else { return }
-        imageImportTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer { self.imageImportTask = nil }
-            _ = await self.importStillImage(at:url)
-        }
+        guard Self.imageImportEnabled, !fileCommandBlocked() else { return }
+        importFiles([url])
     }
     func cancelImageImport() {
+        pendingOps.removeAll { if case .importFiles = $0 { return true }; return false }
         imageImportEpoch += 1
         imageImportTask?.cancel()
         if imageImportBusy { statusMessage = "이미지 가져오기를 취소하는 중입니다." }
     }
     @discardableResult
-    func importStillImage(at url: URL, atFrame: Int? = nil, lane: UUID? = nil) async -> Bool {
+    func importStillImage(at url: URL) async -> Bool {
         // The mutation boundary, not just the menu, enforces development gating.
-        guard Self.imageImportEnabled else { statusMessage = "내부 이미지 가져오기가 꺼져 있습니다."; return false }
+        guard Self.imageImportEnabled else { statusMessage = "이 빌드에서는 이미지 가져오기를 사용할 수 없습니다."; return false }
         guard !Task.isCancelled, !imageImportBusy, importTask == nil, exportTask == nil,
               openProgress == nil, !openRequested, !discardConfirmed, !editorClosedByUser,
               gestureBase == nil, fileCommandsAvailable else { return false }
         let before = timeline, session = projectSession, epoch = imageImportEpoch
-        let start = atFrame ?? playhead
-        guard let target = lane ?? addDestination(hasVideo:true,hasAudio:false).video else { return false }
         imageImportBusy = true
-        statusMessage = "내부 이미지 검증 중: \(url.lastPathComponent)"
+        statusMessage = "이미지 가져오는 중… \(url.lastPathComponent)"
         let acquired = startPersistenceScope(url)
         var transferred = false
         defer {
             if acquired && !transferred { stopPersistenceScope(url) }
             Self.trace.info("internal image import access retired scopeReleased=\(acquired && !transferred, privacy: .public) scopeTransferred=\(transferred, privacy: .public)")
-            imageImportBusy = false; imageImportTask = nil
+            imageImportBusy = false
             if session == projectSession, timeline == before, epoch != imageImportEpoch || Task.isCancelled {
                 statusMessage = "이미지 가져오기를 취소했습니다. 프로젝트는 그대로입니다."
             }
-            runNextOp()
+            if imageImportTask == nil { runNextOp() }
         }
         func current() -> Bool {
             !Task.isCancelled && epoch == imageImportEpoch && session == projectSession && timeline == before
@@ -607,32 +634,51 @@ final class ProjectStore {
             #else
             bookmark = try url.bookmarkData(options:[.withSecurityScope],includingResourceValuesForKeys:nil,relativeTo:nil)
             #endif
-            let mid = UUID(), cid = UUID()
-            let candidate = try StillImageImport.inserting(prepared,into:before,at:start,lane:target,mediaID:mid,clipID:cid)
+            let mid = UUID()
+            // Build every history snapshot locally. Registration is non-Undo, like AV import,
+            // but the throwing identity check must never leave a partially updated real history.
+            var candidate = history
+            var registrationError: Error?
+            candidate.mapAll { snapshot in
+                guard registrationError == nil else { return snapshot }
+                do { return try StillImageImport.registering(prepared,into:snapshot,mediaID:mid) }
+                catch { registrationError = error; return snapshot }
+            }
+            if let registrationError { throw registrationError }
             guard current() else { return false }
-            pauseForEdit()
-            history.apply(candidate,focus:cid)
+            history = candidate
             bookmarks[mid] = bookmark; imageSourceURLs[mid] = prepared.url
             if acquired { scopedURLs.append(url); transferred = true }
-            selection = cid; linkCandidate = nil
-            Self.trace.info("internal image import committed media=\(mid.uuidString, privacy: .public) clip=\(cid.uuidString, privacy: .public) sourceIn=0 length=150 scopeTransferred=\(acquired, privacy: .public) sessionScopes=\(self.scopedURLs.count, privacy: .public) bookmarks=\(self.bookmarks.count, privacy: .public)")
-            timelineChanged()
-            statusMessage = "내부 시험 이미지 추가 완료."
+            Self.trace.info("image import registered media=\(mid.uuidString, privacy: .public) scopeTransferred=\(acquired, privacy: .public) sessionScopes=\(self.scopedURLs.count, privacy: .public) bookmarks=\(self.bookmarks.count, privacy: .public)")
+            // The current image preview capability validates the complete catalog. A nonempty
+            // project therefore keeps its existing pause/rebuild behavior after registration.
+            // An empty browser-only project has no render interval and must not build a zero-duration plan.
+            if timeline.durationFrames > 0 { timelineChanged() }
+            else { refreshAssets(); updateWindowDocumentState() }
+            statusMessage = nil
             return true
         } catch {
             Self.trace.info("internal image import rejected before commit")
-            if current() { statusMessage = "이미지를 추가하지 못했습니다: \(error). JPEG/PNG, 최대 8 MiB·2048 px 제한을 확인하세요." }
+            if current() {
+                let reason = (error as? EditError)?.description ?? error.localizedDescription
+                statusMessage = "\(url.lastPathComponent)을(를) 가져오지 못했습니다: \(reason)"
+            }
             return false
         }
     }
 
-    func presentImportPanel() {
-        guard !fileCommandBlocked() else { return }
+    /// The normal menu and Cmd-I share the same gated format list and validated importer.
+    func makeImportPanel() -> NSOpenPanel {
         let p = NSOpenPanel()
         p.allowsMultipleSelection = true
         p.canChooseDirectories = false
-        p.allowedContentTypes = [.movie, .audio]
-        p.message = "가져올 영상 또는 오디오 파일을 선택하세요."   // 지원 형식·제한은 도움말(README)과 거부 알림에 둔다
+        p.allowedContentTypes = Self.imageImportEnabled ? [.movie, .audio, .png, .jpeg] : [.movie, .audio]
+        p.message = Self.imageImportEnabled ? "가져올 영상·오디오·JPEG/PNG 이미지를 선택하세요. 이미지당 최대 8 MiB, 각 변 4096 px·총 16,777,216픽셀입니다." : "가져올 영상 또는 오디오 파일을 선택하세요."
+        return p
+    }
+    func presentImportPanel() {
+        guard !fileCommandBlocked() else { return }
+        let p = makeImportPanel()
         #if DEBUG
         if let o = importPanelOverrideForTest { if let urls = o() { importFiles(urls) }; return }
         #endif
@@ -665,6 +711,19 @@ final class ProjectStore {
     /// 목록의 + 단추(2026-10-11): 고른 대상 레인(쌍)의 마지막으로 차지한 끝 뒤에 놓는다(리플 없음, 재생 헤드와 무관).
     /// 대상 레인이 비었으면(빈 타임라인의 첫 추가 포함) 0에서 시작한다. 기존 빈틈은 그대로 둔다.
     func addToTimeline(_ mediaID: UUID) {
+        if let image = ProjectPersistence.references(timeline).first(where: { $0.id == mediaID && $0.kind == .stillImage }) {
+            guard Self.imageImportEnabled else { return }
+            guard missingMedia[mediaID] == nil else {
+                statusMessage = "\(image.name)을(를) 타임라인에 추가하지 못했습니다. 이미지 원본을 먼저 재연결하세요."
+                return
+            }
+            let d = addDestination(hasVideo: true, hasAudio: false), cid = UUID()
+            commit({ try $0.appending(media: mediaID, videoLane: d.video, audioLane: nil, clipID: cid) }, focus: cid)
+            if timeline.clip(cid) == nil {
+                statusMessage = "\(image.name)을(를) 타임라인에 추가하지 못했습니다: \(statusMessage ?? "진행 중인 편집을 마친 뒤 다시 시도하세요.")"
+            }
+            return
+        }
         guard let ref = timeline.media.first(where: { $0.id == mediaID }) else { return }
         let d = addDestination(hasVideo: ref.hasVideo, hasAudio: ref.hasAudio)
         let cid = UUID()
@@ -809,13 +868,11 @@ final class ProjectStore {
     static func laneKindName(_ kind: LaneKind) -> String {
         switch kind { case .video: "영상 레인"; case .audio: "오디오 레인"; case .subtitle: "자막 레인"; case .spectrum: "스펙트럼 레인" }
     }
-    /// 레인을 지울 수 있는가: 영상·오디오는 그 종류의 마지막 레인이 아니면, 자막 레인은 늘(0개여도 됨),
-    /// 스펙트럼 레인은 비어 있을 때만(SP-1A 2A: 스펙트럼 삭제 UI는 2C — 레인 삭제로 스펙트럼을 지우지 않는다).
+    /// 영상·오디오는 그 종류의 마지막 레인이 아니면, 자막·스펙트럼 레인은 내용 유무와 관계없이 지울 수 있다.
     func canRemoveLane(_ lane: Lane) -> Bool {
         switch lane.kind {
         case .video, .audio: timeline.lanes(lane.kind).count > 1
-        case .subtitle: true
-        case .spectrum: timeline.spectra(inLane: lane.id).isEmpty
+        case .subtitle, .spectrum: true
         }
     }
 
@@ -1007,8 +1064,17 @@ final class ProjectStore {
         guard player.currentItem != nil, appliedGeneration == generation else {
             timelineChanged(); return
         }
+        // Spectrum style does not change image sources, composition or player item.
+        // Carry only an already-current installation proof across this style revision.
+        // The live access lease keeps its original deadline and all source/seek guards.
+        let imageProof = imagePreviewEligibility(for: player.currentItem, session: projectSession,
+                                                generation: generation) == .validatedAtInstallation ? appliedImagePreview : nil
         generation += 1
         appliedGeneration = generation
+        if let imageProof {
+            appliedImagePreview = AppliedImagePreview(item: imageProof.item, composition: imageProof.composition,
+                session: imageProof.session, generation: generation, accessRevision: imageProof.accessRevision)
+        }
         updateWindowDocumentState()
         if let overlay = previewHost?.spectrumOverlay { overlay.refresh(retainingStyleFrame: true) }
         else { spectrumPreview.update(timeline: timeline, media: assets) }
@@ -1148,19 +1214,21 @@ final class ProjectStore {
         let j = i + step
         return timeline.lanes.indices.contains(j) && timeline.lanes[j].kind == timeline.lanes[i].kind
     }
-    /// 레인 삭제. 클립이 있으면 확인한다(레인·클립 삭제와 짝 연결 해제가 한 단계). 그 종류의 마지막 레인은 지우지 않는다.
+    /// 스펙트럼 레인은 내용과 함께 확인 없이 한 단계로 삭제한다(SP-7A-01 소유자 결정).
+    /// 다른 종류는 기존 정책대로 내용이 있으면 확인하며, 마지막 영상·오디오 레인은 지우지 않는다.
     func requestRemoveLane(_ id: UUID) {
         guard let lane = timeline.laneInfo(id), gestureBase == nil else { return }
         guard canRemoveLane(lane) else {   // 자막·스펙트럼 레인은 0개여도 된다
-            statusMessage = lane.kind == .spectrum ? "스펙트럼이 있는 레인은 지울 수 없습니다. 스펙트럼을 골라 Delete로 먼저 지우세요." : EditError.lastLane.description
+            statusMessage = EditError.lastLane.description
             return
         }
+        if lane.kind == .spectrum { commitLane({ try $0.removingLane(id) }); return }
         let ids = Self.laneContentIDs(timeline, id)
         let n = ids.count
         guard n > 0 else { commitLane({ try $0.removingLane(id) }); return }
         let request = LaneRemovalRequest(session: projectSession, lane: id, kind: lane.kind, clipIDs: ids)
         let linked = timeline.clips(inLane: id).filter { $0.link != nil }.count
-        var msg = "‘\(lane.name)’ 레인과 그 안의 \(lane.kind == .subtitle ? "자막" : "클립") \(n)개를 지웁니다."   // 스펙트럼 레인은 비어 있을 때만 여기까지 옴(n = 0)
+        var msg = "‘\(lane.name)’ 레인과 그 안의 \(lane.kind == .subtitle ? "자막" : "클립") \(n)개를 지웁니다."
         if linked > 0 { msg += " 다른 레인에 있는 연결된 짝 \(linked)개는 지우지 않고 연결만 해제합니다." }
         msg += "\n\n실행 취소(⌘Z)로 되돌릴 수 있습니다. 원본 파일은 그대로입니다."
         presentAlert(AlertInfo(title: "레인을 삭제할까요?", message: msg, buttons: ["레인 삭제", "취소"], destructiveIndex: 0, cancelIndex: 1,
@@ -1494,6 +1562,14 @@ final class ProjectStore {
             }
             return
         }
+        if edge == .end, let c = base.clip(id), ProjectPersistence.imageRevision(base, mediaID: c.mediaID) != nil {
+            do {
+                guard (-Timeline.maxFrames...Timeline.maxFrames).contains(delta) else { throw EditError.frameLimit }
+                let next = try base.resizingStillImage(clip: id, length: max(1, c.length + delta))
+                history.updateGesture(next, focus: id); moveRejection = nil
+            } catch let e as EditError { history.updateGesture(base, focus: id); moveRejection = delta == 0 ? nil : e } catch {}
+            return
+        }
         do { history.updateGesture(try edge == .start ? base.trimmingStart(clip: id, by: delta) : base.trimmingEnd(clip: id, by: delta), focus: id); moveRejection = nil }
         catch let e as EditError { history.updateGesture(base, focus: id); moveRejection = delta == 0 ? nil : e } catch {}
     }
@@ -1769,7 +1845,10 @@ final class ProjectStore {
         }
         // Only an active playback tick opts into periodic proactive renewal.
         // Explicit callers may still acquire an absent/expired lease.
-        if authorized && (!allowProactiveRenewal || now < imagePlaybackAccessUntil - 0.1) { return true }
+        // A full valid reference check can take ~0.17 s for an admitted PNG.
+        // Start the next check with enough lead; the original one-second expiry,
+        // one-worker bound and failure retry deadline remain unchanged.
+        if authorized && (!allowProactiveRenewal || now < imagePlaybackAccessUntil - 0.25) { return true }
         #if DEBUG
         SpectrumContinuityTrace.record(11, SpectrumContinuityTrace.lease, authorized ? 4 : 2, Int64(imagePlaybackAccessUntil * 1_000_000))
         #endif
@@ -1783,7 +1862,7 @@ final class ProjectStore {
             Int64(serial), Int64(imageAccessRevision), Int64(projectSession), Int64(generation), Int64(appliedGeneration))
         SpectrumContinuityTrace.record(15, traceLease, SpectrumContinuityTrace.id(item), SpectrumContinuityTrace.id(proof.composition))
         #endif
-        imagePlaybackAccessRetry = now + 0.9
+        imagePlaybackAccessRetry = now + 0.75
         #if DEBUG
         imagePlaybackAccessChecksForTest += 1
         #endif
@@ -1868,10 +1947,14 @@ final class ProjectStore {
     }
 
     @ObservationIgnored private var imagePreviewTask: Task<Void,Never>?
+    @ObservationIgnored private var imagePreviewCache = InternalImagePreview.Cache()
     #if DEBUG || OTF_PREVIEW_COMPAT_TESTS
     @ObservationIgnored var imageSourceValidatedForTest: ((UUID) -> Void)?
     @ObservationIgnored var imagePreviewPreparedForTest: ((Int) async -> Void)?
     @ObservationIgnored private(set) var imagePreviewStaleDropsForTest = 0
+    func imagePreviewCacheStatisticsForTest() async -> InternalImagePreview.Cache.Statistics {
+        await imagePreviewCache.statistics
+    }
     #endif
 
     /// 타임라인이 바뀌면 composition을 다시 만들고 오래된 결과는 버린다.
@@ -1879,6 +1962,25 @@ final class ProjectStore {
         imagePreviewError = nil
         restoreImageRelinkBindings()
         if Self.imageImportEnabled && InternalImagePreview.containsImages(timeline) {
+            // Registered images can exist without any timeline clips. Import, Undo of
+            // the first insertion and reopen must leave an empty Preview, not ask the
+            // image planner to construct a zero-duration playback item.
+            if timeline.durationFrames == 0 {
+                imagePreviewTask?.cancel()
+                pauseForEdit()
+                generation += 1; seekToken &+= 1
+                invalidateImageEligibility(.absent)
+                refreshAssets(refreshSpectrum: false)
+                currentPlan = nil; appliedVideoSnap = nil
+                player.currentItem?.cancelPendingSeeks()
+                player.replaceCurrentItem(with: nil)
+                previewHost?.setSubtitles([], durationFrames: 0, fps: Double(settings.fps), item: nil)
+                previewHost?.spectrumOverlay.invalidate(forgetFrame: true)
+                appliedGeneration = generation
+                playhead = 0
+                dropStill(); updateWindowDocumentState()
+                return
+            }
             rebuildInternalImagePreview(); return
         }
         imagePreviewTask?.cancel()
@@ -1990,7 +2092,7 @@ final class ProjectStore {
         let previous=imagePreviewTask
         previous?.cancel()
         pauseForEdit();generation += 1;seekToken &+= 1
-        let g=generation,session=projectSession,snap=timeline,media=mediaByID,s=settings,resolved=imageSourceURLs
+        let g=generation,session=projectSession,snap=timeline,media=mediaByID,s=settings,resolved=imageSourceURLs,cache=imagePreviewCache
         appliedVideoSnap=nil;currentPlan=nil
         player.currentItem?.cancelPendingSeeks()
         player.replaceCurrentItem(with:nil)
@@ -2002,7 +2104,7 @@ final class ProjectStore {
             await previous?.value
             guard let self,!Task.isCancelled,g==self.generation,session==self.projectSession else{return}
             do {
-                let plan=try await InternalImagePreview.plan(snap,media:media,enabled:Self.imageImportEnabled,settings:s,resolvedImages:resolved) { id, available in
+                let plan=try await InternalImagePreview.plan(snap,media:media,enabled:Self.imageImportEnabled,settings:s,resolvedImages:resolved,cache:cache) { id, available in
                     self.applyImageAvailability(available, id: id, snapshot: snap, session: session, generation: g)
                     #if DEBUG || OTF_PREVIEW_COMPAT_TESTS
                     if available { self.imageSourceValidatedForTest?(id) }
@@ -2041,7 +2143,7 @@ final class ProjectStore {
             } catch {
                 guard !Task.isCancelled,g==self.generation,session==self.projectSession else{return}
                 self.invalidateImageEligibility(.failed)
-                self.imagePreviewError = "이미지 프리뷰를 표시할 수 없습니다: \(error). 프로젝트와 클립은 유지했습니다."
+                self.imagePreviewError = "이미지 프리뷰를 표시할 수 없습니다: \(error.localizedDescription). 프로젝트와 클립은 유지했습니다."
             }
         }
     }
@@ -2085,12 +2187,15 @@ final class ProjectStore {
         #endif
         if hasPendingSubtitleEdits, frame != playhead { commitInlineEditIfAny() }   // 재생 헤드를 옮기면 글 편집 확정(§44)
         let f = max(0, min(frame, timeline.durationFrames))
+        previewHost?.spectrumOverlay.flushPendingStyleBeforeTransition()
         // 프리뷰 자막 창에 탐색 시작·끝(완료·취소)을 번호와 함께 알린다(§49.6, Codex 검토): 탐색이 끝날 때까지 화면은 이전에 끝난 탐색의 프레임이라
         // 그 프레임과 아직 끝나지 않은 탐색의 프레임에 보이는 자막 그림을 놓지 않는다. 재생 헤드를 바꾸기 전에 알린다(재생 헤드 didSet이 창을 맞춘다).
         seekToken &+= 1
         let token = seekToken
-        spectrumPreview.playback.stop()
         let host = previewHost
+        // The host retires frame approval and output before the exact seek.
+        // A hostless seek still fences playback.
+        if host == nil { spectrumPreview.playback.stop() }
         previewHost?.subtitleSeekRequested(token: token, frame: f)
         playhead = f
         nonisolated(unsafe) let seekDone: (Bool) -> Void = { [weak host] finished in
@@ -2103,7 +2208,10 @@ final class ProjectStore {
 
     /// 재생 중에만 디스플레이 유휴 절전을 막는다(E3-1: 디스플레이가 꺼지면 화면 표시가 멈춤).
     private func setPlaying(_ p: Bool) {
-        spectrumPreview.playback.stop()
+        if p { previewHost?.spectrumOverlay.flushPendingStyleBeforeTransition() }
+        if let host = previewHost, host.window != nil, let item = player.currentItem {
+            spectrumPreview.playback.prepareForTransition(item: item, view: host)
+        } else { spectrumPreview.playback.stop() }
         if p || isPlaying { previewHost?.spectrumOverlay.invalidate(forgetFrame: true) }
         isPlaying = p
         previewHost?.spectrumOverlay.updatePlaybackLink()
@@ -2537,6 +2645,9 @@ extension ProjectStore {
     func stopAllScopes() {
         invalidateImageEligibility(.cancelled)
         imagePreviewTask?.cancel()
+        // Old cancelled work may retain its own bounded cache until it drains;
+        // a new/opened project never shares that representation owner.
+        imagePreviewCache = InternalImagePreview.Cache()
         generation += 1 // Fence image decode/plan publication before source access ends.
         // Commit/termination only. Candidate validation must keep the old session alive.
         // Fence callbacks synchronously BEFORE old access ends; engine reset is queued.
@@ -2966,7 +3077,7 @@ extension ProjectStore {
         if !missing.isEmpty {
             let names = decoded.media.filter { missing[$0.id] != nil }.map(\.name)
             let guidance = decoded.media.contains(where: { $0.kind == .stillImage })
-                ? "저장된 이미지 참조와 편집 구조는 보존했습니다. 내부 이미지 시험 모드에서는 미디어 목록의 재연결 버튼으로 JPEG/PNG 원본을 다시 선택할 수 있습니다. 누락 원본을 복구하기 전에는 내보낼 수 없습니다."
+                ? "저장된 이미지 참조와 편집 구조는 보존했습니다. 미디어 목록의 재연결 버튼으로 JPEG/PNG 원본을 다시 선택하세요. 누락 원본을 복구하기 전에는 내보낼 수 없습니다."
                 : "이 원본을 쓰는 구간은 프리뷰에서 비어 보이고, 내보내기는 다시 연결할 때까지 할 수 없습니다. 파일 > 미디어 재연결…을 쓰세요."
             presentAlert(AlertInfo(title:"찾을 수 없는 원본 미디어가 있습니다",message:"\(names.joined(separator:", "))\n\n편집 내용은 그대로 열었습니다. \(guidance)"))
         }
@@ -3098,7 +3209,10 @@ extension ProjectStore {
             statusMessage="‘\(url.lastPathComponent)’로 이미지를 다시 연결했습니다."
             return true
         } catch {
-            if current() { presentAlert(AlertInfo(title:"이미지를 다시 연결할 수 없습니다",message:"\(error)\nJPEG/PNG, 최대 8 MiB·2048 px 제한과 원본 접근 권한을 확인하세요. 기존 프로젝트는 유지했습니다.")) }
+            if current() {
+                let reason = (error as? EditError)?.description ?? error.localizedDescription
+                presentAlert(AlertInfo(title:"이미지를 다시 연결할 수 없습니다",message:"\(url.lastPathComponent)을(를) 다시 연결하지 못했습니다: \(reason)\n기존 프로젝트는 유지했습니다."))
+            }
             return false
         }
     }

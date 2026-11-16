@@ -3,7 +3,7 @@ import AppKit
 import OnTheFrameEngine
 
 /// 프로젝트 열기·미디어 가져오기 회귀 자체 검사(2026-10-11, Debug 전용). `open -n -W -a OnTheFrame.app <폴더> --args -OTFOpenImportTest`.
-/// 실제 메뉴 항목("프로젝트 열기…"·"가져오기…"·"새 프로젝트")을 눌러 메뉴 동작 → 요청 → 저장하지 않은 변경 확인 → 열기·가져오기 경로를 지난다.
+/// 실제 메뉴 항목("프로젝트 열기…"·"미디어 가져오기…"·"새 프로젝트")을 눌러 메뉴 동작 → 요청 → 저장하지 않은 변경 확인 → 열기·가져오기 경로를 지난다.
 /// 패널만 고른 파일로 바꾼다(openPanelOverrideForTest·importPanelOverrideForTest). 폴더: sources/(otf-TA·otf-TB·aud-steady48s·long-180s),
 /// p-v1(커밋 44943ea의 실제 저장기)·p-v2–v4(지금 저장 결과를 그 형식으로 바꾼 것)·p-v5(지금 저장기)·p-long(3분 원본).
 /// 기대값은 fixture를 만든 배치에서 손으로 정했다. 결과는 <폴더>/openimport-result.json.
@@ -99,7 +99,7 @@ enum OpenImportSelfTest {
         let files = [src.appendingPathComponent("long-180s.mp4"), src.appendingPathComponent("otf-TB.mp4")]
         s.importPanelOverrideForTest = { files }
         let i0 = Date()
-        let im = await menu("가져오기…")
+        let im = await menu("미디어 가져오기…")
         var stages = Set<String>(), names = Set<String>()
         while (s.importProgress != nil || s.importing > 0), Date().timeIntervalSince(i0) < 60 {
             if let st = s.importProgress?.stage { stages.insert(st.components(separatedBy: " · ").first ?? st) }
@@ -118,7 +118,7 @@ enum OpenImportSelfTest {
         _ = await LaneSelfTest.waitUntil(3) { s.assets.isEmpty }
         s.probeDelayForTest = 1_500_000_000
         s.importPanelOverrideForTest = { files }
-        _ = await menu("가져오기…")
+        _ = await menu("미디어 가져오기…")
         _ = await LaneSelfTest.waitUntil(5) { s.importProgress != nil }
         try? await Task.sleep(nanoseconds: 300_000_000)
         s.cancelImport()
@@ -136,7 +136,7 @@ enum OpenImportSelfTest {
         func observe(_ urls: [URL]) async -> (fractions: [Double], percents: [String], spinnerNames: Set<String>, done: ProjectStore.ImportDone?, doneSeen: Bool, fullWhileRunning: Bool) {
             s.probeDelayForTest = 400_000_000
             s.importPanelOverrideForTest = { urls }
-            _ = await menu("가져오기…")
+            _ = await menu("미디어 가져오기…")
             var fr: [Double] = [], pc: [String] = [], names = Set<String>(), full = false, done: ProjectStore.ImportDone?
             let t0 = Date()
             while Date().timeIntervalSince(t0) < 20 {

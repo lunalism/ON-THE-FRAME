@@ -66,8 +66,8 @@ struct ContentView: View {
                 .help("편집 도구: 선택 (V) · 자르기 (C) · 텍스트 (T)")
             }
             ToolbarItemGroup(placement: .primaryAction) {
-                Button { store.presentImportPanel() } label: { Label("가져오기", systemImage: "square.and.arrow.down") }.disabled(!store.fileCommandsAvailable)
-                    .help("영상·소리 파일 가져오기(⌘I)")
+                Button { store.presentImportPanel() } label: { Label("미디어 가져오기", systemImage: "square.and.arrow.down") }.disabled(!store.fileCommandsAvailable)
+                    .help(ProjectStore.imageImportEnabled ? "영상·소리·이미지 파일 가져오기(⌘I)" : "영상·소리 파일 가져오기(⌘I)")
                 Button { store.presentExportPanel() } label: { Label("내보내기", systemImage: "square.and.arrow.up") }
                     .help("MP4로 내보내기(⌘E)").disabled(!store.canExport || !store.fileCommandsAvailable)
             }
@@ -181,6 +181,9 @@ struct MediaListView: View {
     @Bindable var store: ProjectStore
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            Button { store.presentImportPanel() } label: { Label("미디어 가져오기", systemImage: "square.and.arrow.down") }
+                .disabled(!store.fileCommandsAvailable)
+                .padding(.horizontal, 8).padding(.vertical, 6)
             // 재연결은 누락 원본 복구, 교체는 사용 가능한 이미지의 선택 동작이다.
             if !store.missingMedia.isEmpty || (ProjectStore.imageImportEnabled && ProjectPersistence.references(store.timeline).contains { $0.kind == .stillImage }) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -195,6 +198,13 @@ struct MediaListView: View {
                                 Text(pending ? "교체할 이미지 확인 중…" : (warning ?? "정지 이미지")).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                             }
                             Spacer()
+                            if r.kind == .stillImage, warning == nil {
+                                Button { store.addToTimeline(r.id) } label: { Image(systemName: "plus.circle") }
+                                    .buttonStyle(.borderless)
+                                    .help("V1(또는 고른 영상 레인)의 마지막 클립 뒤에 추가 — 비었으면 0에서 시작")
+                                    .accessibilityLabel("\(r.name)을(를) 타임라인에 추가")
+                                    .disabled(pending || !store.fileCommandsAvailable || store.gestureBase != nil)
+                            }
                             Button(r.kind != .stillImage ? "미디어 재연결…" : (warning == nil ? "교체…" : "재연결…")) { store.relinkMedia(r.id) }
                                 .controlSize(.small)
                                 .fixedSize(horizontal: r.kind == .stillImage, vertical: false)
@@ -213,10 +223,9 @@ struct MediaListView: View {
                     Spacer()
                     Image(systemName: "film.stack").font(.system(size: 30)).foregroundStyle(.tertiary)
                     Text(ProjectPersistence.references(store.timeline).contains(where: { $0.kind == .stillImage })
-                         ? (ProjectStore.imageImportEnabled ? "정지 이미지는 타임라인에서 편집합니다. 내부 시험 프리뷰·내보내기 경로입니다."
+                         ? (ProjectStore.imageImportEnabled ? "미디어의 + 단추로 타임라인에 추가하세요."
                             : "정지 이미지는 타임라인에서 편집합니다. 프리뷰·내보내기는 아직 지원하지 않습니다.")
                          : "가져온 미디어가 없습니다").foregroundStyle(.secondary)
-                    Button("영상·소리 가져오기…") { store.presentImportPanel() }.disabled(!store.fileCommandsAvailable)
                     Text("파일을 여기로 끌어 놓아도 됩니다.").font(.caption).foregroundStyle(.tertiary)
                     Spacer()
                 }.frame(maxWidth: .infinity)
@@ -475,6 +484,11 @@ final class PlayerNSView: NSView {
     var hasPendingSpectrumSeek: Bool { !pendingSeeks.isEmpty }
     /// 저장소가 탐색을 시작한다(재생 헤드를 바꾸기 전)
     func subtitleSeekRequested(token: Int, frame: Int) {
+        if let store = spectrumOverlay.store, store.previewHost === self {
+            // A live exact seek can leave a reused output without new buffers.
+            // Retire it here; playback obtains a fresh output for the new target.
+            store.spectrumPreview.playback.stop()
+        }
         spectrumOverlay.invalidate(forgetFrame: true)
         pendingSeeks.append((token, frame))
     }
@@ -578,6 +592,10 @@ final class PlayerNSView: NSView {
     func subtitleLayerForTest(_ id: UUID) -> CALayer? { subtitleLayers[id] }
     #endif
     func setSubtitles(_ items: [SubtitleItem], durationFrames: Int, fps: Double, item: AVPlayerItem?) {
+        // Transport reuse is confined to the same player item. Rebuild failures
+        // install nil here too, so they must release the retired item's output.
+        if let playback = spectrumOverlay.store?.spectrumPreview.playback,
+           item == nil || playback.timing.item !== item { playback.stop() }
         CATransaction.begin(); CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
         subtitleKVO = nil; pendingSubtitleItem = nil
@@ -1447,14 +1465,14 @@ struct LaneSettingsAdjust: View {
                 Button { store.moveLane(lane.id, by: 1) } label: { Image(systemName: "arrow.down") }.help("레인을 아래로").disabled(!store.canMoveLane(lane.id, by: 1))
                     .accessibilityLabel("레인을 아래로")
                 Spacer(minLength: 4)
-                Button("삭제…", role: .destructive) { store.requestRemoveLane(lane.id) }.disabled(!store.canRemoveLane(lane))
+                Button(lane.kind == .spectrum ? "레인 삭제" : "삭제…", role: .destructive) { store.requestRemoveLane(lane.id) }.disabled(!store.canRemoveLane(lane))
             }
             .controlSize(.small)
             Text({ switch lane.kind {
                 case .video: "위 레인이 아래 레인을 가립니다."
                 case .audio: "음소거하지 않은 오디오 레인을 모두 더합니다."
                 case .subtitle: "자막은 모든 영상 위에 그리고, 위 자막 레인이 아래 자막 레인 위에 그립니다."
-                case .spectrum: "스펙트럼은 영상 위·자막 아래에 그립니다. 스펙트럼을 누르면 고르고, 끌어 옮기고, 가장자리를 끌어 길이를 바꾸고, Delete로 지웁니다. 스펙트럼이 있는 레인은 지울 수 없습니다(먼저 스펙트럼을 지우세요)."
+                case .spectrum: "스펙트럼은 영상 위·자막 아래에 그립니다. 스펙트럼을 누르면 고르고, 끌어 옮기고, 가장자리를 끌어 길이를 바꾸고, Delete로 지웁니다. 레인 삭제는 이 레인의 스펙트럼을 함께 바로 지웁니다. 실행 취소로 되돌릴 수 있습니다."
             } }())
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }

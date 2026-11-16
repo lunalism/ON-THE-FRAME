@@ -29,9 +29,9 @@ enum ShortcutSelfTest {
 
         // 메뉴 구성: ⌘K 자르기, ⌘B 없음, 수정 키 없는 키 등가물 없음
         let items = allItems(NSApp.mainMenu)
-        let closeish = items.filter { $0.keyEquivalent.lowercased() == "w" || $0.keyEquivalent.lowercased() == "q" || $0.action.map(NSStringFromSelector).map { $0.contains("lose") || $0.contains("erminate") } == true }
-            .map { "\($0.menu?.title ?? "?")>\($0.title)[\($0.keyEquivalent)/\($0.keyEquivalentModifierMask.rawValue)] act=\($0.action.map(NSStringFromSelector) ?? "nil") tgt=\($0.target.map { String(describing: type(of: $0)) } ?? "nil")" }
-        check("probe.closeMenuItems", true, closeish.joined(separator: " ; ") + " | delegate=\(w.delegate.map { String(describing: type(of: $0)) } ?? "nil") closeBtnTarget=\(w.standardWindowButton(.closeButton)?.target.map { String(describing: type(of: $0)) } ?? "nil") act=\(w.standardWindowButton(.closeButton)?.action.map(NSStringFromSelector) ?? "nil")")
+        let closeish: [String] = items.filter(isCloseMenuItem).map(menuDescription)
+        let windowInfo: String = windowDescription(w)
+        check("probe.closeMenuItems", true, closeish.joined(separator: " ; ") + windowInfo)
         let split = items.first { $0.title == "재생 헤드에서 자르기" }
         check("menu.splitIsCmdK", split?.keyEquivalent == "k" && split?.keyEquivalentModifierMask == [.command],
               "\(split?.keyEquivalent ?? "nil") \(split?.keyEquivalentModifierMask.rawValue ?? 0)")
@@ -85,54 +85,9 @@ enum ShortcutSelfTest {
               "menuEnabled \(enabledNow) split Δ\(afterK) undo → \(s.timeline.clips.count - c0),\(s.history.undoDepth - d0)")
         s.seek(to: 50); s.selection = s.timeline.clips.first { $0.sourceIn == 50 }?.id; await settle()
         guard await regainFocus(w) else { return finish(folder, checks + [lostFocus("korean")]) }
-        // 한글 2벌식에서 시스템이 만드는 모양(실험으로 확인): characters는 단축키 배열의 라틴 문자, charactersIgnoringModifiers는 한글 자모
-        do {
-            s.seek(to: 20); s.selection = s.timeline.clips[0].id; await settle()
-            let c0 = s.timeline.clips.count, d0 = s.history.undoDepth
-            await key(40, "k", [.command], w, ignoring: "\u{314F}")
-            let k = (s.timeline.clips.count - c0, s.history.undoDepth - d0)
-            await key(6, "z", [.command], w, ignoring: "\u{314B}")
-            let z = (s.timeline.clips.count - c0, s.history.undoDepth - d0)
-            await key(6, "z", [.command, .shift], w, ignoring: "\u{314B}")
-            let sz = (s.timeline.clips.count - c0, s.history.undoDepth - d0)
-            await key(6, "z", [.command], w, ignoring: "\u{314B}")
-            check("korean.cmdKZShapes", k == (1, 1) && z == (0, 0) && sz == (1, 1) && s.timeline.clips.count == c0,
-                  "⌘K Δ\(k) ⌘Z Δ\(z) ⇧⌘Z Δ\(sz) end \(s.timeline.clips.count - c0)")
-            s.seek(to: 50); s.selection = s.timeline.clips.first { $0.sourceIn == 50 }?.id; await settle()
-        }
+        checks += await koreanChecks(s, w)
         guard await regainFocus(w) else { return finish(folder, checks + [lostFocus("direct")]) }
-        // 이벤트 큐를 거치지 않고 앱 sendEvent로 바로 전달된 경우: 로컬 감시·performKeyEquivalent·타임라인 keyDown 여러 층이
-        // 같은 이벤트를 볼 수 있어도 한 번만 처리되는지. (로컬 감시는 sendEvent 안에서 불린다 — 이 검사로 확인. 따라서
-        // 이 검사는 "로컬 감시를 건너뛰는 경로"를 재현하지 않는다.)
-        do {
-            s.seek(to: 20); s.selection = s.timeline.clips[0].id
-            if let tv = findTimeline(w.contentView) { w.makeFirstResponder(tv) }
-            await settle()
-            let c0 = s.timeline.clips.count, d0 = s.history.undoDepth
-            direct(40, "k", [.command], w, ignoring: "\u{314F}"); await settle()
-            let k = (s.timeline.clips.count - c0, s.history.undoDepth - d0)
-            direct(6, "z", [.command], w, ignoring: "\u{314B}"); await settle()
-            let z = (s.timeline.clips.count - c0, s.history.undoDepth - d0)
-            direct(6, "z", [.command, .shift], w, ignoring: "\u{314B}"); await settle()
-            let sz = (s.timeline.clips.count - c0, s.history.undoDepth - d0)
-            direct(6, "z", [.command], w, ignoring: "\u{314B}"); await settle()
-            direct(49, " ", [], w); await settle()
-            let played = s.isPlaying
-            direct(49, " ", [], w); await settle()
-            check("routing.directSendEventOnce", k == (1, 1) && z == (0, 0) && sz == (1, 1) && s.timeline.clips.count == c0 && played && !s.isPlaying,
-                  "⌘K Δ\(k) ⌘Z Δ\(z) ⇧⌘Z Δ\(sz) space \(played)/\(s.isPlaying)")
-            // ⌘E는 저장 패널(모달)을 여므로 검사에서는 해석만 확인한다. 실제 동작은 소유자 확인.
-            let shapes: [(UInt16, String, NSEvent.ModifierFlags, KeyRouting.CommandAction)] = [
-                (40, "\u{314F}", [.command], .split), (40, "k", [.command], .split),
-                (6, "\u{314B}", [.command], .undo), (6, "z", [.command], .undo),
-                (6, "\u{314B}", [.command, .shift], .redo), (6, "Z", [.command, .shift], .redo),
-                (14, "\u{3137}", [.command], .export), (14, "e", [.command], .export)]
-            let bad = shapes.filter { KeyRouting.commandAction(keyCode: $0.0, charactersIgnoringModifiers: $0.1, modifiers: $0.2) != $0.3 }
-            let notCmd = [KeyRouting.commandAction(keyCode: 40, charactersIgnoringModifiers: "\u{314F}", modifiers: []),
-                          KeyRouting.commandAction(keyCode: 11, charactersIgnoringModifiers: "\u{3160}", modifiers: [.command])]
-            check("routing.koreanAndLatinShapesMap", bad.isEmpty && notCmd.allSatisfy { $0 == nil }, "bad \(bad.count)")
-            s.seek(to: 50); s.selection = s.timeline.clips.first { $0.sourceIn == 50 }?.id; await settle()
-        }
+        checks += await directChecks(s, w)
         guard await regainFocus(w) else { return finish(folder, checks + [lostFocus("aux")]) }
         // 보조 창(주 창이 될 수 없는 패널)이 키 창이고 편집기가 주 창일 때도 단축키가 동작(입력 소스 표시 창 후보 대응)
         do {
@@ -241,6 +196,107 @@ enum ShortcutSelfTest {
         check("delete.noSelectionNoop", s.timeline == before && s.history.undoDepth == depth)
 
         guard await regainFocus(w) else { return finish(folder, checks + [lostFocus("text")]) }
+        checks += await textChecks(s, w)
+        guard await regainFocus(w) else { return finish(folder, checks + [lostFocus("modal")]) }
+        checks += await modalChecks(s, w)
+        guard await regainFocus(w) else { return finish(folder, checks + [lostFocus("drag")]) }
+        checks += await dragChecks(s, w)
+        finish(folder, checks)
+    }
+
+    // MARK: Ordered diagnostic phases
+
+    // Concrete intermediate types keep diagnostic formatting out of the async test constraint system.
+    private static func isCloseMenuItem(_ item: NSMenuItem) -> Bool {
+        let key: String = item.keyEquivalent.lowercased()
+        let action: String? = item.action.map(NSStringFromSelector)
+        let isCloseAction: Bool = action.map { $0.contains("lose") || $0.contains("erminate") } == true
+        return key == "w" || key == "q" || isCloseAction
+    }
+    private static func targetDescription(_ target: AnyObject?) -> String {
+        guard let target else { return "nil" }
+        return String(describing: type(of: target))
+    }
+    private static func actionDescription(_ action: Selector?) -> String {
+        guard let action else { return "nil" }
+        return NSStringFromSelector(action)
+    }
+    private static func menuDescription(_ item: NSMenuItem) -> String {
+        let menu: String = item.menu?.title ?? "?"
+        let action: String = actionDescription(item.action)
+        let target: String = targetDescription(item.target)
+        return "\(menu)>\(item.title)[\(item.keyEquivalent)/\(item.keyEquivalentModifierMask.rawValue)] act=\(action) tgt=\(target)"
+    }
+    private static func windowDescription(_ window: NSWindow) -> String {
+        let delegate: String = targetDescription(window.delegate)
+        let button: NSButton? = window.standardWindowButton(.closeButton)
+        let target: String = targetDescription(button?.target)
+        let action: String = actionDescription(button?.action)
+        return " | delegate=\(delegate) closeBtnTarget=\(target) act=\(action)"
+    }
+
+    private static func koreanChecks(_ s: ProjectStore, _ w: NSWindow) async -> [Check] {
+        var checks: [Check] = []
+        func check(_ n: String, _ p: Bool, _ d: String = "") { checks.append(Check(name: n, pass: p, detail: d)) }
+        // 한글 2벌식에서 시스템이 만드는 모양(실험으로 확인): characters는 단축키 배열의 라틴 문자, charactersIgnoringModifiers는 한글 자모
+        do {
+            s.seek(to: 20); s.selection = s.timeline.clips[0].id; await settle()
+            let c0 = s.timeline.clips.count, d0 = s.history.undoDepth
+            await key(40, "k", [.command], w, ignoring: "\u{314F}")
+            let k = (s.timeline.clips.count - c0, s.history.undoDepth - d0)
+            await key(6, "z", [.command], w, ignoring: "\u{314B}")
+            let z = (s.timeline.clips.count - c0, s.history.undoDepth - d0)
+            await key(6, "z", [.command, .shift], w, ignoring: "\u{314B}")
+            let sz = (s.timeline.clips.count - c0, s.history.undoDepth - d0)
+            await key(6, "z", [.command], w, ignoring: "\u{314B}")
+            check("korean.cmdKZShapes", k == (1, 1) && z == (0, 0) && sz == (1, 1) && s.timeline.clips.count == c0,
+                  "⌘K Δ\(k) ⌘Z Δ\(z) ⇧⌘Z Δ\(sz) end \(s.timeline.clips.count - c0)")
+            s.seek(to: 50); s.selection = s.timeline.clips.first { $0.sourceIn == 50 }?.id; await settle()
+        }
+        return checks
+    }
+
+    private static func directChecks(_ s: ProjectStore, _ w: NSWindow) async -> [Check] {
+        var checks: [Check] = []
+        func check(_ n: String, _ p: Bool, _ d: String = "") { checks.append(Check(name: n, pass: p, detail: d)) }
+        // 이벤트 큐를 거치지 않고 앱 sendEvent로 바로 전달된 경우: 로컬 감시·performKeyEquivalent·타임라인 keyDown 여러 층이
+        // 같은 이벤트를 볼 수 있어도 한 번만 처리되는지. (로컬 감시는 sendEvent 안에서 불린다 — 이 검사로 확인. 따라서
+        // 이 검사는 "로컬 감시를 건너뛰는 경로"를 재현하지 않는다.)
+        do {
+            s.seek(to: 20); s.selection = s.timeline.clips[0].id
+            if let tv = findTimeline(w.contentView) { w.makeFirstResponder(tv) }
+            await settle()
+            let c0 = s.timeline.clips.count, d0 = s.history.undoDepth
+            direct(40, "k", [.command], w, ignoring: "\u{314F}"); await settle()
+            let k = (s.timeline.clips.count - c0, s.history.undoDepth - d0)
+            direct(6, "z", [.command], w, ignoring: "\u{314B}"); await settle()
+            let z = (s.timeline.clips.count - c0, s.history.undoDepth - d0)
+            direct(6, "z", [.command, .shift], w, ignoring: "\u{314B}"); await settle()
+            let sz = (s.timeline.clips.count - c0, s.history.undoDepth - d0)
+            direct(6, "z", [.command], w, ignoring: "\u{314B}"); await settle()
+            direct(49, " ", [], w); await settle()
+            let played = s.isPlaying
+            direct(49, " ", [], w); await settle()
+            check("routing.directSendEventOnce", k == (1, 1) && z == (0, 0) && sz == (1, 1) && s.timeline.clips.count == c0 && played && !s.isPlaying,
+                  "⌘K Δ\(k) ⌘Z Δ\(z) ⇧⌘Z Δ\(sz) space \(played)/\(s.isPlaying)")
+            // ⌘E는 저장 패널(모달)을 여므로 검사에서는 해석만 확인한다. 실제 동작은 소유자 확인.
+            let shapes: [(UInt16, String, NSEvent.ModifierFlags, KeyRouting.CommandAction)] = [
+                (40, "\u{314F}", [.command], .split), (40, "k", [.command], .split),
+                (6, "\u{314B}", [.command], .undo), (6, "z", [.command], .undo),
+                (6, "\u{314B}", [.command, .shift], .redo), (6, "Z", [.command, .shift], .redo),
+                (14, "\u{3137}", [.command], .export), (14, "e", [.command], .export)]
+            let bad = shapes.filter { KeyRouting.commandAction(keyCode: $0.0, charactersIgnoringModifiers: $0.1, modifiers: $0.2) != $0.3 }
+            let notCmd = [KeyRouting.commandAction(keyCode: 40, charactersIgnoringModifiers: "\u{314F}", modifiers: []),
+                          KeyRouting.commandAction(keyCode: 11, charactersIgnoringModifiers: "\u{3160}", modifiers: [.command])]
+            check("routing.koreanAndLatinShapesMap", bad.isEmpty && notCmd.allSatisfy { $0 == nil }, "bad \(bad.count)")
+            s.seek(to: 50); s.selection = s.timeline.clips.first { $0.sourceIn == 50 }?.id; await settle()
+        }
+        return checks
+    }
+
+    private static func textChecks(_ s: ProjectStore, _ w: NSWindow) async -> [Check] {
+        var checks: [Check] = []
+        func check(_ n: String, _ p: Bool, _ d: String = "") { checks.append(Check(name: n, pass: p, detail: d)) }
         // 텍스트 입력 초점: 입력·커서 이동·삭제·텍스트 실행 취소가 텍스트 칸으로 가고 타임라인은 그대로
         let field = NSTextField(frame: NSRect(x: 20, y: 20, width: 240, height: 24))
         w.contentView?.addSubview(field)
@@ -274,7 +330,12 @@ enum ShortcutSelfTest {
         await settle()
         check("text.focusReleased", s.editorFocused)
 
-        guard await regainFocus(w) else { return finish(folder, checks + [lostFocus("modal")]) }
+        return checks
+    }
+
+    private static func modalChecks(_ s: ProjectStore, _ w: NSWindow) async -> [Check] {
+        var checks: [Check] = []
+        func check(_ n: String, _ p: Bool, _ d: String = "") { checks.append(Check(name: n, pass: p, detail: d)) }
         // 시트(알림)가 떠 있으면 편집기 단축키를 실행하지 않는다
         s.presentAlert(.init(title: "단축키 검사", message: "모달 확인"))
         _ = await waitUntil(5) { s.alerts.isShowing && NSApp.keyWindow !== w }
@@ -290,7 +351,12 @@ enum ShortcutSelfTest {
         _ = await waitUntil(5) { !s.alerts.isShowing && NSApp.keyWindow === w }
         await settle()
 
-        guard await regainFocus(w) else { return finish(folder, checks + [lostFocus("drag")]) }
+        return checks
+    }
+
+    private static func dragChecks(_ s: ProjectStore, _ w: NSWindow) async -> [Check] {
+        var checks: [Check] = []
+        func check(_ n: String, _ p: Bool, _ d: String = "") { checks.append(Check(name: n, pass: p, detail: d)) }
         // 드래그 중: Space·Delete 무시, Esc로 드래그 취소(마우스 이벤트로 실제 드래그)
         if let tv = findTimeline(w.contentView) {
             let base = s.timeline, d0 = s.history.undoDepth
@@ -317,7 +383,7 @@ enum ShortcutSelfTest {
                   "committed \(committed) depth \(s.history.undoDepth - d0) lens \(s.timeline.clips.map(\.length)) base \(base.clips.map(\.length)) starts \(s.timeline.starts)")
         } else { check("drag.timelineView", false, "not found") }
 
-        finish(folder, checks)
+        return checks
     }
 
     // MARK: 도우미

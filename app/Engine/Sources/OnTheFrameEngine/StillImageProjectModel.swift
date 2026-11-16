@@ -30,8 +30,8 @@ enum StillImageProjectModel {
             try require(componentBitDepth == 8 && ["RGB","Gray","Indexed"].contains(colorModel), "image descriptor color/depth")
             try require(colorModel == "Indexed" ? [1,2,4,8].contains(encodedSampleBitDepth) : encodedSampleBitDepth == 8, "encoded depth")
             if encoding == .jpeg { try require(encodedSampleBitDepth == 8 && colorModel != "Indexed" && !alphaCapability, "JPEG descriptor") }
-            try require(["embedded-sRGB-ICC","explicit-sRGB","assumed-sRGB"].contains(profileDisposition), "image profile")
-            if profileDisposition == "embedded-sRGB-ICC" {
+            try require(["embedded-sRGB-ICC","embedded-Display-P3-ICC","explicit-sRGB","assumed-sRGB"].contains(profileDisposition), "image profile")
+            if ["embedded-sRGB-ICC","embedded-Display-P3-ICC"].contains(profileDisposition) {
                 try require(profileSHA256?.count == 64 && profileSHA256!.allSatisfy { "0123456789abcdef".contains($0) }, "ICC digest")
             } else { try require(profileSHA256 == nil, "unexpected ICC digest") }
         }
@@ -40,11 +40,15 @@ enum StillImageProjectModel {
     struct ValidatedImage: Sendable {
         let url: URL
         let descriptor: StillImageDescriptor
-        private init(url: URL, descriptor: StillImageDescriptor) { self.url=url; self.descriptor=descriptor }
+        /// Runtime-only fingerprint. It is not a portable source capability or schema field.
+        let encodedSHA256: String
+        private init(url: URL, descriptor: StillImageDescriptor, encodedSHA256: String) {
+            self.url=url; self.descriptor=descriptor; self.encodedSHA256=encodedSHA256
+        }
         static func inspect(_ url: URL) async throws -> Self {
             let metadata=try StillImageProbe.inspect(url)
             let result=try await StillImageProbe.validator.validate(metadata)
-            return Self(url:url, descriptor:result.descriptor)
+            return Self(url:url, descriptor:result.descriptor, encodedSHA256:metadata.encodedSHA256)
         }
     }
     struct ImageReference: Equatable, Sendable {

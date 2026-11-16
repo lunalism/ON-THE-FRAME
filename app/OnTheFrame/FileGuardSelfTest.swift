@@ -81,7 +81,7 @@ enum FileGuardSelfTest {
         let cmds: [Cmd] = [
             Cmd(name: "open", menu: "프로젝트 열기…", key: (31, "o", [.command]), direct: { s.requestOpenProject(nil) }),
             Cmd(name: "recent", menu: "other", key: (0, "", []), direct: { if let r = s.recentProjects.first(where: { $0.name == "other" }) { s.openRecent(r) } }),
-            Cmd(name: "import", menu: "가져오기…", key: (34, "i", [.command]), direct: { s.presentImportPanel() }),
+            Cmd(name: "import", menu: "미디어 가져오기…", key: (34, "i", [.command]), direct: { s.presentImportPanel() }),
             Cmd(name: "export", menu: "내보내기…", key: (14, "e", [.command]), direct: { s.presentExportPanel() }),
             Cmd(name: "save", menu: "프로젝트 저장", key: (1, "s", [.command]), direct: { s.saveProject() }),
             Cmd(name: "saveAs", menu: "다른 이름으로 저장…", key: (1, "s", [.command, .shift]), direct: { s.saveProject(saveAs: true) }),

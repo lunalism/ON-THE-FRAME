@@ -1,6 +1,7 @@
 import XCTest
 import ImageIO
 import CoreGraphics
+import Darwin
 @testable import OnTheFrameEngine
 
 final class StillImageProbeTests:XCTestCase {
@@ -12,6 +13,46 @@ final class StillImageProbeTests:XCTestCase {
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
     }
     func be(_ n:UInt32)->Data{Data([UInt8(n>>24),UInt8((n>>16)&255),UInt8((n>>8)&255),UInt8(n&255)])}
+    func testChecksumsMatchIndependentReferenceAcrossBlockBoundaries() {
+        func referenceCRC(_ bytes:Data)->UInt32 {
+            var value:UInt32=0xffffffff
+            for byte in bytes {
+                value ^= UInt32(byte)
+                for _ in 0..<8 { value=(value>>1) ^ (value&1==1 ? 0xedb88320:0) }
+            }
+            return value ^ 0xffffffff
+        }
+        func referenceAdler(_ bytes:Data)->UInt32 {
+            var a:UInt32=1,b:UInt32=0
+            for byte in bytes { a=(a+UInt32(byte))%65521;b=(b+a)%65521 }
+            return (b<<16)|a
+        }
+        func adler(_ data:Data)->UInt32 {
+            data.withUnsafeBytes { StillImageProbe.adler($0.bindMemory(to:UInt8.self)) }
+        }
+        let standard=Data("123456789".utf8)
+        XCTAssertEqual(StillImageProbe.crc(Data()),0)
+        XCTAssertEqual(adler(Data()),1)
+        XCTAssertEqual(StillImageProbe.crc(standard),0xcbf43926)
+        XCTAssertEqual(adler(standard),0x091e01de)
+        for length in [0,1,31,4096,65_535,65_536,65_537] {
+            let data=Data((0..<length).map { UInt8(truncatingIfNeeded:($0*37)^($0>>3)) })
+            XCTAssertEqual(StillImageProbe.crc(data),referenceCRC(data),"CRC length \(length)")
+            XCTAssertEqual(adler(data),referenceAdler(data),"Adler length \(length)")
+        }
+    }
+    func testPNGChunkChecksumCorruptionRemainsRejected() throws {
+        let valid=try png("valid-crc.png"),original=try Data(contentsOf:valid)
+        var corrupt=original
+        corrupt[29] ^= 1 // First IHDR CRC byte; keep signature, length, type and pixels intact.
+        let invalid=root.appendingPathComponent("invalid-crc.png")
+        try corrupt.write(to:invalid)
+        XCTAssertThrowsError(try StillImageProbe.inspect(invalid)) {
+            XCTAssertEqual($0 as? StillImageProbeError,.malformed)
+        }
+        XCTAssertEqual(try Data(contentsOf:valid),original)
+        XCTAssertEqual(try Data(contentsOf:invalid),corrupt)
+    }
     func chunk(_ name:String,_ payload:Data)->Data{let body=Data(name.utf8)+payload;return be(UInt32(payload.count))+body+be(StillImageProbe.crc(body))}
     func png(_ name:String="image.png",color:UInt8=2,depth:UInt8=8,transparent:Bool=false,extra:Data=Data())throws->URL {
         let channels=[0:1,2:3,3:1,4:2,6:4][Int(color)]!,scan=Data([0]+Array(repeating:UInt8(0),count:channels))
@@ -97,7 +138,269 @@ final class StillImageProbeTests:XCTestCase {
     }
     func testJPEGOrientationsAndProfiles()async throws {
         for o in 1...8 {let url=try jpeg("o\(o).jpg",orientation:o),m=try StillImageProbe.inspect(url),v=try await StillImageProbe.validator.validate(m);XCTAssertEqual(m.descriptor.orientation,o);XCTAssertEqual(v.normalizedWidth,o>=5 ? 2:4);XCTAssertEqual(v.normalizedHeight,o>=5 ? 4:2)}
-        let unsupported=try jpeg("p3.jpg",orientation:1,space:CGColorSpace(name:CGColorSpace.displayP3));XCTAssertThrowsError(try StillImageProbe.inspect(unsupported))
+        let p3=try jpeg("p3.jpg",orientation:1,space:CGColorSpace(name:CGColorSpace.displayP3))
+        let metadata=try StillImageProbe.inspect(p3)
+        XCTAssertEqual(metadata.descriptor.profileDisposition,"embedded-Display-P3-ICC")
+        XCTAssertNotNil(metadata.descriptor.profileSHA256)
+        _ = try await StillImageProbe.validator.validate(metadata)
+        let unsupported=try jpeg("adobe-rgb.jpg",orientation:1,space:CGColorSpace(name:CGColorSpace.adobeRGB1998))
+        XCTAssertThrowsError(try StillImageProbe.inspect(unsupported)) {XCTAssertEqual($0 as? StillImageProbeError,.unsupportedProfile)}
+    }
+    func jpegSegment(_ marker:UInt8,_ payload:Data)->Data {
+        let n=payload.count+2
+        return Data([0xff,marker,UInt8(n>>8),UInt8(n&255)])+payload
+    }
+    func le16(_ n:UInt16)->Data { Data([UInt8(n&255),UInt8(n>>8)]) }
+    func le32(_ n:UInt32)->Data { Data([UInt8(n&255),UInt8((n>>8)&255),UInt8((n>>16)&255),UInt8(n>>24)]) }
+    func withoutGeneratedExif(_ data:Data)throws->Data {
+        var result=Data(data.prefix(2)),k=2
+        while k+1<data.count {
+            guard data[k]==0xff else{throw StillImageProbeError.malformed}
+            let begin=k
+            while k<data.count && data[k]==0xff{k+=1}
+            guard k<data.count else{throw StillImageProbeError.malformed}
+            let marker=data[k];k+=1
+            if marker==0xda || marker==0xd9 {result.append(data[begin...]);return result}
+            guard k+2<=data.count else{throw StillImageProbeError.malformed}
+            let n=Int(data[k])*256+Int(data[k+1])
+            guard n>=2,n<=data.count-k else{throw StillImageProbeError.malformed}
+            let isExif=marker==0xe1 && data[k+2..<k+n].starts(with:Data("Exif\0\0".utf8))
+            if !isExif{result.append(data[begin..<k+n])}
+            k+=n
+        }
+        throw StillImageProbeError.malformed
+    }
+    func testJPEGWithEmbeddedExifThumbnailRemainsSingleImage() async throws {
+        let fullURL=try jpeg("exif-full-generated.jpg",orientation:1)
+        let thumbURL=try jpeg("exif-thumb-generated.jpg",orientation:1,width:2,height:1)
+        let full=try withoutGeneratedExif(Data(contentsOf:fullURL)),thumb=try Data(contentsOf:thumbURL)
+        func entry(_ tag:UInt16,_ type:UInt16,_ value:UInt32)->Data {le16(tag)+le16(type)+le32(1)+le32(value)}
+        // TIFF IFD0 has orientation 1 and points to IFD1. IFD1 contains a real
+        // separately encoded JPEG thumbnail at offset 92 from the TIFF header.
+        var tiff=Data([0x49,0x49,0x2a,0])+le32(8)+le16(1)+entry(0x112,3,1)+le32(26)
+        tiff += le16(5)+entry(0x100,4,2)+entry(0x101,4,1)+entry(0x103,3,6)
+        tiff += entry(0x201,4,92)+entry(0x202,4,UInt32(thumb.count))+le32(0)
+        XCTAssertEqual(tiff.count,92);tiff.append(thumb)
+        let bytes=Data(full.prefix(2))+jpegSegment(0xe1,Data("Exif\0\0".utf8)+tiff)+Data(full.dropFirst(2))
+        let url=root.appendingPathComponent("with-exif-thumbnail.jpg");try bytes.write(to:url)
+        let source=try XCTUnwrap(CGImageSourceCreateWithData(bytes as CFData,nil))
+        XCTAssertEqual(CGImageSourceGetCount(source),1,"ImageIO excludes embedded thumbnails")
+        let metadata=try StillImageProbe.inspect(url),validation=try await StillImageProbe.validator.validate(metadata)
+        XCTAssertEqual(metadata.descriptor.width,4);XCTAssertEqual(metadata.descriptor.height,2)
+        XCTAssertEqual(validation.normalizedWidth,4);XCTAssertEqual(validation.normalizedHeight,2)
+        XCTAssertEqual(try Data(contentsOf:url),bytes)
+    }
+    func testJPEGDimensionLimitPrecedesUnsupportedMPF() throws {
+        // This is a generated declared-MPF negative control, not a claim of a valid MPO.
+        let baseline=try Data(contentsOf:jpeg("size-primary-generated.jpg",orientation:1))
+        var oversized=baseline,k=2,changed=false
+        while k+1<oversized.count {
+            guard oversized[k]==0xff else{throw StillImageProbeError.malformed}
+            while k<oversized.count && oversized[k]==0xff{k+=1}
+            let marker=oversized[k];k+=1
+            if marker==0xda || marker==0xd9{break}
+            let n=Int(oversized[k])*256+Int(oversized[k+1])
+            if marker==0xc0 || marker==0xc2 {
+                oversized[k+3]=0x0f;oversized[k+4]=0xa0 // height 4000
+                oversized[k+5]=0x13;oversized[k+6]=0x88 // width 5000, beyond provisional cap
+                changed=true;break
+            }
+            k+=n
+        }
+        XCTAssertTrue(changed,"generated JPEG must contain a supported SOF")
+        let marker=jpegSegment(0xe2,Data("MPF\0".utf8))
+        let bytes=Data(oversized.prefix(2))+marker+Data(oversized.dropFirst(2))
+        let url=root.appendingPathComponent("oversized-declared-mpf.jpg");try bytes.write(to:url)
+        XCTAssertThrowsError(try StillImageProbe.inspect(url)) {
+            XCTAssertEqual($0 as? StillImageProbeError,.dimensionLimit(width:5000,height:4000,maxDimension:4096,maxPixels:16_777_216))
+            XCTAssertTrue($0.localizedDescription.contains("5000×4000"));XCTAssertTrue($0.localizedDescription.contains("4096"))
+        }
+        let small=root.appendingPathComponent("small-declared-mpf.jpg")
+        try (Data(baseline.prefix(2))+marker+Data(baseline.dropFirst(2))).write(to:small)
+        XCTAssertThrowsError(try StillImageProbe.inspect(small)) {XCTAssertEqual($0 as? StillImageProbeError,.malformed)}
+        XCTAssertEqual(try Data(contentsOf:url),bytes)
+    }
+    func testGeneratedTwoIndependentJPEGMPOIsStillRejected() throws {
+        let first=try Data(contentsOf:jpeg("mpo-first-generated.jpg",orientation:1,width:4,height:2))
+        let second=try Data(contentsOf:jpeg("mpo-second-generated.jpg",orientation:1,width:6,height:3))
+        // Valid MP Index layout: TIFF header 8 + IFD 42 + two 16-byte entries.
+        // The second JPEG starts after the first, relative to the MP endian field.
+        let app2Bytes=4+4+82,firstBytes=first.count+app2Bytes
+        var tiff=Data([0x4d,0x4d,0,0x2a])+be(8)+Data([0,3])
+        tiff += Data([0xb0,0,0,7])+be(4)+Data("0100".utf8)
+        tiff += Data([0xb0,1,0,4])+be(1)+be(2)
+        tiff += Data([0xb0,2,0,7])+be(32)+be(50)+be(0)
+        tiff += be(0x20030000)+be(UInt32(firstBytes))+be(0)+Data(repeating:0,count:4)
+        tiff += be(0)+be(UInt32(second.count))+be(UInt32(firstBytes-10))+Data(repeating:0,count:4)
+        XCTAssertEqual(tiff.count,82)
+        let bytes=Data(first.prefix(2))+jpegSegment(0xe2,Data("MPF\0".utf8)+tiff)+Data(first.dropFirst(2))+second
+        let url=root.appendingPathComponent("two-independent-generated.jpg");try bytes.write(to:url)
+        // Structural rejection is required even when ImageIO hides the second image.
+        XCTAssertThrowsError(try StillImageProbe.inspect(url)) {XCTAssertEqual($0 as? StillImageProbeError,.multiImage)}
+        XCTAssertEqual(try Data(contentsOf:url),bytes)
+        let source=try XCTUnwrap(CGImageSourceCreateWithData(bytes as CFData,nil))
+        guard CGImageSourceGetCount(source)==2 else{
+            print("STILLPROBE unsupported MPF structurally rejected; ImageIO exposes \(CGImageSourceGetCount(source)) primary image(s), so independent second-frame decoding is not verified")
+            return
+        }
+        for (index,width,height) in [(0,4,2),(1,6,3)] {
+            let image=try XCTUnwrap(CGImageSourceCreateImageAtIndex(source,index,[kCGImageSourceShouldCacheImmediately:true] as CFDictionary))
+            XCTAssertEqual(image.width,width);XCTAssertEqual(image.height,height)
+            XCTAssertEqual(CGImageSourceGetStatusAtIndex(source,index),.statusComplete)
+        }
+    }
+    func testMalformedJPEGDoesNotClaimMultipleImages() throws {
+        let url=root.appendingPathComponent("no-image-data.jpg"),bytes=Data([0xff,0xd8,0xff,0xd9])
+        try bytes.write(to:url)
+        XCTAssertThrowsError(try StillImageProbe.inspect(url)) {XCTAssertEqual($0 as? StillImageProbeError,.malformed)}
+        XCTAssertEqual(try Data(contentsOf:url),bytes)
+    }
+    func testImageFailureCategoriesHaveSpecificKoreanDescriptions() {
+        let failures:[StillImageProbeError]=[.unreadable,.invalidSignature,.typeMismatch,.multiImage,.orientation,.dimensions,
+            .unsupportedDepth,.unsupportedColor,.unsupportedProfile,.animated,.malformed,.resourceLimit,.changed,
+            .dimensionLimit(width:3024,height:4032,maxDimension:2048,maxPixels:4_194_304)]
+        let fragments=["읽을 수 없습니다","JPEG 또는 PNG","확장자","MPF 이미지 구성","회전 방향","가로·세로 크기",
+                       "비트 깊이","색상 모델","sRGB","APNG","끝까지 해석","자원 한도","원본이 변경","3024×4032"]
+        for (failure,fragment) in zip(failures,fragments) {
+            XCTAssertTrue(failure.localizedDescription.contains(fragment),"\(failure)")
+            XCTAssertFalse(failure.localizedDescription.contains("OnTheFrameEngine.StillImageProbeError"))
+        }
+        XCTAssertEqual(Set(failures.map(\.localizedDescription)).count,14)
+        XCTAssertFalse(StillImageProbeError.multiImage.localizedDescription.contains("사진이 여러 장"))
+    }
+    func testOwnerJPEGReadOnlyHighResolutionAcceptanceWhenProvided() async throws {
+        guard let path=ProcessInfo.processInfo.environment["OTF_OWNER_JPEG"],
+              let expected=ProcessInfo.processInfo.environment["OTF_OWNER_JPEG_SHA256"] else{throw XCTSkip("explicit exact owner JPEG opt-in")}
+        let url=URL(fileURLWithPath:path),before=try Data(contentsOf:url)
+        guard QA01.sha(before)==expected else{XCTFail("owner JPEG identity mismatch; probe was not run");return}
+        let metadata=try StillImageProbe.inspect(url),validator=StillImageProbe.Validator()
+        XCTAssertEqual(metadata.descriptor.width,3024);XCTAssertEqual(metadata.descriptor.height,4032)
+        XCTAssertEqual(metadata.descriptor.orientation,1)
+        XCTAssertEqual(metadata.descriptor.profileDisposition,"embedded-Display-P3-ICC")
+        XCTAssertEqual(metadata.descriptor.profileSHA256,"0ff6958f98684c61f6bbdce1368ddeaf3873baf84545baba482e920d92a914c0")
+        XCTAssertEqual(metadata.encodedSHA256,expected)
+        let first=try await validator.validate(metadata)
+        XCTAssertEqual(first.normalizedWidth,1536);XCTAssertEqual(first.normalizedHeight,2048)
+        XCTAssertEqual(first.normalizedRGBABytes,12_582_912);XCTAssertFalse(first.hasTransparentPixels)
+        _ = try await validator.validate(StillImageProbe.inspect(url))
+        let diagnostics=await validator.diagnostics()
+        XCTAssertEqual(diagnostics.fullDecodes,1);XCTAssertEqual(diagnostics.proxyDecodes,1)
+        XCTAssertEqual(diagnostics.cacheHits,1);XCTAssertEqual(diagnostics.retainedDecodedBytes,0)
+        XCTAssertEqual(try Data(contentsOf:url),before)
+    }
+    func testHighResolutionAlphaPNGAndFiniteSafetyBounds() async throws {
+        let width=3072,height=2304,url=root.appendingPathComponent("high-resolution-alpha.png")
+        try autoreleasepool {
+            let context=try XCTUnwrap(CGContext(data:nil,width:width,height:height,bitsPerComponent:8,bytesPerRow:width*4,space:CGColorSpace(name:CGColorSpace.sRGB)!,bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.setFillColor(CGColor(red:0.2,green:0.7,blue:0.4,alpha:0.5));context.fill(CGRect(x:0,y:0,width:width,height:height))
+            let writer=try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL,"public.png" as CFString,1,nil))
+            CGImageDestinationAddImage(writer,try XCTUnwrap(context.makeImage()),nil);XCTAssertTrue(CGImageDestinationFinalize(writer))
+        }
+        let before=try Data(contentsOf:url),metadata=try StillImageProbe.inspect(url),validator=StillImageProbe.Validator()
+        let result=try await validator.validate(metadata)
+        XCTAssertEqual(metadata.descriptor.width,width);XCTAssertEqual(metadata.descriptor.height,height)
+        XCTAssertEqual(result.normalizedWidth,2048);XCTAssertEqual(result.normalizedHeight,1536)
+        XCTAssertTrue(metadata.descriptor.alphaCapability);XCTAssertTrue(result.hasTransparentPixels)
+        XCTAssertEqual(result.normalizedRGBABytes,12_582_912)
+        XCTAssertEqual(try Data(contentsOf:url),before)
+        let bomb=root.appendingPathComponent("extreme-declared-size.png")
+        let bombBytes=Data([137,80,78,71,13,10,26,10])+chunk("IHDR",be(UInt32.max)+be(1)+Data([8,2,0,0,0]))
+        try bombBytes.write(to:bomb)
+        XCTAssertThrowsError(try StillImageProbe.inspect(bomb)) {XCTAssertEqual($0 as? StillImageProbeError,.dimensionLimit(width:Int(UInt32.max),height:1,maxDimension:4096,maxPixels:16_777_216))}
+        let oversized=root.appendingPathComponent("too-many-encoded-bytes.jpg")
+        try Data(repeating:0,count:8*1024*1024+1).write(to:oversized)
+        XCTAssertThrowsError(try StillImageProbe.inspect(oversized)) {XCTAssertEqual($0 as? StillImageProbeError,.resourceLimit)}
+        var constrained=StillImageProbe.Limits();constrained.estimatedDecodeBytes=1024
+        XCTAssertThrowsError(try StillImageProbe.inspect(url,limits:constrained)) {XCTAssertEqual($0 as? StillImageProbeError,.resourceLimit)}
+        XCTAssertEqual(StillImageProbe.Limits().maxDimension,4096)
+        XCTAssertEqual(StillImageProbe.Limits().maxPixels,16_777_216)
+        XCTAssertEqual(StillImageProbe.Limits().estimatedDecodeBytes,384*1024*1024)
+    }
+    func testValidationResultCacheUsesContentLimitsAndBoundedLRU() async throws {
+        let validator=StillImageProbe.Validator()
+        let url=try png("validation-cache.png",extra:chunk("tEXt",Data("note\0a".utf8)))
+        let first=try StillImageProbe.inspect(url)
+        _ = try await validator.validate(first)
+        _ = try await validator.validate(StillImageProbe.inspect(url))
+        var stats=await validator.diagnostics()
+        XCTAssertEqual(stats.fullDecodes,1);XCTAssertEqual(stats.proxyDecodes,1);XCTAssertEqual(stats.cacheHits,1)
+        // Change valid encoded metadata without changing file size/inode/mtime.
+        // A FileIdentity-only cache would miss this content revision.
+        var stamp=stat();XCTAssertEqual(stat(url.path,&stamp),0)
+        _ = try png("validation-cache.png",extra:chunk("tEXt",Data("note\0b".utf8)))
+        let times=[stamp.st_atimespec,stamp.st_mtimespec]
+        XCTAssertEqual(times.withUnsafeBufferPointer{Darwin.utimensat(AT_FDCWD,url.path,$0.baseAddress,0)},0)
+        XCTAssertEqual(FileIdentity.of(url),first.descriptor.identity)
+        let changed=try StillImageProbe.inspect(url)
+        XCTAssertNotEqual(changed.encodedSHA256,first.encodedSHA256)
+        _ = try await validator.validate(changed)
+        stats=await validator.diagnostics();XCTAssertEqual(stats.fullDecodes,2);XCTAssertEqual(stats.cachedResults,1)
+        var alteredLimits=StillImageProbe.Limits();alteredLimits.estimatedDecodeBytes-=1
+        _ = try await validator.validate(StillImageProbe.inspect(url,limits:alteredLimits))
+        stats=await validator.diagnostics();XCTAssertEqual(stats.fullDecodes,3)
+        for index in 0..<9 {_ = try await validator.validate(StillImageProbe.inspect(png("lru-\(index).png")))}
+        stats=await validator.diagnostics()
+        XCTAssertEqual(stats.cachedResults,8);XCTAssertEqual(stats.retainedDecodedBytes,0)
+    }
+    func testCachedValidationStillHonorsBeforeDecodeIdentityAndCancellation() async throws {
+        let validator=StillImageProbe.Validator(),url=try png("cached-seam.png"),metadata=try StillImageProbe.inspect(url)
+        _ = try await validator.validate(metadata)
+        let canceled=Task { () throws -> StillImageProbe.Validation in
+            withUnsafeCurrentTask{$0?.cancel()}
+            return try await validator.validate(metadata)
+        }
+        do{_ = try await canceled.value;XCTFail("cached validation ignored cancellation")}catch is CancellationError{}
+        do {
+            _ = try await validator.validate(metadata,beforeDecode:{try Data([1,2,3]).write(to:url,options:.atomic)})
+            XCTFail("cached validation bypassed identity seam")
+        }catch StillImageProbeError.changed{}
+        let stats=await validator.diagnostics();XCTAssertEqual(stats.fullDecodes,1)
+    }
+    func testUnknownICCIsRejectedDespiteFriendlyProfileKeyword() throws {
+        let unknown=try XCTUnwrap(CGColorSpace(name:CGColorSpace.adobeRGB1998)?.copyICCData()) as Data
+        // The PNG profile keyword is descriptive metadata, never an authority for
+        // admitting the actual ICC's colorimetry as sRGB or Display P3.
+        let extra=chunk("iCCP",Data("sRGB Display P3".utf8)+Data([0,0])+storedZlib(unknown))
+        let url=try png("profile-name-spoof.png",extra:extra),before=try Data(contentsOf:url)
+        XCTAssertThrowsError(try StillImageProbe.inspect(url)) {XCTAssertEqual($0 as? StillImageProbeError,.unsupportedProfile)}
+        XCTAssertEqual(try Data(contentsOf:url),before)
+    }
+    func testStandardSRGBChromaticitiesAndStrictNegativeControls() async throws {
+        let values: [UInt32] = [31270,32900,64000,33000,30000,60000,15000,6000]
+        let chromaticities = values.reduce(Data()) { $0 + be($1) }
+        let gamma = chunk("gAMA",be(45455)), chroma = chunk("cHRM",chromaticities)
+        for (name,extra) in [("standard",gamma+chroma),("explicit",chunk("sRGB",Data([0]))+chroma)] {
+            let u=try png(name+".png",color:6,extra:extra),before=try Data(contentsOf:u)
+            let m=try StillImageProbe.inspect(u),v=try await StillImageProbe.validator.validate(m)
+            XCTAssertEqual(m.descriptor.colorModel,"RGB")
+            XCTAssertTrue(m.descriptor.alphaCapability);XCTAssertTrue(v.hasTransparentPixels)
+            XCTAssertEqual(v.normalizedRGBABytes,4);XCTAssertEqual(try Data(contentsOf:u),before)
+        }
+        var changed=values;changed[2]+=1
+        let invalid:[(String,Data)]=[
+            ("other-primaries",gamma+chunk("cHRM",changed.reduce(Data()){$0+be($1)})),
+            ("short-chroma",gamma+chunk("cHRM",Data(chromaticities.dropLast()))),
+            ("duplicate-chroma",gamma+chroma+chroma),
+            ("unknown-transfer",chroma),
+            ("other-gamma",chunk("gAMA",be(40000))+chroma),
+            ("duplicate-gamma",gamma+gamma+chroma)
+        ]
+        for (name,extra) in invalid {
+            let u=try png(name+".png",extra:extra)
+            XCTAssertThrowsError(try StillImageProbe.inspect(u)) { XCTAssertEqual($0 as? StillImageProbeError,.unsupportedProfile) }
+        }
+    }
+    func testOwnerImageReadOnlyWhenProvided() async throws {
+        guard let path=ProcessInfo.processInfo.environment["OTF_OWNER_IMAGE"],
+              let expected=ProcessInfo.processInfo.environment["OTF_OWNER_IMAGE_SHA256"] else { throw XCTSkip("explicit owner image opt-in") }
+        let u=URL(fileURLWithPath:path),before=try Data(contentsOf:u)
+        XCTAssertEqual(QA01.sha(before),expected)
+        let m=try StillImageProbe.inspect(u),v=try await StillImageProbe.validator.validate(m)
+        let expectedSize=StillImageProbe.proxySize(for:m.descriptor,maxDimension:StillImageProbe.validationProxyMaxDimension)
+        XCTAssertLessThanOrEqual(abs(v.normalizedWidth-expectedSize.width),1)
+        XCTAssertLessThanOrEqual(abs(v.normalizedHeight-expectedSize.height),1)
+        XCTAssertEqual(v.normalizedRGBABytes,v.normalizedWidth*v.normalizedHeight*4)
+        XCTAssertEqual(try Data(contentsOf:u),before)
     }
     func storedZlib(_ data:Data)->Data {
         var a:UInt32=1,b:UInt32=0;for v in data{a=(a+UInt32(v))%65521;b=(b+a)%65521}
@@ -113,9 +416,11 @@ final class StillImageProbeTests:XCTestCase {
         let absent=try StillImageProbe.inspect(png("absent.png"));XCTAssertNil(absent.descriptor.profileSHA256);XCTAssertEqual(absent.descriptor.profileDisposition,"assumed-sRGB")
         let broken=try png("badICC.png",extra:chunk("iCCP",Data([65,0,0,1,2,3])))
         XCTAssertThrowsError(try StillImageProbe.inspect(broken))
-        let large=try jpeg("maximum.jpg",orientation:1,width:2048,height:2048),m=try StillImageProbe.inspect(large),v=try await StillImageProbe.validator.validate(m)
+        let large=try jpeg("maximum.jpg",orientation:1,width:4096,height:4096),m=try StillImageProbe.inspect(large),v=try await StillImageProbe.validator.validate(m)
         XCTAssertEqual(v.normalizedRGBABytes,16_777_216)
-        print("STILLPROBE max-admitted2048x2048 RGBA bytes=\(v.normalizedRGBABytes) RSS=\(IBDiagnostics(root:root).rss())")
+        XCTAssertEqual(m.descriptor.width,4096);XCTAssertEqual(m.descriptor.height,4096)
+        XCTAssertEqual(v.normalizedWidth,2048);XCTAssertEqual(v.normalizedHeight,2048)
+        print("STILLPROBE max-admitted4096x4096 validation-proxy RGBA bytes=\(v.normalizedRGBABytes) RSS=\(IBDiagnostics(root:root).rss())")
     }
     func testRequiredStreamIntegrityControls()async throws {
         let valid=try png("control.png"),original=try Data(contentsOf:valid)

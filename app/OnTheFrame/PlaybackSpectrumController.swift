@@ -26,7 +26,16 @@ final class SpectrumPlaybackTiming {
             previewView?.spectrumOutputChanged(on: item)
         }
         previewView = nil
-        item = nil; output = nil; lastFrame = nil
+        item = nil; output = nil
+        invalidateApproval()
+    }
+    /// A transport can prepare the new target while no Spectrum frame is approved.
+    /// Clearing this evidence never substitutes the previous frame for a seek target.
+    func invalidateApproval() {
+        lastFrame = nil
+        #if DEBUG
+        confirmedPTSForTest = .invalid
+        #endif
     }
     /// Rational floor on the fixed 30fps grid; never clamp invalid/end time to a plausible frame.
     static func frame(_ time: CMTime, duration: Int) -> Int? {
@@ -166,6 +175,14 @@ final class PlaybackSpectrumController {
         retained.removeAll(keepingCapacity: true); retainedBytes = 0
         cancelObsolete()
         if detachTiming { timing.detach() }
+    }
+    /// Keep only the same item's video-output transport across style/play/pause
+    /// boundaries. Explicit seeks retire it through the preview host.
+    /// Every accepted image and timestamp approval is still revoked.
+    func prepareForTransition(item: AVPlayerItem, view: PlayerNSView) {
+        stop(detachTiming: false)
+        timing.attach(item, view: view)
+        timing.invalidateApproval()
     }
     private func cancelObsolete() {
         for key in pending.keys {
@@ -317,7 +334,12 @@ extension ProjectStore {
             #if DEBUG
             SpectrumContinuityTrace.record(21, SpectrumContinuityTrace.tick, 1, isPlaying ? 1 : 0, Int64(generation), Int64(appliedGeneration))
             #endif
-            playback.stop(); return
+            if let view = previewHost, view.window != nil, view.spectrumOverlay.store === self,
+               let item = player.currentItem, playback.timing.item === item {
+                playback.stop(detachTiming: false)
+                playback.timing.invalidateApproval()
+            } else { playback.stop() }
+            return
         }
         let hasImages = InternalImagePreview.containsImages(timeline)
         // Preserve composited timestamps in covered intervals. Access failure blanks
@@ -326,7 +348,11 @@ extension ProjectStore {
             #if DEBUG
             SpectrumContinuityTrace.record(21, SpectrumContinuityTrace.tick, 2, SpectrumContinuityTrace.lease)
             #endif
-            playback.advance(frame: nil, timeline: timeline); return
+            if playback.timing.item === item, view.spectrumOverlay.store === self {
+                playback.stop(detachTiming: false)
+                playback.timing.invalidateApproval()
+            } else { playback.stop() }
+            return
         }
         playback.timing.attach(item, view: view)
         var frame = playback.timing.sample(hostTime: hostTime, timeline: timeline)
