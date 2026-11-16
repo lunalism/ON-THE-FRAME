@@ -908,7 +908,7 @@ struct AdjustmentsView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+            .padding(store.selectedSpectrum == nil ? 10 : 4)
         }
     }
     func target(icon: String, title: String, subtitle: String) -> some View {
@@ -926,25 +926,20 @@ struct AdjustmentsView: View {
     }
 }
 
-// SP-5A-02: local text only until Apply. Decimal parsing avoids binary rounding of milli-pixels.
+// Integer UI only; model values retain milli-pixel precision until a different integer is committed.
 struct SpectrumStyleDraft {
-    var startX: String { didSet { editedPixels.insert("시작 X") } }
-    var startY: String { didSet { editedPixels.insert("시작 Y") } }
-    var endX: String { didSet { editedPixels.insert("끝 X") } }
-    var endY: String { didSet { editedPixels.insert("끝 Y") } }
-    var height: String { didSet { editedPixels.insert("최대 높이") } }
+    var startX: String, startY: String, endX: String, endY: String, height: String
     var reaction: String
     var red: String, green: String, blue: String
-    var thickness: String { didSet { editedPixels.insert("두께") } }
+    var thickness: String
     var sides: SpectrumItemStyle.Sides
     var mode: SpectrumItemStyle.Mode
-    private(set) var editedPixels: Set<String> = []
-    static func pixels(_ value: Int) -> String {
-        if value % 1000 == 0 { return String(value / 1000) }
-        let magnitude = value.magnitude
-        let fraction = String(format: "%03llu", UInt64(magnitude % 1000))
-        return "\(value < 0 ? "-" : "")\(magnitude / 1000).\(fraction)"
+    // Nearest integer, with exact halves away from zero. Integer arithmetic also handles Int.min.
+    static func wholePixels(_ value: Int) -> Int {
+        let quotient = value / 1000, remainder = value % 1000
+        return quotient + (remainder >= 500 ? 1 : remainder <= -500 ? -1 : 0)
     }
+    static func pixels(_ value: Int) -> String { String(wholePixels(value)) }
     init(_ style: SpectrumItemStyle) {
         let pixels = Self.pixels
         startX = pixels(style.startXMilli); startY = pixels(style.startYMilli)
@@ -960,8 +955,6 @@ struct SpectrumStyleDraft {
     }
     func style(from base: SpectrumItemStyle) throws -> SpectrumItemStyle {
         func milli(_ text: String, _ label: String, original: Int, range: ClosedRange<Int>) throws -> Int {
-            // Selecting a clip does not count as editing; typed legacy decimals are still rejected.
-            if original % 1000 != 0 && !editedPixels.contains(label) { return original }
             let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard text.count <= 20,
                   text.range(of: #"^[+-]?[0-9]+$"#, options: .regularExpression) != nil,
@@ -970,9 +963,12 @@ struct SpectrumStyleDraft {
             }
             let (value, overflow) = integer.multipliedReportingOverflow(by: 1000)
             guard !overflow, range.contains(value) else {
-                throw Invalid(message: "\(label): \(Double(range.lowerBound) / 1000)–\(Double(range.upperBound) / 1000) px 범위의 정수를 입력하세요.")
+                let minimum = range.lowerBound / 1000 + (range.lowerBound % 1000 == 0 ? 0 : 1)
+                throw Invalid(message: "\(label): \(minimum)–\(range.upperBound / 1000) px 범위의 정수를 입력하세요.")
             }
-            return value
+            // Validate first: even the original fractional text must be rejected. Identical display
+            // writebacks (Tab/Return/blur or reverting a draft) must not round the stored value.
+            return integer == Self.wholePixels(original) ? original : value
         }
         func color(_ text: String, _ label: String) throws -> Int {
             let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1062,6 +1058,74 @@ private struct SpectrumDisclosureStyle: DisclosureGroupStyle {
     }
 }
 
+// Layout changes placement without replacing the inputs when the sidebar resizes.
+private struct SpectrumPropertyRowLayout: Layout {
+    var minimumControlWidth: CGFloat = 72
+    private let labelWidth: CGFloat = 70, gap: CGFloat = 6
+
+    private func resolvedWidth(_ proposed: CGFloat?) -> CGFloat {
+        guard let proposed, proposed.isFinite else { return labelWidth + gap + minimumControlWidth }
+        return max(min(148, minimumControlWidth), proposed)
+    }
+    private func measure(_ width: CGFloat, _ views: Subviews) -> (Bool, CGFloat, CGSize, CGSize) {
+        let inline = width >= labelWidth + gap + minimumControlWidth
+        let controlWidth = inline ? width - labelWidth - gap : width
+        let label = views[0].sizeThatFits(.init(width: inline ? labelWidth : width, height: nil))
+        let control = views[1].sizeThatFits(.init(width: controlWidth, height: nil))
+        return (inline, controlWidth, label, control)
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = resolvedWidth(proposal.width)
+        let (inline, _, label, control) = measure(width, subviews)
+        return CGSize(width: width, height: inline ? max(label.height, control.height) : label.height + 4 + control.height)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let width = resolvedWidth(bounds.width)
+        let (inline, controlWidth, label, control) = measure(width, subviews)
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY + (inline ? (bounds.height - label.height) / 2 : 0)),
+                          anchor: .topLeading, proposal: .init(width: inline ? labelWidth : width, height: label.height))
+        subviews[1].place(at: CGPoint(x: bounds.minX + (inline ? labelWidth + gap : 0),
+                                     y: bounds.minY + (inline ? (bounds.height - control.height) / 2 : label.height + 4)),
+                          anchor: .topLeading, proposal: .init(width: controlWidth, height: control.height))
+    }
+}
+
+private struct SpectrumCoordinatePairLayout: Layout {
+    private let columnGap: CGFloat = 4, axisGap: CGFloat = 3
+
+    private func resolvedWidth(_ proposed: CGFloat?) -> CGFloat {
+        guard let proposed, proposed.isFinite else { return 180 }
+        return max(148, proposed) // Two native inputs of at least 72pt, separated by 4pt.
+    }
+    private func measure(_ width: CGFloat, _ views: Subviews) -> (Bool, CGFloat, [CGSize]) {
+        let inline = width >= 180
+        let column = (width - columnGap) / 2
+        let x = views[0].sizeThatFits(.unspecified), y = views[2].sizeThatFits(.unspecified)
+        let xf = views[1].sizeThatFits(.init(width: column - (inline ? x.width + axisGap : 0), height: nil))
+        let yf = views[3].sizeThatFits(.init(width: column - (inline ? y.width + axisGap : 0), height: nil))
+        return (inline, column, [x, xf, y, yf])
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = resolvedWidth(proposal.width)
+        let (inline, _, sizes) = measure(width, subviews)
+        let axes = max(sizes[0].height, sizes[2].height), fields = max(sizes[1].height, sizes[3].height)
+        return CGSize(width: width, height: inline ? max(axes, fields) : axes + 2 + fields)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let (inline, column, sizes) = measure(resolvedWidth(bounds.width), subviews)
+        let axes = max(sizes[0].height, sizes[2].height)
+        for axis in [0, 2] {
+            let x = bounds.minX + (axis == 0 ? 0 : column + columnGap)
+            subviews[axis].place(at: CGPoint(x: x, y: bounds.minY + (inline ? (bounds.height - sizes[axis].height) / 2 : 0)),
+                                 anchor: .topLeading, proposal: .init(width: sizes[axis].width, height: sizes[axis].height))
+            let inputWidth = column - (inline ? sizes[axis].width + axisGap : 0)
+            subviews[axis + 1].place(at: CGPoint(x: x + (inline ? sizes[axis].width + axisGap : 0),
+                                               y: bounds.minY + (inline ? (bounds.height - sizes[axis + 1].height) / 2 : axes + 2)),
+                                     anchor: .topLeading, proposal: .init(width: inputWidth, height: sizes[axis + 1].height))
+        }
+    }
+}
+
 struct SpectrumStyleAdjust: View {
     @Bindable var store: ProjectStore
     let item: SpectrumItem
@@ -1119,26 +1183,28 @@ struct SpectrumStyleAdjust: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            AdjustSection(title: "스타일") {
+            AdjustSection(title: "스타일", horizontalInset: 2) {
                 DisclosureGroup("위치 및 크기", isExpanded: $positionExpanded) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("1920×1080 기준 정수 px · 왼쪽 위가 원점")
                             .font(.caption2).foregroundStyle(.secondary)
-                        field("시작 X", $draft.startX); field("시작 Y", $draft.startY)
-                        field("끝 X", $draft.endX); field("끝 Y", $draft.endY)
+                        point("시작점", xTitle: "시작 X", x: $draft.startX, yTitle: "시작 Y", y: $draft.startY)
+                        point("끝점", xTitle: "끝 X", x: $draft.endX, yTitle: "끝 Y", y: $draft.endY)
                         field("최대 높이", $draft.height)
                     }.padding(.top, 4)
                 }
                 Divider()
                 DisclosureGroup("모양 및 색상", isExpanded: $appearanceExpanded) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Picker("표시 모드", selection: $draft.mode) {
-                            Text("Digital").tag(SpectrumItemStyle.Mode.digital)
-                            Text("Analog").tag(SpectrumItemStyle.Mode.analog)
+                        property("표시 모드", minimumControlWidth: 100) {
+                            Picker("표시 모드", selection: $draft.mode) {
+                                Text("Digital").tag(SpectrumItemStyle.Mode.digital)
+                                Text("Analog").tag(SpectrumItemStyle.Mode.analog)
+                            }.labelsHidden().accessibilityLabel("표시 모드")
                         }
                         field("두께", $draft.thickness)
                         Slider(value: Binding(get: {
-                            Double(store.timeline.spectrum(item.id)?.style.thicknessMilli ?? item.style.thicknessMilli) / 1000
+                            Double(SpectrumStyleDraft.wholePixels(store.timeline.spectrum(item.id)?.style.thicknessMilli ?? item.style.thicknessMilli))
                         }, set: { value in
                             draft.thickness = String(Int(value.rounded()))
                             commitLive(kind: "thickness-slider")
@@ -1148,17 +1214,22 @@ struct SpectrumStyleAdjust: View {
                         })
                         .accessibilityLabel("스펙트럼 두께")
                         .padding(.bottom, 8)
-                        Picker("표시 방향", selection: $draft.sides) {
-                            Text("위쪽 (above)").tag(SpectrumItemStyle.Sides.above)
-                            Text("양쪽 (mirrored)").tag(SpectrumItemStyle.Sides.mirrored)
-                            Text("아래쪽 (below)").tag(SpectrumItemStyle.Sides.below)
+                        property("표시 방향", minimumControlWidth: 140) {
+                            Picker("표시 방향", selection: $draft.sides) {
+                                Text("위쪽 (above)").tag(SpectrumItemStyle.Sides.above)
+                                Text("양쪽 (mirrored)").tag(SpectrumItemStyle.Sides.mirrored)
+                                Text("아래쪽 (below)").tag(SpectrumItemStyle.Sides.below)
+                            }.labelsHidden().accessibilityLabel("표시 방향")
                         }
                         Text("방향은 시작점→끝점 기준선의 수직 방향 기준이며, 화면 위·아래와 다를 수 있습니다.")
                             .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        ColorPicker("색상", selection: pickerColor, supportsOpacity: false)
-                            .id(store.spectrumColorEventRevision)
-                            .onAppear { NSColorPanel.shared.isContinuous = true }
-                            .disabled(SpectrumPickerRGB.channels(draft) == nil)
+                        property("색상") {
+                            ColorPicker("색상", selection: pickerColor, supportsOpacity: false)
+                                .labelsHidden().accessibilityLabel("색상")
+                                .id(store.spectrumColorEventRevision)
+                                .onAppear { NSColorPanel.shared.isContinuous = true }
+                                .disabled(SpectrumPickerRGB.channels(draft) == nil)
+                        }
                         if SpectrumPickerRGB.channels(draft) == nil {
                             Text("RGB 입력을 0–255 정수로 완성하면 색상 선택기를 사용할 수 있습니다.")
                                 .font(.caption2).foregroundStyle(.secondary)
@@ -1167,7 +1238,7 @@ struct SpectrumStyleAdjust: View {
                 }
             }
             .disclosureGroupStyle(SpectrumDisclosureStyle())
-            AdjustSection(title: "오디오 분석") {
+            AdjustSection(title: "오디오 분석", horizontalInset: 2) {
                 field("반응 강도 (%)", $draft.reaction)
                 Slider(value: Binding(get: {
                     Double(store.timeline.spectrum(item.id)?.style.reactionPercent ?? item.style.reactionPercent)
@@ -1204,15 +1275,31 @@ struct SpectrumStyleAdjust: View {
         }
     }
     private func field(_ title: String, _ value: Binding<String>) -> some View {
-        HStack {
-            Text(title).font(.caption).lineLimit(2).fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 4)
-            TextField(title, text: value).textFieldStyle(.roundedBorder)
-                .multilineTextAlignment(.trailing).frame(width: 100)
-                .accessibilityLabel("스펙트럼 " + title)
-                .focused($focusedPixel, equals: title)
-                .onSubmit { commitLive(kind: "numeric") }
+        property(title) { input(title, value) }
+    }
+    private func point(_ title: String, xTitle: String, x: Binding<String>, yTitle: String, y: Binding<String>) -> some View {
+        property(title, minimumControlWidth: 180) {
+            SpectrumCoordinatePairLayout {
+                Text("X").font(.caption)
+                input(xTitle, x)
+                Text("Y").font(.caption)
+                input(yTitle, y)
+            }
         }
+    }
+    private func property<C: View>(_ title: String, minimumControlWidth: CGFloat = 72, @ViewBuilder control: () -> C) -> some View {
+        SpectrumPropertyRowLayout(minimumControlWidth: minimumControlWidth) {
+            Text(title).font(.caption).fixedSize(horizontal: false, vertical: true)
+            control().frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+    private func input(_ title: String, _ value: Binding<String>) -> some View {
+        TextField(title, text: value).textFieldStyle(.roundedBorder)
+            .font(.system(size: 11, design: .monospaced)).controlSize(.small)
+            .multilineTextAlignment(.trailing).frame(minWidth: 72, maxWidth: .infinity)
+            .accessibilityLabel("스펙트럼 " + title)
+            .focused($focusedPixel, equals: title)
+            .onSubmit { commitLive(kind: "numeric") }
     }
 }
 
@@ -1256,13 +1343,15 @@ struct SpectrumSourceAdjust: View {
 /// 조정 묶음 제목 + 내용
 struct AdjustSection<Content: View>: View {
     let title: String
+    var horizontalInset: CGFloat = 8
     @ViewBuilder let content: Content
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary).lineLimit(2)
             content
         }
-        .padding(8)
+        .padding(.vertical, 8)
+        .padding(.horizontal, horizontalInset)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
     }
