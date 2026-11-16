@@ -1,6 +1,7 @@
 import AppKit
+import OnTheFrameEngine
 
-/// 편집기 단축키 경로(Premiere 방식 기본값, D-019. 완전한 Premiere 호환이 아니다).
+/// 편집기 단축키 경로(흔히 쓰는 기본 단축키, D-019·D-027. 다른 편집기와의 완전 호환을 주장하지 않는다).
 /// 처리 층(2026-10-10 한국어 입력 소스 대응):
 /// 1. 로컬 키 감시(ProjectStore.attachEditorWindow): 이벤트 큐에서 꺼낸 모든 키 이벤트를 먼저 본다. 키 창이 없어도 본다.
 /// 2. 보조: 편집기 창 보기의 performKeyEquivalent(⌘ 조합, WindowAccessor)와 타임라인 보기의 keyDown(수정 키 없는 키).
@@ -9,7 +10,7 @@ import AppKit
 /// 모든 층은 같은 판단(route)을 쓰고, 이미 처리한 이벤트는 다시 처리하지 않는다(한 번 누름 = 한 번 동작).
 /// `-OTFKeyTrace` 실행 인수를 주면 층별 경로를 기록한다(KeyTrace).
 ///
-/// - 수정 키 없는 키(Space, ←/→, Home/End, Delete·⌫)는 메뉴 키 등가물로 두지 않는다. 메뉴 키 등가물은 텍스트 입력보다 먼저
+/// - 수정 키 없는 키(Space, ←/→, Home/End, Delete·⌫, 도구 V·C)는 메뉴 키 등가물로 두지 않는다. 메뉴 키 등가물은 텍스트 입력보다 먼저
 ///   처리되어 글자 입력·커서 이동·삭제를 가로채기 때문이다. 대신 이 라우터(위 처리 층)에서만 처리하고,
 ///   다음 조건을 모두 만족할 때만 실행한다. 아니면 이벤트를 건드리지 않고 그대로 보낸다.
 ///   편집기 창이 키 창 · 시트·모달 없음 · 텍스트 입력에 초점 없음 · 드래그 중 아님 · 동작이 켜져 있음.
@@ -21,11 +22,12 @@ import AppKit
 /// - Esc(드래그 취소)는 타임라인 보기가 직접 처리한다(TimelineNSView.cancelOperation).
 @MainActor
 enum KeyRouting {
-    enum BareKeyAction: Equatable { case playPause, stepBackward, stepForward, toStart, toEnd, deleteSelection, rippleDelete }
+    enum BareKeyAction: Equatable { case playPause, stepBackward, stepForward, toStart, toEnd, deleteSelection, rippleDelete, selectionTool, cutTool, textTool }
 
     /// 키 코드(가상 키) → 동작. 수정 키(⌘⌥⌃⇧)가 있으면 nil(예: ⇧← 등은 처리하지 않음).
     /// 예외: ⇧Delete·⇧⌫·⇧⌦는 리플 삭제(D-020). 수정 키 없는 Delete·⌫·⌦는 빈틈을 남기는 삭제.
-    /// 반복 입력은 프레임 이동에만 허용한다(누르고 있으면 계속 이동). Space·Delete 반복은 동작하지 않는다.
+    /// 반복 입력은 프레임 이동에만 허용한다(누르고 있으면 계속 이동). Space·Delete·V·C 반복은 동작하지 않는다.
+    /// 도구 V·C(2026-10-11, D-030)는 물리 키 코드(V=9, C=8)로 맞춰 한국어 입력 소스(ㅍ·ㅊ)에서도 같다.
     static func bareKeyAction(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, isRepeat: Bool) -> BareKeyAction? {
         let mods = modifiers.intersection([.command, .option, .control, .shift])
         if mods == [.shift], keyCode == 51 || keyCode == 117 { return isRepeat ? nil : .rippleDelete }
@@ -38,13 +40,16 @@ enum KeyRouting {
         case 115: a = .toStart             // Home
         case 119: a = .toEnd               // End
         case 51, 117: a = .deleteSelection // ⌫(Delete), ⌦(Forward Delete)
+        case 9: a = .selectionTool         // V(한국어 ㅍ)
+        case 8: a = .cutTool               // C(한국어 ㅊ)
+        case 17: a = .textTool             // T(한국어 ㅅ, 2026-10-22): 도구만 바꾼다(자막을 만들지 않음)
         default: a = nil
         }
         if isRepeat, a != .stepBackward, a != .stepForward { return nil }
         return a
     }
 
-    enum CommandAction: Equatable { case split, undo, redo, export, newProject, openProject, save, saveAs }
+    enum CommandAction: Equatable { case split, undo, redo, export, newProject, openProject, save, saveAs, copy, paste }
 
     /// ⌘ 조합 → 명령. 글자는 수정 키를 뺀 문자로 맞추고, 한글 등 라틴 문자가 아닌 입력 소스에서는 키 코드(ANSI)로 맞춘다.
     static func commandAction(keyCode: UInt16, charactersIgnoringModifiers: String?, modifiers: NSEvent.ModifierFlags) -> CommandAction? {
@@ -59,6 +64,8 @@ enum KeyRouting {
             if letter("n", 45) { return .newProject }
             if letter("o", 31) { return .openProject }
             if letter("s", 1) { return .save }
+            if letter("c", 8) { return .copy }    // 2026-10-11 클립 복사(텍스트 입력 중이면 텍스트로 넘김)
+            if letter("v", 9) { return .paste }
         }
         if mods == [.command, .shift], letter("z", 6) { return .redo }
         if mods == [.command, .shift], letter("s", 1) { return .saveAs }
@@ -118,12 +125,19 @@ enum KeyRouting {
 
     /// 판단과 실행. 처리하면 nil(소비), 아니면 이벤트를 그대로 돌려준다.
     static func handle(_ e: NSEvent, store: ProjectStore) -> NSEvent? {
+        // A Spectrum numeric drag is not an NSText editor. Keep editor commands
+        // from mutating its base; Escape still reaches the owning native control.
+        if store.spectrumNumericScrubToken != nil, eventWindowOK(e, store), e.keyCode != 53 {
+            if commandAction(keyCode: e.keyCode, charactersIgnoringModifiers: e.charactersIgnoringModifiers,
+                             modifiers: e.modifierFlags) != nil ||
+                bareKeyAction(keyCode: e.keyCode, modifiers: e.modifierFlags, isRepeat: e.isARepeat) != nil { return nil }
+        }
         if let cmd = commandAction(keyCode: e.keyCode, charactersIgnoringModifiers: e.charactersIgnoringModifiers, modifiers: e.modifierFlags) {
             return handleCommand(cmd, e, store: store)
         }
         guard let action = bareKeyAction(keyCode: e.keyCode, modifiers: e.modifierFlags, isRepeat: e.isARepeat) else {
             // 반복된 Space·Delete는 편집기 문맥이면 조용히 버린다(한 번 누름 = 한 번 동작).
-            if e.isARepeat, [49, 51, 117].contains(e.keyCode),
+            if e.isARepeat, [49, 51, 117, 8, 9, 17].contains(e.keyCode),
                e.modifierFlags.intersection([.command, .option, .control]).isEmpty,
                editorAcceptsShortcuts(store), eventWindowOK(e, store) { return nil }
             return e
@@ -131,7 +145,7 @@ enum KeyRouting {
         guard eventWindowOK(e, store), editorAcceptsShortcuts(store), store.gestureBase == nil else { return e }
         switch action {
         case .playPause:
-            guard store.canPlay else { return e }
+            guard store.canRequestPlayback else { return e }
             store.togglePlay()
         case .stepBackward, .stepForward, .toStart, .toEnd:
             guard !store.timeline.isEmpty else { return e }
@@ -144,6 +158,9 @@ enum KeyRouting {
         case .deleteSelection, .rippleDelete:
             guard store.selection != nil else { return e }
             store.deleteSelection(ripple: action == .rippleDelete)
+        case .selectionTool: store.setTool(.selection)   // 도구만 바꾼다(재생·재생 헤드·선택·편집 그대로)
+        case .cutTool: store.setTool(.cut)
+        case .textTool: store.setTool(.text)
         }
         return nil
     }
@@ -155,7 +172,7 @@ enum KeyRouting {
             switch cmd {
             case .undo: NSApp.sendAction(Selector(("undo:")), to: nil, from: nil); return nil
             case .redo: NSApp.sendAction(Selector(("redo:")), to: nil, from: nil); return nil
-            case .split, .export, .newProject, .openProject, .save, .saveAs: return e   // 텍스트 입력 중: 메뉴(응답자 체인)로
+            case .split, .export, .newProject, .openProject, .save, .saveAs, .copy, .paste: return e   // 텍스트 입력 중: 메뉴(응답자 체인 → 텍스트 복사·붙여넣기)로
             }
         }
         guard editorAcceptsShortcuts(store) else { return e }
@@ -164,7 +181,7 @@ enum KeyRouting {
         switch cmd {
         // 초점은 위에서 실제 상태로 확인했다. 캐시된 editorFocused(store.canSplit)는 키 창 변화 알림이 늦으면 낡을 수 있어 쓰지 않는다.
         case .split: if !store.timeline.isEmpty, store.alert == nil, store.gestureBase == nil { store.splitAtPlayhead(); done = true }
-        case .undo: if store.gestureBase == nil, store.history.canUndo { store.undo(); done = true }
+        case .undo: if store.gestureBase == nil, store.history.canUndo || store.colorSession != nil || store.spectrumLiveSession != nil { store.undo(); done = true }   // 색 조정 세션: 끝내고 되돌림(D-039)
         case .redo: if store.gestureBase == nil, store.history.canRedo { store.redo(); done = true }
         case .export: if store.gestureBase == nil, store.exportBlockReason != nil || store.canExport { store.presentExportPanel(); done = true }
         // 프로젝트 파일(A-013): 한국어 입력 소스에서도 한 번만 동작하도록 라우터가 처리한다
@@ -172,6 +189,8 @@ enum KeyRouting {
         case .openProject: if store.gestureBase == nil { store.requestOpenProject(nil); done = true }
         case .save: if store.gestureBase == nil { store.saveProject(); done = true }
         case .saveAs: if store.gestureBase == nil { store.saveProject(saveAs: true); done = true }
+        case .copy: if store.canCopy { store.copySelection(); done = true } else if store.selectedSpectrum != nil { store.statusMessage = ProjectStore.spectrumEditUnsupported }   // 스펙트럼 복사 없음(2B-2): 경고음 + 안내
+        case .paste: if store.canPaste { store.pasteAtPlayhead(); done = true } else if store.clipClipboard == nil { store.statusMessage = EditError.clipboardEmpty.description }
         }
         if !done { NSSound.beep() }   // 꺼진 동작: 메뉴 키 등가물과 같이 경고음만
         return nil

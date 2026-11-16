@@ -271,6 +271,13 @@ enum LaneSelfTest {
         case (40, [.command]): if ed == nil { s.splitAtPlayhead() }
         case (6, [.command]): if let ed { ed.undoManager?.undo() } else { s.undo() }
         case (6, [.command, .shift]): if let ed { ed.undoManager?.redo() } else { s.redo() }
+        // 2026-10-23(자막 자체 검사): 도구 키·⌘Return·복사·붙여넣기(직접 경로에서도 같은 저장소 동작·글 칸 명령)
+        case (9, []): if let ed { ed.insertText("v", replacementRange: NSRange(location: NSNotFound, length: 0)) } else { s.setTool(.selection) }
+        case (8, []): if let ed { ed.insertText("c", replacementRange: NSRange(location: NSNotFound, length: 0)) } else { s.setTool(.cut) }
+        case (17, []): if let ed { ed.insertText("t", replacementRange: NSRange(location: NSNotFound, length: 0)) } else { s.setTool(.text) }
+        case (36, [.command]): (ed as? CommandReturnTextView)?.onCommandReturn?()
+        case (8, [.command]): if ed == nil, s.canCopy { s.copySelection() }   // 키 창 확인 없이 같은 클립 복사·붙여넣기
+        case (9, [.command]): if ed == nil, s.canPaste { s.pasteAtPlayhead() }
         default: break
         }
     }

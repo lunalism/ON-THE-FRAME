@@ -94,10 +94,89 @@ public enum ExportService {
     /// 인코딩 중에는 [0, 0.99], 1.0은 검증·승격 성공 뒤 한 번. 취소·실패에서는 1.0을 보고하지 않는다.
     /// 작업(Task) 취소 = 내보내기 취소.
     /// stage: 인코딩 시작(.encoding)과 인코딩이 끝나 검증·승격에 들어감(.finalizing)을 순서대로 알린다(표시용, 진행률은 바꾸지 않음).
+    /// 그리지 못하는 자막(첫 번째). 앱은 내보내기 전에 같은 판정으로 막고 알린다.
+    public static func unrenderableSubtitle(_ p: PlannedComposition) -> SubtitleItem? {
+        p.subtitles.first { SubtitleRenderer.shared.renderFailed($0) }   // 결과만 기억하는 판정(그림 캐시보다 큰 묶음에서 다시 그리지 않음, §49)
+    }
     public static func export(_ p: PlannedComposition, to d: ExportDestination, sources: [MediaAsset],
                               options: Options = Options(), stage: @escaping @Sendable (ExportStage) async -> Void = { _ in },
                               progress: @escaping @Sendable (Double) async -> Void) async -> ExportOutcome {
+        await exportPrepared(p, to:d, sources:sources, options:options, stage:stage, progress:progress)
+    }
+
+    /// Explicit internal capability. The app supplies its compile + runtime gate;
+    /// ordinary plans and direct preview-plan exports retain their original fence.
+    public static func exportImages(_ timeline: Timeline, media: [UUID:MediaAsset], enabled: Bool,
+                                    resolvedImages: [UUID:URL] = [:], to destination: ExportDestination,
+                                    settings: RenderSettings = .m1, options: Options = Options(),
+                                    stage: @escaping @Sendable (ExportStage) async -> Void = { _ in },
+                                    progress: @escaping @Sendable (Double) async -> Void) async -> ExportOutcome {
+        guard enabled else { return .failed(.export("내부 이미지 내보내기가 꺼져 있습니다.")) }
+        guard timeline.isValid, InternalImagePreview.containsImages(timeline), timeline.durationFrames > 0 else {
+            return .failed(.export("이미지 타임라인이 필요합니다."))
+        }
+        guard timeline.spectra.isEmpty else { return .failed(.export("스펙트럼 내보내기는 아직 지원하지 않습니다.")) }
+        var scopes = [URL](), identities = [URL:FileIdentity]()
+        defer { for url in scopes { url.stopAccessingSecurityScopedResource() } }
+        do {
+            for entry in timeline.mediaCatalog {
+                guard let image = entry.still else { continue }
+                guard let url = resolvedImages[entry.id] ?? image.validated?.url, url.isFileURL else {
+                    throw InternalImagePreview.error("이미지 원본 접근·검증이 필요합니다.")
+                }
+                if url.startAccessingSecurityScopedResource() { scopes.append(url) }
+                guard let identity = FileIdentity.of(url) else { throw StillImageProbeError.changed }
+                identities[url] = identity
+            }
+            let plan = try await InternalImagePreview.plan(timeline,media:media,enabled:true,settings:settings,resolvedImages:resolvedImages)
+            return await exportPrepared(plan,to:destination,sources:Array(media.values),options:options,
+                                        stage:stage,progress:progress,imageIdentities:identities)
+        } catch { return Task.isCancelled ? .cancelled : .failed(.export(String(describing:error))) }
+    }
+
+    #if DEBUG
+    /// Explicit test-only capability. Normal export continues to reject every spectrum plan.
+    static func exportSpectrumSlice(_ timeline: Timeline, media: [UUID: MediaAsset], enabled: Bool,
+                                    to destination: ExportDestination, controls: SpectrumExportControls,
+                                    options: Options = Options(), progress: @escaping @Sendable (Double) async -> Void = { _ in }) async -> ExportOutcome {
+        guard enabled else { return .failed(.export("Internal spectrum export is disabled.")) }
+        do {
+            let frames = try SpectrumExportFrames(timeline: timeline, assets: Array(media.values), controls: controls)
+            let plan = try await CompositionPlanner.plan(timeline, media: media, settings: .m1)
+            try Task.checkCancellation()
+            return await exportPrepared(plan, to: destination, sources: Array(media.values), options: options,
+                                        stage: { _ in }, progress: progress, spectrum: frames)
+        } catch { return Task.isCancelled || error is CancellationError ? .cancelled : .failed(.export(String(describing: error))) }
+    }
+    #endif
+
+    private static func exportPrepared(_ p: PlannedComposition, to d: ExportDestination, sources: [MediaAsset],
+                                       options: Options, stage: @escaping @Sendable (ExportStage) async -> Void,
+                                       progress: @escaping @Sendable (Double) async -> Void,
+                                       imageIdentities: [URL:FileIdentity] = [:], spectrum: (any ExportFrameOverlay)? = nil) async -> ExportOutcome {
+        let imageExport = !imageIdentities.isEmpty
+        if p.imagePreviewOnly && !imageExport { return .failed(.export("내부 이미지 프리뷰 구성은 내보낼 수 없습니다.")) }
+        func imageSafety() -> ExportFailure? {
+            let dest = d.url.standardizedFileURL.resolvingSymlinksInPath(), destID = FileIdentity.of(dest)
+            for (url, identity) in imageIdentities {
+                if url.standardizedFileURL.resolvingSymlinksInPath() == dest || destID?.sameFile(as:identity) == true { return .destinationIsSource }
+                if FileIdentity.of(url) != identity { return .export("내보내는 동안 이미지 원본이 바뀌었습니다.") }
+            }
+            return nil
+        }
+        if Task.isCancelled { return .cancelled }
+        if let f = imageSafety() { return .failed(f) }
         if let f = validate(d, sources: sources) { return .failed(f) }
+        // 스펙트럼(2026-10-25, SP-1A 1단계): 내보내기 그리기가 아직 없다 — 스펙트럼을 조용히 빼고 내보내지 않도록 대상 파일·임시 폴더 전에 거부한다.
+        if !p.spectra.isEmpty && spectrum == nil {
+            return .failed(.export("이 빌드는 스펙트럼을 아직 내보내지 못합니다(스펙트럼 \(p.spectra.count)개). 스펙트럼 없이 내보내려면 스펙트럼을 지우세요."))
+        }
+        // A-014: 영상 원본이 하나도 없으면(소리 파일만) 영상 트랙을 만들 수 없다 — 내보내지 않는다(앱은 미리 막는다)
+        guard p.hasVideo else { return .failed(.export("영상이 있는 원본이 없습니다. 영상 파일을 하나 이상 가져오세요.")) }
+        // 그려야 할 자막을 그리지 못하면(2026-10-23) 임시 파일·대상 파일을 건드리기 전에 거부한다. 빈 자막은 plan.subtitles에 없다.
+        if let bad = Self.unrenderableSubtitle(p) {
+            return .failed(.export("자막을 그릴 수 없어 내보내지 않았습니다(\(bad.start)프레임에서 시작하는 자막). 글을 줄이거나 글자 크기를 줄인 뒤 다시 내보내세요."))
+        }
         let tempDir: URL
         do {
             tempDir = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: d.url, create: true)
@@ -107,14 +186,67 @@ public enum ExportService {
         defer { try? FileManager.default.removeItem(at: tempDir) }   // 이 내보내기가 만든 임시 디렉터리만
         let tempFile = tempDir.appendingPathComponent("output.mp4")
 
+        await stage(.encoding)
+        let result: Result<Void, Error>
+        if p.subtitles.isEmpty && !imageExport && spectrum == nil {
+            // 자막이 없는 프로젝트: 지금까지의 내보내기 세션 경로 그대로
+            let (r, injected) = await encodeWithSession(p, to: tempFile, options: options, progress: progress)
+            if injected { return .failed(.injected) }
+            result = r
+        } else {
+            // 자막이 있는 프로젝트: 구조 R(기본 합성기 리더 → 4:2:0 자막 → 쓰기, SubtitleExporter)
+            do { try await SubtitleExporter.encode(p, to: tempFile, failAfterFraction: options.failAfterFraction, progress: progress, strictFrameGrid:imageExport, spectrum:spectrum); result = .success(()) }
+            catch is SubtitleExporter.Injected { return .failed(.injected) }
+            catch let e as ExportFailure { return .failed(e) }
+            catch { result = .failure(error) }
+        }
+        switch result {
+        case .failure(let e):
+            if e is CancellationError || Task.isCancelled { return .cancelled }
+            return .failed(.export(e.localizedDescription))
+        case .success:
+            break
+        }
+        if Task.isCancelled { return .cancelled }
+        await stage(.finalizing)
+        // 승격 전 검증
+        do {
+            let a = AVURLAsset(url: tempFile)
+            let v = try await a.loadTracks(withMediaType: .video)
+            guard v.count == 1 else { return .failed(.verification("video tracks \(v.count)")) }
+            let r = try await v[0].load(.timeRange)
+            let frames = p.settings.nearestFrame(r.duration)
+            guard frames == p.durationFrames else { return .failed(.verification("frames \(frames) != \(p.durationFrames)")) }
+            // 소리는 섞인 트랙 하나(여러 레인을 따로 쓴 파일은 첫 트랙만 들리므로 승격하지 않는다)
+            let au = try await a.loadTracks(withMediaType: .audio)
+            guard au.count == (p.hasAudio ? 1 : 0) else { return .failed(.verification("audio tracks \(au.count)")) }
+        } catch { return .failed(.verification(error.localizedDescription)) }
+        #if DEBUG
+        await spectrum?.checkpoint(.promotionPreparation)
+        #endif
+        options.beforePromotion?()
+        // 마무리(검증) 중 취소(CP-13): 승격 직전에 다시 본다. 취소했으면 결과를 옮기지 않고 임시 파일만 지운다.
+        if Task.isCancelled { return .cancelled }
+        if let f = imageSafety() { return .failed(f) }
+        do { try spectrum?.validateSources() } catch { return .failed(.export(String(describing: error))) }
+        let outcome = promote(tempFile, to: d, sources: sources)
+        #if DEBUG
+        if case .completed = outcome { await spectrum?.checkpoint(.promoted) }
+        #endif
+        if case .completed = outcome { await progress(1) }   // 검증·승격 성공 뒤에만 1.0
+        return outcome
+    }
+
+    /// 자막 없는 프로젝트의 인코딩(내보내기 세션, AVAssetExportPreset1920x1080). 결과와 실패 주입 여부.
+    static func encodeWithSession(_ p: PlannedComposition, to tempFile: URL, options: Options, progress: @escaping @Sendable (Double) async -> Void) async -> (Result<Void, Error>, Bool) {
         guard let session = AVAssetExportSession(asset: p.composition, presetName: AVAssetExportPreset1920x1080) else {
-            return .failed(.export("export session"))
+            return (.failure(ExportFailure.export("export session")), false)
         }
         session.videoComposition = p.videoComposition
+        session.audioMix = p.audioMix   // 오디오 레인 음량(A-014)
         session.shouldOptimizeForNetworkUse = false
         let injected = OSAllocatedUnfairLock(initialState: false)
         let box = SessionBox(session: session)
-        await stage(.encoding)
         let exportTask = Task { try await box.session.export(to: tempFile, as: .mp4) }
         let watcher = Task {
             var last = 0.0
@@ -137,29 +269,7 @@ public enum ExportService {
         } onCancel: { exportTask.cancel() }
         watcher.cancel()
         _ = await watcher.value   // 진행률 보고가 끝난 뒤에 결과를 정한다(늦은 진행률이 결과 뒤에 오지 않게)
-        if injected.withLock({ $0 }) { return .failed(.injected) }
-        switch result {
-        case .failure(let e):
-            if e is CancellationError || Task.isCancelled { return .cancelled }
-            return .failed(.export(e.localizedDescription))
-        case .success:
-            break
-        }
-        if Task.isCancelled { return .cancelled }
-        await stage(.finalizing)
-        // 승격 전 검증
-        do {
-            let a = AVURLAsset(url: tempFile)
-            let v = try await a.loadTracks(withMediaType: .video)
-            guard v.count == 1 else { return .failed(.verification("video tracks \(v.count)")) }
-            let r = try await v[0].load(.timeRange)
-            let frames = p.settings.nearestFrame(r.duration)
-            guard frames == p.durationFrames else { return .failed(.verification("frames \(frames) != \(p.durationFrames)")) }
-        } catch { return .failed(.verification(error.localizedDescription)) }
-        options.beforePromotion?()
-        let outcome = promote(tempFile, to: d, sources: sources)
-        if case .completed = outcome { await progress(1) }   // 검증·승격 성공 뒤에만 1.0
-        return outcome
+        return (result, injected.withLock { $0 })
     }
 
     static func promote(_ temp: URL, to d: ExportDestination, sources: [MediaAsset]) -> ExportOutcome {

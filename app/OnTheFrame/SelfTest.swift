@@ -42,7 +42,7 @@ enum SelfTest {
         do { try fm.createDirectory(at: out, withIntermediateDirectories: false); check("sandbox.grantedFolderWritable", true) }
         catch { check("sandbox.grantedFolderWritable", false, error.localizedDescription) }
 
-        let names = ["otf-A.mp4", "otf-B.mp4", "otf-rot90.mp4", "reject-prores.mov", "reject-500fps.mp4", "reject-audio-only.m4a", "reject-2video.mov",
+        let names = ["otf-A.mp4", "otf-B.mp4", "otf-rot90.mp4", "reject-prores.mov", "reject-500fps.mp4", "reject-4ch.wav", "reject-2video.mov",
                      "otf-hevc.mp4", "reject-uhd.mp4", "otf-N2997.mp4", "otf-P25.mp4", "otf-VFR.mp4"]
         let hashesBefore = Dictionary(uniqueKeysWithValues: names.map { ($0, sha(src.appendingPathComponent($0))) })
         check("fixtures.present", hashesBefore.values.allSatisfy { $0 != nil })
@@ -75,9 +75,9 @@ enum SelfTest {
         }
         _ = await waitUntil(5) { store.alert != nil }   // 묶음 처리가 끝난 뒤 알림 하나
         let msg = store.alert?.message ?? ""
-        check("import.rejectionsReported", ["reject-prores.mov", "reject-500fps.mp4", "reject-audio-only.m4a", "reject-2video.mov", "reject-uhd.mp4"].allSatisfy { msg.contains($0) })
+        check("import.rejectionsReported", ["reject-prores.mov", "reject-500fps.mp4", "reject-4ch.wav", "reject-2video.mov", "reject-uhd.mp4"].allSatisfy { msg.contains($0) })
         await dismissAlert()
-        for (n, want) in [("reject-prores.mov", "unsupportedCodec"), ("reject-500fps.mp4", "frameRate"), ("reject-audio-only.m4a", "noVideo"), ("reject-2video.mov", "multipleVideoTracks"), ("reject-uhd.mp4", "dimensions")] {
+        for (n, want) in [("reject-prores.mov", "unsupportedCodec"), ("reject-500fps.mp4", "frameRate"), ("reject-4ch.wav", "audioChannels"), ("reject-2video.mov", "multipleVideoTracks"), ("reject-uhd.mp4", "dimensions")] {
             do { _ = try await MediaProbe.inspect(src.appendingPathComponent(n)); check("probe.\(n)", false, "accepted") }
             catch let e as ProbeError { check("probe.\(n)", e.kind == want, "\(e.kind): \(e)") }
             catch { check("probe.\(n)", false, "\(error)") }
@@ -285,15 +285,18 @@ enum SelfTest {
         } else { check("export.timedSources", false, "timed fixtures not imported") }
 
         // 4l. A-011 가져오기 취소: 첫 파일 검사가 끝난 뒤 취소하면 이번 묶음은 아무것도 추가하지 않고, 늦은 결과도 버린다
+        // 2026-10-11: 검사가 빨라져(샘플 커서) 세 파일이 관찰 전에 끝날 수 있어, 파일마다 Debug 전용 지연을 넣어 첫 파일 뒤에 끼어든다.
         let before = store.assets.map(\.id)
+        store.probeDelayForTest = 400_000_000
         store.importFiles(["otf-TA.mp4", "otf-TB.mp4", "otf-F23976.mp4"].map { src.appendingPathComponent($0) })
         _ = await waitUntil(30) { (store.importProgress?.completed ?? 0) >= 1 }
         let completedAtCancel = store.importProgress?.completed ?? -1
         store.cancelImport()
+        store.probeDelayForTest = 0
         let cancellingShown = store.importProgress?.cancelling == true
         _ = await waitUntil(30) { store.importProgress == nil }
         try? await Task.sleep(nanoseconds: 1_000_000_000)   // 늦게 끝난 검사가 있어도 추가되지 않아야 한다
-        check("import.cancel", completedAtCancel >= 1 && cancellingShown && store.assets.map(\.id) == before && store.importing == 0
+        check("import.cancel", completedAtCancel >= 1 && cancellingShown && store.assets.map(\.id) == before && store.importing == 0 && store.importDone == nil
               && (store.statusMessage ?? "").contains("가져오기를 취소"), "completed at cancel \(completedAtCancel), \(store.statusMessage ?? "")")
         // 4m. 차례 실행: 내보내는 동안 고른 가져오기는 대기열에 들어가고 카드는 하나다. 대기 중 가져오기 취소, 내보내기 취소.
         let e8 = out.appendingPathComponent("queued.mp4")

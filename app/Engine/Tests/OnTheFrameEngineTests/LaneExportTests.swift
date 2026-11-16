@@ -92,6 +92,7 @@ final class LaneExportTests: XCTestCase {
         let o = AVAssetReaderAudioMixOutput(audioTracks: tracks, audioSettings: [
             AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 48_000, AVNumberOfChannelsKey: 1,
             AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true, AVLinearPCMIsNonInterleaved: false, AVLinearPCMIsBigEndianKey: false])
+        o.audioMix = p.audioMix   // 오디오 레인 음량(A-014, 프리뷰 항목과 같은 믹스)
         r.add(o)
         guard r.startReading() else { throw ProbeFailure("audio reader") }
         var mono: [Float] = []

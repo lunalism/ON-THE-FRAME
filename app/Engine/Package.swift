@@ -15,7 +15,7 @@ let package = Package(
         // 실험의 생성 fixture(SourceVideoSpec)와 프레임 측정(E2Metrics)을 재사용한다.
         .target(name: "OTFDevSupport", dependencies: ["OnTheFrameEngine", .product(name: "E2Core", package: "e2-4k")],
                 swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]),
-        .executableTarget(name: "otf-dev", dependencies: ["OTFDevSupport", .product(name: "E2Core", package: "e2-4k")], swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]),
+        .executableTarget(name: "otf-dev", dependencies: ["OTFDevSupport", "OnTheFrameEngine", .product(name: "E2Core", package: "e2-4k")], swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]),
         .testTarget(name: "OnTheFrameEngineTests", dependencies: ["OnTheFrameEngine", "OTFDevSupport", .product(name: "E2Core", package: "e2-4k")]),
     ],
     swiftLanguageModes: [.v5]

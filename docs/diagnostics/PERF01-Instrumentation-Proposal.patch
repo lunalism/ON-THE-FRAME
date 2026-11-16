@@ -1,0 +1,80 @@
+--- a/app/Engine/Tests/OnTheFrameEngineTests/IMGBPOC1/ImageAware420Compositor.swift
++++ b/app/Engine/Tests/OnTheFrameEngineTests/IMGBPOC1/ImageAware420Compositor.swift
+@@ -117,6 +117,7 @@
+     private func process(_ request: AVAsynchronousVideoCompositionRequest,ins: IBInstruction?,lease: IBLease) -> IBTerminal<CVPixelBuffer> {
+         guard let ins else { return .failure(IBContract.error("instruction",code:200)) }
+         let started = Date()
++        let perf = IBPerfProbe.enabled ? IBPerfProbe():nil
+         if lease.isCancelled { ins.log.add(["event":"cancelled-before","frame":ins.frame]);return .cancelled }
+         do {
+             let expected = CMTime(value: Int64(ins.frame),timescale: 30)
+@@ -125,6 +126,7 @@
+             let topActive = ins.frame >= 2 && ins.frame < 4
+             let top = topActive ? request.sourceFrame(byTrackID: ins.top) : nil
+             if topActive && top == nil { throw IBContract.error("missing top",code: 200) }
++            perf?.mark("A-sourceFrame-lookup")
+             try IBContract.validate(bottom);if let top { try IBContract.validate(top) }
+             var sources: [[String: Any]] = []
+             for (id,pb) in [(ins.bottom,Optional(bottom)),(ins.top,top)] {
+@@ -139,13 +141,17 @@
+                 guard identifier == ins.frame else { throw IBContract.error("source ID \(identifier) expected \(ins.frame)",code: 200) }
+                 sources.append(["track":id,"sourceFrameID":identifier,"time":"\(t.value)/\(t.timescale)","pixelFormat":CVPixelBufferGetPixelFormatType(pb)])
+             }
++            perf?.mark("source-validation-ID-metadata")
+             lock.lock();let ctx = context;lock.unlock()
+             guard let output = ctx?.newPixelBuffer() else { throw IBContract.error("render buffer",code: 300) }
+             guard CVPixelBufferGetPixelFormatType(output) == IBContract.format,CVPixelBufferGetWidth(output) == IBContract.w,
+                   CVPixelBufferGetHeight(output) == IBContract.h else { throw IBContract.error("output not FHD420v",code: 300) }
++            perf?.mark("F-context-buffer-allocation")
+             try render(bottom: bottom,top: top,out: output,ins: ins,deadline: started.addingTimeInterval(30))
++            perf?.mark("CDE-Fcopy-fused-render")
+             IBContract.tag(output)
+             if lease.isCancelled { ins.log.add(["event":"cancelled-after","frame":ins.frame]);return .cancelled }
++            if let perf { ins.log.add(["event":"performance-spans","frame":ins.frame,"requestID":lease.id,"spans":perf.rows]) }
+             ins.log.add(["event":"rendered","frame":ins.frame,"requestID":lease.id,"sources":sources,"seconds":Date().timeIntervalSince(started),"outputFormat":CVPixelBufferGetPixelFormatType(output)])
+             return .success(output)
+         } catch {
+--- a/app/Engine/Tests/OnTheFrameEngineTests/IMGBPOC1/ImageAwareAdmission.swift
++++ b/app/Engine/Tests/OnTheFrameEngineTests/IMGBPOC1/ImageAwareAdmission.swift
+@@ -34,7 +34,9 @@
+         self.pendingLimit = max(0,pendingLimit);self.pendingTimeout = pendingTimeout;self.executor = executor
+     }
+     private func record(_ event: String,_ e: Entry) {
+-        events.append(["event":event,"id":e.id,"tag":e.tag,"generation":e.generation,"active":active.count,"pending":pending.count])
++        var row: [String:Any] = ["event":event,"id":e.id,"tag":e.tag,"generation":e.generation,"active":active.count,"pending":pending.count]
++        if IBPerfProbe.enabled { row["monotonicNs"] = DispatchTime.now().uptimeNanoseconds }
++        events.append(row)
+         if events.count>256 { events.removeFirst(events.count-256) }
+         maxActive = max(maxActive,active.count);maxPending = max(maxPending,pending.count)
+     }
+--- /dev/null
++++ b/app/Engine/Tests/OnTheFrameEngineTests/IMGBPOC1/IBPerfProbe.swift
+@@ -0,0 +1,28 @@
++import Foundation
++import Darwin
++
++// PROPOSED ONLY. Not installed, compiled or executed by IMG-B-PERF-01.
++// Per-worker synchronous spans, no per-pixel clocks and no rendering expression refactor.
++final class IBPerfProbe {
++    static let enabled = ProcessInfo.processInfo.environment["OTF_IMG_B_PERF01_PROBE"] == "1"
++    private static func stamp() -> (UInt64,Double?) {
++        var info = thread_basic_info(), count = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size / 4)
++        let thread = pthread_mach_thread_np(pthread_self()) // borrowed thread port
++        let result = withUnsafeMutablePointer(to: &info) { pointer in
++            pointer.withMemoryRebound(to: integer_t.self,capacity: Int(count)) {
++                thread_info(thread,thread_flavor_t(THREAD_BASIC_INFO),$0,&count)
++            }
++        }
++        let cpu: Double? = result == KERN_SUCCESS ? Double(info.user_time.seconds + info.system_time.seconds)
++            + Double(info.user_time.microseconds + info.system_time.microseconds) / 1_000_000 : nil
++        return (DispatchTime.now().uptimeNanoseconds,cpu)
++    }
++    private var last = IBPerfProbe.stamp()
++    private(set) var rows: [[String:Any]] = []
++    func mark(_ label: String) {
++        let now = Self.stamp()
++        let cpu: Any = (last.1 != nil && now.1 != nil) ? max(0,now.1! - last.1!) as Any : "unavailable"
++        rows.append(["stage":label,"wallSeconds":Double(now.0 - last.0) / 1e9,"threadCPUSeconds":cpu])
++        last = now
++    }
++}
