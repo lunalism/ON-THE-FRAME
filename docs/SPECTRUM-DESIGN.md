@@ -3,6 +3,27 @@
 ON THE FRAME의 오디오 스펙트럼(R-10~R-12) 설계다. 표시:
 **[승인]** 소유자가 정한 것 · **[권고]** Claude Code 권고(소유자 미승인) · **[결정 필요]** 소유자가 정해야 하는 것 · **[근거]** 저장소 기록·코드·측정·Apple 문서.
 
+## 현행 Spectrum 계약과 검증 상태
+
+**2026-11-17 DOC-ALIGN-01 · 게시된 feature 기준:** `feature/subtitles`의 기준은 `f2b80444b439ad59a3870da3350a1385d388552a`이며, 문서 정렬 브랜치 `docs/audit-alignment-20261117`도 이 커밋에서 시작했다. 문서 정렬 변경 자체는 아직 커밋·게시하지 않았다. 현재 기능·공개 범위의 정본은 [현행 기능과 검증 경계](ROADMAP.md#현행-기능과-검증-경계), 소유자 승인 방향과 변경 관계는 [DOC-ALIGN-01 결정 기록](DECISIONS.md#2026-11-17-doc-align-01-현행-방향과-문서-정렬)을 따른다.
+
+소유자가 정한 방향은 macOS **Composition-first Music Visual Editor**다. 음악 중심의 이미지·영상·오디오 배치, 자막, 오디오 반응형 Spectrum, Preview와 최종 영상 Export가 중심이다. After Effects는 composition 편집 개념·Audio Spectrum 속성·숫자 편집 경험의 참고이며 전체 기능을 첫 출시 범위로 승인한 것이 아니다. 완전한 Composition 시스템이 이미 구현됐다고 보지 않고 고급 전환은 보류한다.
+
+| 작업 | 구현 | 이전 자동 검증 보고 | 소유자 수동 수락 | 커밋·게시 |
+|---|---|---|---|---|
+| SPECTRUM-UX-01 | 기존 숫자 7필드 자체의 직접 scrubbing, 정수 입력, live Preview, 드래그별 Undo와 취소. untouched legacy milli 정밀도 유지 | 집중 scrubbing 138 PASS, 실제 Inspector의 합성 scrubbing 33/33 PASS. 물리 입력 수락과 별개 | 시험한 Mac의 6개 시나리오 **6/6 PASS** | `30e02a54ae67e36959d8baef10f04dd01e3d8eef`, feature에 게시됨 |
+| SPECTRUM-ZERO-01 | 유효한 Digital 0높이 최소 점과 실제 내장 overlay의 새 ready-zero 계약 | 01C 엔진 85·실제 내장 overlay 61·zero Preview 23이 각각 PASS/0 FAIL/0 SKIP. Seek 캡처 18/18·한정 raster 비교 66/66 일치 | 시험한 Mac의 paused0·점 모양/간격/색·음악 반응·활성 구간·편집/Undo·Seek/이미지 재생의 **6/6 PASS** | `f2b80444b439ad59a3870da3350a1385d388552a`, feature에 게시됨 |
+
+이 표의 수치는 이전 작업에서 실행한 결과다. 이번 문서 정렬에서는 빌드·제품 테스트를 재실행하지 않는다. 구현, 자동 검증, 소유자 수락, Git 게시를 각각 구분하며 어느 하나가 전체 제품 완료를 뜻하지 않는다. Spectrum 만들기는 Debug 전용이고, 이미 존재하는 Spectrum의 편집·소스 계보·Preview 경로와 공개 Release 준비 상태는 별도로 판단한다.
+
+- **현행 zero 계약:** 유효하고 완료된 분석의 Digital 밴드 높이가 0이면 기존 밴드 중심에 설정 두께 직경의 독립 원을 그린다. 기존 위치·밴드 수·간격·색·알파·표시 방향을 사용한다. 양수 막대와 Analog 기하는 유지하며 Reaction 0·최대 높이 0도 같은 0높이 기하다. FFT 값에 양수 바닥을 더하거나 0초 전용 placeholder를 만들지 않는다.
+- **가용성·시간 경계:** missing·unavailable·pending·실패·stale 결과를 유효한 무음으로 바꾸지 않고, Spectrum의 활성 구간 밖에서는 표시하지 않는다. 정확 PTS·seek token·player item·source identity·generation/revision/epoch 검증과 원래 오디오 시간 매핑을 유지한다. 이전 프레임을 현재 프레임으로 승인하지 않는다.
+- **공유 그리기와 Export 범위:** Preview와 내부 Export는 같은 분석·`SpectrumFrameRenderer` 계약을 사용한다. 실제 내부 worker와 Preview의 일부 프레임 bands·전체 raster, 120프레임 checkpoint 인코딩/디코딩 검증은 한정 증거다. **전체 Preview/Export parity는 미검증이고 공개 Spectrum Export는 계속 비활성**이다. 내부 Debug slice의 통과를 일반 Export 지원으로 표시하지 않는다.
+- **열린 제한:** Native Inspector **7 FAIL/4 SKIP**을 유지한다. 내부 Undo/Redo Seek 설치 지연 **53.6→116.2ms median** 조사는 OPEN이며 화면 FPS 측정이 아니다. 장시간 성능·다른 하드웨어·전체 Preview/Export parity는 미검증이다. 이전 소유자 수락은 시험한 시나리오 밖으로 확대하지 않는다.
+- **후속 계획:** 소유자가 제시한 순서는 **SPECTRUM-UX-02 → SPECTRUM-FX-01 → SPECTRUM-FX-02 → SPECTRUM-SHADOW-01**이다. 계획 순서이며 구현 완료나 개별 작업 착수 승인이 아니다. 효과의 파라미터·기본값·색/합성/저장 의미를 이 문서 정렬에서 임의로 정하지 않는다.
+
+아래 표제·초기 설계·날짜별 실행 및 수락 기록은 당시 이력으로 보존한다. 옛 “Digital 모두0 → nil”, 빌드 중지, 수락·게시 대기는 그때의 상태이며 위 현행 계약과 게시 상태가 후속 상태다. 이전 실패·검증 한계·미승인 제안과 소유자 결정은 소급 삭제하거나 변경하지 않는다.
+
 **2026-11-17 SPECTRUM-ZERO-01C 수락과 내장 검사 정리:** 소유자는 실제 Mac의 01B에서 paused 0초 점·모양/간격/색·음악 반응·활성 구간·편집/Undo·Seek/이미지 재생 6/6 PASS를 보고했다. 유효한 Digital 0높이는 기존 밴드 중심·두께·색·알파의 독립 원이며 missing/pending/stale/비활성 상태를 무음으로 대체하지 않는다. 이번에는 제품 기하를 바꾸지 않고 내장 overlay의 옛 nil 기대값을 ready-zero 래스터·프레임/소스·독립 기하 확인으로 정리했다. 현재 소스 Debug 빌드에서 **실제 내장 overlay 61 PASS/0 FAIL/0 SKIP**, 엔진 전체 재실행 **85 PASS/0 FAIL/0 SKIP**와 관련 앱 회귀를 확인했다. Preview/내부 Export의 5프레임 bands/래스터 일치·120프레임 checkpoint와 소유자 수락은 각각 범위가 다른 증거이며 전체 parity가 아니다. 정확한 결과·초기 진단 오류와 정정·남은 native 7 FAIL/4 SKIP·내부 Seek 지연은 [현재 수락·검증 기록](DECISIONS.md#2026-11-17-spectrum-zero-01c-소유자-수락과-회귀-계약-정리)을 따른다. 장시간·다른 하드웨어·전체 Preview/Export parity는 미검증, 공개 Spectrum Export는 비활성이다.
 
 체크포인트 보존 확인은 PARTIAL이다. 보호 루트 .DS_Store의 시작/최종 해시 차이는 원인이 미확인이고 현재 파일·증거를 보존한 채 제안에서 제외했다. 이는 렌더링 회귀 결과와 구분하며 상세 보존 상태는 위 수락·검증 기록을 따른다.

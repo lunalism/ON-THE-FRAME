@@ -1,8 +1,8 @@
 # ON THE FRAME (온더프레임)
 
-A macOS video editor for timeline editing, audio spectrum visualization, subtitles, and video export.
+A macOS Composition-first Music Visual Editor.
 
-ON THE FRAME은 음악·플레이리스트 영상 제작과 일반 컷 편집을 위한 macOS 데스크톱 영상 편집기다. 영상·이미지·오디오를 타임라인에서 편집하고, 선택한 오디오를 따라 움직이는 오디오 스펙트럼과 수동 입력 자막을 얹어 영상으로 내보내는 것을 목표로 한다.
+ON THE FRAME은 음악을 중심으로 이미지·영상·오디오를 배치하고, 자막과 오디오 반응형 Spectrum을 더해 Preview와 최종 영상 내보내기로 연결하는 macOS Composition-first Music Visual Editor다. 현재 구현은 타임라인 기반 편집기이며 완전한 Composition 시스템이 구현된 상태는 아니다.
 
 ## 핵심 기능 (기획 brief 명시 요구사항)
 
@@ -14,22 +14,26 @@ ON THE FRAME은 음악·플레이리스트 영상 제작과 일반 컷 편집을
 
 자세한 내용과 각 요구사항의 출처 구분(명시/파생)은 [docs/PRODUCT.md](docs/PRODUCT.md)를 참조한다.
 
-## 제품 방향 (소유자 확인, 2026-10-09)
+## 제품 방향 (소유자 확인, 2026-11-17 DOC-ALIGN-01)
 
+- 음악 중심의 영상 구성과 편집을 우선한다. After Effects는 Composition 편집 개념·Audio Spectrum 속성·숫자 조작 경험의 참고이며, 전체 기능을 구현했거나 첫 출시 범위로 계획했다는 뜻이 아니다. 고급 전환 효과는 유보한다.
 - 처음에는 소유자의 Mac에서 쓰는 개인용 앱으로 시작하고, 성공하면 상업 배포를 검토한다. 배포 채널, 라이선스, 활성화, 업데이트 권한, 결제는 미정이다.
 - 가격 아이디어(약 20,000원, 일회 구매·평생 라이선스)는 잠정이며 확정이 아니다.
 - 최대 3시간 프로젝트와 4K 편집·내보내기는 **지원 목표**다. 아직 구현·검증되지 않았다. 4K의 프레임레이트·HDR 등 세부는 미정이다.
 
 ## 현재 상태
 
-**기획·실험 단계에서 편집기를 만드는 중이다(2026-10-11).** 정본 상태 체크리스트는 [docs/ROADMAP.md](docs/ROADMAP.md) §S, 짧은 인계 요약은 [docs/HANDOFF.md](docs/HANDOFF.md)에 있다.
+**2026-11-17 확인:** 게시된 `feature/subtitles` 기준은 `f2b80444b439ad59a3870da3350a1385d388552a`다. 문서 정렬 브랜치 `docs/audit-alignment-20261117`은 그 커밋에서 시작했으며 문서 변경은 아직 미커밋이다. [현행 기능·검증 상태](docs/ROADMAP.md#현행-기능과-검증-경계), [인계](docs/HANDOFF.md), [형식·기능 경계](docs/PRODUCT.md#현행-프로젝트-형식과-기능-경계)를 구분해 읽는다.
 
-- **편집기([app/](app/)):** M1(2026-10-10 완료) 뒤 작업 승인별로 넓혔다. 영상(H.264·HEVC, 고정·가변 프레임레이트)과 소리 파일(WAV·AIFF·M4A, MP3는 실제 파일 미검증) 가져오기, 여러 영상·오디오 레인, 연결된 영상·소리, 자르기·트림·옮기기·빈틈 삭제·리플 삭제, 실행 취소·다시 실행, 영상 클립 크기·위치, 소리 클립·레인 음량·음소거·페이드, 타임라인 클립 복사·붙여넣기, 프로젝트 저장·열기(`.ontheframe`, 형식 5)·재연결·최근 목록, 진행 표시, FHD 30 fps SDR H.264/AAC MP4 내보내기(진행률·취소·실패 처리·출력 보호).
-- **아직 없는 것:** 이미지 가져오기(원 요구사항), 자막, 오디오 스펙트럼, 4K 출력. 다음 순서(소유자 결정 D-028): 단축키 목록 정리와 V·C 도구 전환 → 자막(T 포함) → 오디오 스펙트럼 → 프로젝트 보호·안정화 → 개인 사용 검증.
-- **실험:** E1(짧은 FHD)과 E3-1(10분 FHD)은 각자의 실험 범위 안에서 완료, E2(짧은 4K)는 사용자 정의 합성기의 원본 프레임 불일치로 미완료, E3-2 이후(60분·3시간·4K 길이)는 시작하지 않았다. 실험의 자막·스펙트럼 렌더링은 편집기 기능이 아니다.
+- **편집기([app/](app/)):** 영상·오디오 가져오기, 여러 레인·연결·트림·분할·이동·복사/붙여넣기·Undo/Redo, 영상 변형·오디오 gain/mute/fade, 자막·효과·자막 포함 FHD 30 fps SDR H.264/AAC MP4 내보내기, 프로젝트 저장/열기·재연결이 구현돼 있다. `.ontheframe`은 콘텐츠와 경로에 따라 형식을 선택하며 현재 앱 persistence 경계는 Format 10이다.
+- **이미지:** 사용자 정의 Debug 빌드 조건과 명시적 실행 인수가 필요한 내부 경로다. 한정된 고해상도·Display P3 입력을 허용하고 Preview 표현을 sRGB로 정규화하지만, 임의 해상도·모든 이미지·공개 Release 지원을 뜻하지 않는다.
+- **Spectrum:** 생성은 Debug 전용이며 기존 항목 편집·소스 계보·Digital/Analog·정수 숫자와 직접 mouse scrubbing·live Preview·Undo/Redo가 구현돼 있다. 유효하게 완료된 Digital 0높이 분석은 밴드별 최소 점을 그린다. Seek 연속성과 이미지 재구성 중 playback intent 수정도 게시됐다. **공개 Spectrum Export는 비활성**이며 내부 공유 렌더링 검증과 구분한다.
+- **수락과 게시:** scrubbing과 ZERO의 소유자 수락은 각각 시험한 조건의 **6/6 PASS**이며 관련 체크포인트는 feature에 게시됐다. 이전 자동 검증·소유자 수락·커밋/푸시는 서로 다른 상태다. 이번 문서 작업에서 제품 검사를 재실행하지 않았다.
+- **다음 개발 제안 순서:** `SPECTRUM-UX-02 → SPECTRUM-FX-01 → SPECTRUM-FX-02 → SPECTRUM-SHADOW-01`. 모두 미구현 계획이며 구체적 FX 파라미터·구성 의미는 후속 승인 전까지 열린 상태다.
+- **실험:** E1(짧은 FHD)과 E3-1(10분 FHD)은 각 실험 범위에서 완료, E2(짧은 4K)는 원본 프레임 불일치로 미완료다. E3-2 이후는 시작하지 않았고 과거 실험의 통과가 현재 제품 전체의 수락은 아니다.
 - **지원 목표:** 최대 3시간 프로젝트와 4K는 받아들인 지원 목표이며 아직 입증되지 않았다.
 - **미정:** 기술 스택 확정, 최소 macOS 버전, 입출력 포맷 정책, 성능 기준, 배포 방식, 라이선스. 상업 배포는 개인 사용이 성공한 뒤에만 검토하고, 활성화·결제·라이선스 인프라는 개인 사용 단계에 넣지 않는다.
-- 알려진 열린 문제(A-010 프리뷰 프레임 0 불일치, 간헐 테스트 실패, 실제 MP3 미검증 등)는 [docs/ROADMAP.md](docs/ROADMAP.md) §S.6에 있다.
+- **열린 제한:** Native Inspector 7 FAIL/4 SKIP, 내부 Undo/Redo Seek 지연 조사, 장시간·다른 하드웨어·전체 Preview/Export parity 미검증은 유지한다. A-010·그 밖의 기존 문제도 [ROADMAP §S.6](docs/ROADMAP.md#s6-프로젝트-보호안정화-단계-6--열린-문제-목록)을 따른다. 빌드·시험은 [현재 실행 승인과 자원 안전](app/README.md#현재-실행-승인과-자원-안전)에 맞는 절차를 먼저 선택해야 한다.
 
 ## 문서
 
@@ -40,7 +44,7 @@ ON THE FRAME은 음악·플레이리스트 영상 제작과 일반 컷 편집을
 - [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — 관찰된 개발 환경
 - [docs/TECHNOLOGY-EVALUATION.md](docs/TECHNOLOGY-EVALUATION.md) — 기술 방식 비교, macOS/CPU 정책 제안, 초기 통합 실험(E1) 상세
 - [docs/EDITOR-PLAN.md](docs/EDITOR-PLAN.md) — 편집기 UI 첫 계획(화면 배치, 조작, 첫 마일스톤, 엔진 재사용, 앱 구조 제안 — 미승인)
-- [app/README.md](app/README.md) — 편집기 구현 기록(M1과 그 뒤 작업 §1–§25): 빌드·실행 방법, 동작, 검증 결과, 소유자 확인, 한계
+- [app/README.md](app/README.md) — 승인된 실행 절차의 경계와 역사적 구현·검증 기록
 - [docs/diagnostics/A-010-preview-frame0.md](docs/diagnostics/A-010-preview-frame0.md) — A-010 프리뷰 경로 프레임 0 불일치 진단 요약(미해결)
 - [docs/EXPERIMENT-PLAN.md](docs/EXPERIMENT-PLAN.md) — 단계별 실험 계획(FHD → 4K → 3시간), 메모리·디스크 구조 제안
 - [experiments/e1-fhd/README.md](experiments/e1-fhd/README.md) — E1 실험 재현 명령, 결과, 소유자 관찰 체크리스트, 한계

@@ -1,5 +1,7 @@
 # SP-3C2-40 — 프리뷰 경계 체크포인트와 Stage 4 계약
 
+> **후속 계약 안내(2026-11-17):** 아래 Digital zero의 nil 관련 기술은 당시 계약이다. SPECTRUM-ZERO-01 이후 유효한 완료 분석의 Digital 0높이는 최소 점 래스터이며 [현행 Spectrum 계약](../SPECTRUM-DESIGN.md#현행-spectrum-계약과-검증-상태)을 따른다. 공개 Spectrum Export 비활성은 유지한다. 아래 원래 설계·판정·수치·실패 기록을 소급 변경하지 않는다.
+
 2026-11-06. 게시 기준 `c2a6dc2e7a3550be4c783f3622b8e3e47f7f8707`. **STAGE 4 CONTRACT READY**는 아래 설계의 검토 완료이며 export 구현·제품 정책 승인·Stage 3C-2 전체 수락이 아니다. 이번 작업은 감사와 문서 갱신뿐이며 새 빌드/기능 실행은 없다.
 
 ## 1. 경계 진단과 증거 구분

@@ -10,14 +10,22 @@
 
 Claude Code는 [docs/DECISIONS.md](docs/DECISIONS.md)에 "확정"으로 기록되지 않은 사항을 임의로 확정하지 않는다. 제안이 필요하면 "제안"으로 표시해 문서에 남기고 사용자 승인을 받는다. 리뷰어(ChatGPT)의 지적이나 제안을 반영할 때도, 소유자가 승인하지 않은 내용은 제안·파생 요구사항·열린 질문으로 기록하고 확정 결정으로 옮기지 않는다.
 
+## 문서의 권위와 제품 방향
+
+소유자의 명시적 승인 방향 → 이 파일의 저장소 작업 규칙 → DECISIONS의 최신 승인·정정 → ROADMAP의 현재 구현 상태 → PRODUCT의 요구사항 → 승인 설계 → 날짜가 붙은 역사적 진단 순으로 적용한다. 과거 제안을 승인으로 승격하지 않고, 이전 결정은 후속 amendment와 연결해 보존한다.
+
+소유자 승인 방향(DOC-ALIGN-01, 2026-11-17)은 macOS **Composition-first Music Visual Editor**다. 음악 중심의 이미지·영상·오디오 구성, 자막·오디오 반응형 Spectrum, Preview와 최종 영상 내보내기에 집중한다. After Effects는 Composition 개념·Spectrum 속성·숫자 편집 경험의 참고이며 전체 기능이나 첫 출시 범위를 약속하지 않는다. 현재 완전한 Composition 시스템이 구현됐다고 쓰지 않으며 고급 전환은 유보한다.
+
 ## 현재 단계
 
-- **현재 상태의 정본은 [docs/ROADMAP.md](docs/ROADMAP.md) §S**(✅ 완료·⏳ 미해결·➡️ 미착수, ⏳는 에이전트가 작업 중이라는 뜻이 아님), 짧은 인계는 [docs/HANDOFF.md](docs/HANDOFF.md)다. 이 절은 작업 규칙만 적는다. 결정 이력은 [docs/DECISIONS.md](docs/DECISIONS.md), 구현 기록은 [app/README.md](app/README.md) §1–§25.
-- 편집기([app/](app/))는 M1(2026-10-10) 뒤 작업 승인·소유자 지시별로 넓혀 왔다(A-010~A-015, D-020~D-026, 그 뒤 소유자 지시). 자막 작업 브랜치는 `feature/subtitles`(첫 자막 기능은 로컬 커밋 `04d4b58`(엔진)·`c36923e`(앱)·`81fda71`(조사 시험)·문서 커밋, 푸시하지 않음)이고 `main`은 소유자 지시 없이 바꾸지 않는다. 프로젝트 형식: `main`의 코드는 형식 1, `feature/subtitles`의 `81fec31`까지의 코드는 형식 1–7 읽기이고 내용에 따라 5(자막 없음, D-023)·6(자막·자막 레인, D-035)·7(켜진 자막 효과, D-040)로 쓴다. SP-1A 1단계(엔진, 2026-10-25)는 형식 8(스펙트럼 레인·스펙트럼·소리 계보, P-S1 (나) 2026-10-25)을 더했다 — 그 값이 있을 때만 8로 쓰고(소리를 자르면 계보가 생김), 형식 1–8 읽기, 이전 앱은 형식 8을 열지 못한다. 스키마를 바꾸면 명시적으로 버전을 올리고 이전 파일 읽기를 유지한다.
-- **다음 작업 순서(D-028):** 단축키 목록 정리와 V·C 도구 전환 → 자막(T 포함; 첫 사용 가능 기능 D-035~D-039는 `feature/subtitles` 로컬 커밋, 소유자 수동 확인; 다음은 외곽선·그림자·배경, 작업 지시가 있을 때) → 오디오 스펙트럼 → 프로젝트 보호·안정화 → 개인 사용 검증. 복사·붙여넣기는 끝났다(`51cef3c`). 각 항목은 작업 지시가 있을 때만 시작하고 한 번에 하나만 한다. 이미지 가져오기는 충족되지 않은 원 요구사항(R-01)이며 위치는 제안(P-010, 리뷰어 권고)일 뿐이다. 로드맵 단계 구성·완료 기준(P-001)은 여전히 제안이다.
+- **현재 상태의 정본은 [docs/ROADMAP.md](docs/ROADMAP.md#현행-기능과-검증-경계)**와 §S, 짧은 인계는 [docs/HANDOFF.md](docs/HANDOFF.md)다. 구현·자동 검증 보고·소유자 수동 수락·커밋/게시·부분·미해결·미구현·유보를 구분한다. 결정 이력은 [docs/DECISIONS.md](docs/DECISIONS.md), 역사적 구현 기록은 [app/README.md](app/README.md)다.
+- **2026-11-17 검증 기준:** 게시 feature는 `f2b80444b439ad59a3870da3350a1385d388552a`이며 문서 브랜치 `docs/audit-alignment-20261117`이 이 커밋에서 시작했다. local main `44943eadabdf5a37d5242d614e7279813126dfde`와 live remote main `fe79fd91997eebb951315a9e398942e6711ec2ae`를 구분하며 main을 자동 갱신하지 않는다. 이전 자막·Spectrum 체크포인트도 feature에 게시됐다. 형식은 [현행 persistence/codec 표](docs/PRODUCT.md#현행-프로젝트-형식과-기능-경계)를 따르며 새 스키마를 도입한 것이 아니다.
+- 영상·오디오·자막·타임라인/Undo/Redo와 후속 Spectrum 편집·정수 scrubbing·valid-zero 점·Seek/image playback 수정은 구현돼 있다. 이미지 가져오기는 사용자 정의 Debug 빌드와 실행 인수 gate, Spectrum 생성은 Debug 전용이다. 공개 Spectrum Export는 비활성이며 내부 검증과 Release 지원을 혼동하지 않는다.
+- 향후 스키마 변경은 명시적으로 버전을 올리고 이전 파일 읽기를 유지한다. 이번 문서 정렬은 형식·모델을 바꾸는 승인이 아니다.
+- **후속 개발 제안 순서(DOC-ALIGN-01):** SPECTRUM-UX-02 → SPECTRUM-FX-01 → SPECTRUM-FX-02 → SPECTRUM-SHADOW-01. 각 기능은 미구현이고 세부 FX 의미·파라미터는 후속 승인 사항이다. D-028의 이전 순서와 P-010의 제안은 역사로 보존하며 P-001 전체 승인으로 해석하지 않는다. 범위가 승인된 작업만 한 번에 하나씩 진행한다.
 - **단축키(D-019, D-027):** 대응 기능에는 흔히 쓰는 기본 단축키를 쓴다. 사용자에게 보이는 이름·도움말은 ON THE FRAME의 기능과 키로 설명하고 다른 회사 제품 비교 상표를 쓰지 않는다. 완전 호환을 주장하지 않는다. 더 넓은 도구·단축키는 각 기능과 함께 넣고(단축키만의 자리 표시 없음), 단축키 사용자 지정·프리셋은 없다. 텍스트 입력의 표준 편집 단축키를 가로채지 않고, 한국어 입력 소스에서도 키 코드로 같은 동작을 한다.
 - **유지되는 제약:** 앱 검증은 짧은 생성 fixture와 일회용 폴더로 한다. 소유자 미디어·프로젝트는 세션에 주어진 경로와 허락이 있을 때만 쓰고 개인 폴더를 탐색하지 않으며, 소유자 파일·원본을 덮어쓰지 않는다. 실제 저장 패널을 자동으로 확인(저장)하지 않는다. 실행 중인 소유자 앱을 끄지 않는다. FFmpeg 설치·새 의존성·개인 미디어 트랜스코딩은 하지 않는다. 빌드·임시 출력은 실험 산출물과 함께 20 GiB 관리 예산 안에서 관리한다(2026-10-24 소유자 승인, 이전 4 GiB). 고유 증거와 실행 가능한 Debug 앱은 보존한다. 크기 감시는 조기 경고일 뿐 강제 상한이 아니다. 2026-10-24 빌드 중 약 37 GB 컴파일 캐시 증가는 비정상·미해결이며, 그 두 실패 빌드의 명시적 모듈·캐시 덮어쓰기 설정을 다시 쓰지 않는다(기본 `app/scripts/build.sh` 설정 사용). 앱 DerivedData는 내부 APFS의 전용 디렉터리 `$HOME/Library/Developer/ON-THE-FRAME/DerivedData`(`app/scripts/derived-data.sh`, 2026-10-24 소유자 승인 — 데이터 볼륨이 HFS+라 컴파일 캐시 희소 파일이 전부 할당됨)이고 예산에 포함하며 할당 크기로 센다. 저장소·원본 미디어·증거는 데이터 볼륨에 둔다. 출력은 FHD 30 fps SDR H.264/AAC MP4이며 ProRes·4K·MKV 등 넓은 호환은 목표로만 기록하고 지원을 주장하지 않는다. 자동 검사·코드 리뷰·소유자 정성 관찰을 구분해 보고하고, 부분 검증을 완료로 표시하지 않는다.
-- 알려진 열린 문제(A-010 프리뷰 프레임 0 불일치, `ClipAudioTests` 렌더링 테스트 실패, 간헐 자체 검사 실패, 실제 MP3 미검증 등)는 [docs/ROADMAP.md](docs/ROADMAP.md) §S.6에 있다. 해결했다는 증거 없이 해결로 바꾸지 않는다.
+- 알려진 열린 문제(A-010 프리뷰 프레임 0 불일치, Native Inspector 7 FAIL/4 SKIP, 내부 Undo/Redo Seek 지연, 간헐 자체 검사 실패, 실제 MP3 미검증 등)는 [docs/ROADMAP.md](docs/ROADMAP.md) §S.6에 있다. 과거 ClipAudioTests 소리 비교 실패는 D-034의 기대값 정정·해당 회귀 기록과 구분한다. 그 정정을 새 전체 suite 통과로 확대하거나 다른 열린 문제를 근거 없이 닫지 않는다.
 - **작업 승인: E1-a(A-001)·E1-b(A-002)는 완료(E1 완료 2026-10-10, 시험한 Mac의 짧은 FHD 통합 실험에 한함). E2(A-003, 2026-10-10)는 열린 정확도 결함 때문에 미완료이고, E3-1(A-004)은 완료(2026-10-10, 시험한 Mac의 10분 FHD 첫 실행에 한함).** 실험 코드는 [experiments/e1-fhd/](experiments/e1-fhd/), [experiments/e2-4k/](experiments/e2-4k/), [experiments/e3-fhd-10min/](experiments/e3-fhd-10min/)에만 둔다([docs/DECISIONS.md](docs/DECISIONS.md) §2.1). E3-2 이후 하위 단계 등 다른 단계는 별도 승인 전까지 시작하지 않는다.
   - E3-1: [docs/EXPERIMENT-PLAN.md](docs/EXPERIMENT-PLAN.md) §7.6의 10분 FHD 첫 실행. 1920×1080, 30fps, SDR, H.264/AAC, 생성 미디어만(짧은 소스 반복), 실제 소스 영상 디코딩·합성, 컷·자막·선택 오디오 스펙트럼, E2 방식의 공유 composition으로 프리뷰·내보내기, 대표 취소·실패·출력 보호. 검증한 10분 내보내기는 소유자 확인용으로 보관한다. 렌더링·분석·디코딩·검증은 스트리밍으로 하며 디코딩된 프레임 전체나 무압축 10분 영상을 남기지 않는다. 8 GiB footprint와 단계 시간 한도는 실험 중지 조건일 뿐이다. 60분·3시간 실행, 4K60, HDR, 디스크 부족 시뮬레이션, 개인 미디어는 허용하지 않는다. E2의 해결되지 않은 소스 프레임 불일치는 E3-1 진행으로 해소되지 않는다.
   - E2: 짧은 4K 컷 편집 실험. 3840×2160, 30fps, SDR, H.264/AAC, 최종 타임라인 10초, 생성 fixture만. 실제 소스 영상 디코딩·합성, 트림·분할·이동(비디오 트랙 1개 순차 하드 컷, 실험 범위), 자막 3개, 선택 오디오 스펙트럼, 같은 타임라인 해석의 프리뷰·내보내기, 출력 보호·취소·실패. E1 부품은 패키지 전체를 복제하지 않고 재사용한다. 실험 전용 최소 창 허용. 성능은 측정만 하고 제품 기준을 만들지 않는다. 60분·3시간 실행, 4K60, HDR은 허용하지 않는다.
@@ -34,6 +42,8 @@ Claude Code는 [docs/DECISIONS.md](docs/DECISIONS.md)에 "확정"으로 기록�
 
 ## 작업 흐름
 
+빌드·제품 검사를 실행하기 전 [현재 실행 승인과 자원 안전](app/README.md#현재-실행-승인과-자원-안전)에 맞는 승인된 절차를 선택한다. 기존 build.sh의 모듈·캐시 정책을 사용하라는 지침은 감시 없는 직접 실행 승인이 아니다. 단일 job, compiler 1280MiB 조기/2GiB hard, aggregate 기존 조기/3GiB hard, 관리 디스크 19.25GiB 조기/20GiB hard, 기존 예측·memory-pressure guard를 유지한다. 원본 종료값·전체 로그로 성공을 판단하고 기존 서명 앱을 보존한다. 현재 한 번의 검증된 재사용 명령으로 이 모두가 보장되지는 않는다. 문서 전용 작업에서는 실행하지 않는다.
+
 1. 작업 전 `git status`로 작업 트리 상태를 확인한다.
 2. 편집할 파일은 먼저 읽고, 관련 문서([docs/PRODUCT.md](docs/PRODUCT.md), [docs/DECISIONS.md](docs/DECISIONS.md), [docs/ROADMAP.md](docs/ROADMAP.md))를 확인한다.
 3. 요청 범위 안에서만 변경한다. 범위 밖의 개선은 제안으로만 보고한다.
@@ -45,6 +55,7 @@ Claude Code는 [docs/DECISIONS.md](docs/DECISIONS.md)에 "확정"으로 기록�
 - 기존 사용자 변경(커밋되지 않은 수정, untracked 파일)을 덮어쓰거나 되돌리거나 삭제하지 않는다.
 - `git reset --hard`, `git checkout -- <path>`, `git clean`, 강제 push 등 파괴적 명령은 사용자의 명시적 요청 없이 실행하지 않는다.
 - commit, push, merge, 저장소 설정·공개 범위 변경은 사용자가 요청할 때만 수행한다.
+- 커밋은 저장소에서 확인한 소유자의 유효 Author/Committer identity를 사용한다(`git var GIT_AUTHOR_IDENT`, `git var GIT_COMMITTER_IDENT`로 확인). AI co-author trailer를 추가하거나 저자 귀속을 꾸며내지 않는다. 기존 공개 공동저자 이력은 별도 변경 승인 없이 수정하지 않으며, 문서 정정으로 GitHub Contributors 표시가 제거된다고 주장하지 않는다.
 - 자격 증명·토큰을 출력하거나 파일에 저장하지 않는다.
 - 커밋되는 문서에 사용자 이름, 기기 식별자, 불필요한 개인 경로를 남기지 않는다.
 
@@ -52,7 +63,7 @@ Claude Code는 [docs/DECISIONS.md](docs/DECISIONS.md)에 "확정"으로 기록�
 
 - 비파괴 편집: 원본 미디어를 덮어쓰거나 삭제하지 않는다.
 - 프리뷰와 내보내기는 구성과 타이밍(오디오, 자막, 스펙트럼 포함)이 일치해야 한다.
-- After Effects의 오디오 스펙트럼은 참고 대상일 뿐, After Effects 전체 대체를 목표로 하지 않는다.
+- After Effects는 Composition 편집 개념·Audio Spectrum 속성·숫자 조작 경험의 참고다. 전체 대체나 첫 출시의 전체 기능 구현 계획을 뜻하지 않는다.
 
 ## 검증 및 보고 규칙
 
@@ -74,7 +85,7 @@ Claude Code는 [docs/DECISIONS.md](docs/DECISIONS.md)에 "확정"으로 기록�
 | [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) | 관찰된 개발 환경 |
 | [docs/TECHNOLOGY-EVALUATION.md](docs/TECHNOLOGY-EVALUATION.md) | 기술 방식 비교, 잠정 추천, macOS/CPU 정책 제안, 초기 통합 실험(E1) 상세 |
 | [docs/EDITOR-PLAN.md](docs/EDITOR-PLAN.md) | 편집기 UI 첫 계획(화면 배치, 조작, 첫 마일스톤 M1, 엔진 재사용, 앱 구조 제안 — 미승인) |
-| [app/README.md](app/README.md) | 편집기 구현 기록(§1–§11 M1, §12–§25 그 뒤 작업과 커밋 대응표): 빌드·실행, 화면·조작, 구조, 입력 범위, 출력 보호, 검증 결과, 소유자 확인, 한계 |
+| [app/README.md](app/README.md) | 현재 실행 승인·자원 안전과 역사적 구현·검증 기록 |
 | [docs/diagnostics/A-010-preview-frame0.md](docs/diagnostics/A-010-preview-frame0.md) | A-010 프리뷰 경로 프레임 0 불일치 진단 요약(미해결, 재현 기록·확인된 사실·가설) |
 | [docs/EXPERIMENT-PLAN.md](docs/EXPERIMENT-PLAN.md) | 단계별 실험 계획(E1 FHD → E2 4K → E3 3시간), 메모리·디스크 구조 제안, 승인 구분 |
 | [experiments/e1-fhd/README.md](experiments/e1-fhd/README.md) | E1 실험(E1-a 내보내기, E1-b 프리뷰) 코드 구성, 재현 명령, 결과·증거 경계, 소유자 관찰 체크리스트, 한계 |

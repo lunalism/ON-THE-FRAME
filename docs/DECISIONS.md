@@ -8,6 +8,10 @@
 
 새 결정은 ID, 날짜, 내용, 근거를 함께 기록한다. 제안이 확정되면 "확정" 섹션으로 옮기고 날짜를 남긴다.
 
+**2026-11-17 현행 참조:** 소유자가 DOC-ALIGN-01에서 확정한 Composition-first Music Visual Editor 방향과 현행 승인/미결정 구분은 [문서 정렬 보완](#2026-11-17-doc-align-01-현행-방향과-문서-정렬)을 따른다. 아래 날짜가 붙은 결정·제안·실행 기록은 당시 범위를 보존한다. 후속 승인을 원래부터 승인됐던 것으로 소급하지 않는다.
+
+문서 권한 순서는 **명시적 소유자 승인 방향 → CLAUDE.md의 저장소 작업 규칙 → 이 문서의 최신 승인 결정 → ROADMAP.md의 현재 구현 상태 → PRODUCT.md의 요구사항 → 승인된 설계 명세 → 날짜가 붙은 역사 진단 증거**다. 현재 기능·검증·공개 범위는 [ROADMAP의 현행 표](ROADMAP.md#현행-기능과-검증-경계), 저장/열기와 codec의 차이는 [PRODUCT의 형식 표](PRODUCT.md#현행-프로젝트-형식과-기능-경계)를 본다.
+
 ## 1. 확정 결정
 
 ### 1.1 원 기획 brief 기반
@@ -95,7 +99,7 @@
 | P-003 | 잠정 기술 방향: 방식 A (Swift + AVFoundation 네이티브), 대안: 방식 B (Swift + FFmpeg 라이브러리 + 자체 합성) ([TECHNOLOGY-EVALUATION.md](TECHNOLOGY-EVALUATION.md) §4) | 제안 — P-002 실험 결과 후 판단 |
 | P-004 | macOS/CPU 목표 호환성: arm64(Apple silicon) 전용, 목표 최소 macOS 14 또는 15(잠정 15). 검증된 호환성은 별도 기록하며, 테스트 환경 부재만으로 최소 버전을 올리지 않음 ([TECHNOLOGY-EVALUATION.md](TECHNOLOGY-EVALUATION.md) §5) | 제안 — 소유자 검토 대기 |
 | P-005 | [PRODUCT.md](PRODUCT.md) §6의 파생 요구사항 DR-01~DR-10 채택 | 제안 — 소유자 검토 대기 |
-| P-006 | 지원 목표 T-01·T-02 검증을 위한 단계적 실험 계획(E1 FHD 통합 → E2 짧은 4K → E3 길이 확대, 3시간 4K 복합 케이스 포함)과 제한된 버퍼링·분석 캐시 구조 ([EXPERIMENT-PLAN.md](EXPERIMENT-PLAN.md)) | 제안 — 소유자 검토 대기. 단계별 착수는 각각 승인 필요. E1-a·E1-b·E2만 작업 승인됨(A-001~A-003) |
+| P-006 | 지원 목표 T-01·T-02 검증을 위한 단계적 실험 계획(E1 FHD 통합 → E2 짧은 4K → E3 길이 확대, 3시간 4K 복합 케이스 포함)과 제한된 버퍼링·분석 캐시 구조 ([EXPERIMENT-PLAN.md](EXPERIMENT-PLAN.md)) | 제안 — 계획 전체는 소유자 검토 대기. **2026-11-17 실행 승인 색인 보완:** E1-a·E1-b·E2(A-001~A-003)와 제한된 E3-1(A-004)은 각각 작업 승인됨. E3-2 이후는 별도 승인 필요 |
 | P-007 | 타임라인 끝 위치(예: t = 10.0 s)에서 프리뷰는 마지막 유효 프레임(예: 299)을 유지해 보여 준다. 제안 당시 실험 프리뷰는 타임라인 밖 프레임(300, 막대·자막 없음)을 그렸고, 내보내기는 299에서 끝난다(O-11 관련) | **채택(2026-10-10) → D-018** |
 | P-008 | 편집기 앱 구조와 UI 기술: SwiftUI 앱 셸 + AppKit 타임라인·프리뷰 + 로컬 Swift 엔진 패키지(실험 E1Core·E2Core에서 필요한 부분을 복사·정리) ([EDITOR-PLAN.md](EDITOR-PLAN.md) §5) | 제안 — 소유자 미승인. P-003·P-004를 승인하지 않음 |
 | P-009 | 첫 편집기 마일스톤 M1: 영상 가져오기 → 배치 → 선택·분할·트림·이동·삭제 → 실행 취소·다시 실행 → 프리뷰 → 내보내기. 리플(빈틈 없음, 영상 트랙 1개, 연결된 소리), 타임라인 1920×1080 30 fps 기본값. 복사·붙여넣기, 자막, 스펙트럼, 이미지·오디오, 저장·다시 열기, 재연결은 다음 마일스톤 ([EDITOR-PLAN.md](EDITOR-PLAN.md) §2~§3) | 제안 — 소유자 미승인. 앱 코드 착수에는 별도 작업 승인 필요 |
@@ -138,14 +142,14 @@
 | O-02 | 기술 스택과 아키텍처 | 제안 P-003 |
 | O-03 | 입력 포맷, 출력 코덱 (4K 포함) | |
 | O-04 | 내보내기 해상도, 프레임레이트, 색 처리, HDR 정책 | 4K의 정확한 크기·프레임레이트 포함. D-016은 4K60·HDR 승인이 아님 |
-| O-05 | 초기 스펙트럼 모양과 세부 컨트롤 | 실험의 막대형 스펙트럼은 실험용이며 제품 결정이 아님 |
-| O-06 | 프로젝트 파일 포맷 | **해결 → D-023**(2026-10-10 결정, 현재 형식 5, 형식 1–4 읽기). 그 밖의 앞으로의 스키마 결정은 없다 |
+| O-05 | 초기 스펙트럼 모양과 세부 컨트롤 | **2026-11-17 색인 정렬:** Digital/Analog·방향·기존 편집·정수 UI/scrubbing·유효 0높이 점은 후속 승인/구현됨. 잠정 분석 기본값의 확정과 미래 FX 의미는 여전히 열림. [현행 구분](#2026-11-17-doc-align-01-현행-방향과-문서-정렬) |
+| O-06 | 프로젝트 파일 포맷 | **해결 → D-023 및 후속 형식 승인. 2026-11-17 색인 정렬:** `.ontheframe` JSON, 지원 경로의 최대 형식 10. 저장은 내용에 따라 5/6/7/8/9/10이고 application persistence와 raw codec의 읽기 범위가 다름. [정확한 경계](PRODUCT.md#현행-프로젝트-형식과-기능-경계). 아래 역사적 형식 5 기록은 당시 이정표로 유지 |
 | O-07 | UI 언어 | |
 | O-08 | 배포 방식과 라이선스 (총괄) | 세부는 O-14~O-19. 스택 선택에 따라 의존성 라이선스 조건이 달라짐 |
 | O-09 | 성능 기준 | 길이 목표는 D-015(최대 3시간). 내보내기 시간·프리뷰 반응성·디스크 사용 기준은 미정 |
 | O-10 | 접근성 지원 수준 | 2026-10-09 감사에서 로드맵 초안의 근거 없는 항목을 이동 |
 | O-11 | 프리뷰/내보내기 일치 판정 기준 | 실험의 판정 기준 제안을 참고 |
-| O-12 | 스펙트럼 소스 세부 동작(선택 단위, 게인, 음소거, 이펙트, 다중 소스, 채널 처리) | 실험에서는 모두 미적용으로 고정하며 제품 결정이 아님 |
+| O-12 | 스펙트럼 소스 세부 동작(선택 단위, 게인, 음소거, 이펙트, 다중 소스, 채널 처리) | **2026-11-17 색인 정렬:** 선택 오디오 계보·자르기 연결/복사 독립·clip/lane 음량/음소거/페이드 반영·로그 밴드의 기존 승인과 실제 채널 에너지 평균 구현을 구분해 보존. 미래 FX·다중 소스 합산 확대는 미확정. [현행 구분](#2026-11-17-doc-align-01-현행-방향과-문서-정렬) |
 | O-13 | 일반 컷 편집의 추가 기능 범위 | D-014 |
 | O-14 | 상업 배포 채널 | D-012 |
 | O-15 | 소스 코드 라이선스 | D-012 |
@@ -1021,3 +1025,17 @@
 - **최종 보존 확인 PARTIAL:** 보호 untracked 5파일은 모두 존재하지만 루트 .DS_Store의 SHA-256이 시작 시 a719f23f…에서 최종 dc035185…로 달라졌다. 변경 주체·원인은 확인되지 않았고 이 작업에서 직접 쓰거나 복원·삭제·stage하지 않았다. 현재 파일과 별도 증거 스냅샷을 보존하고 체크포인트에서 제외한다. 나머지 보호 파일 4개·원본 미디어·기존 프로젝트·signed 앱·이전 검증 증거의 해시, main과 복구 참조 3개는 유지됐다. 제품 회귀·소유자 수락과 이 보존 경고를 구분하며 예상 밖 차이가 남아 있어 작업 전체를 무조건 완료로 표시하지 않는다.
 - **제한 유지:** 기존 native Inspector 7 FAIL/4 SKIP과 내부 Undo/Redo Seek 지연 53.6→116.2ms 조사는 OPEN이다. 장시간·다른 하드웨어·전체 Preview/Export parity는 미검증이며 공개 Spectrum Export는 비활성이다. 제한된 Preview/내부 Export 래스터 비교는 전체 parity 수락이 아니다. 체크포인트는 제안만 하며 staging/commit/push하지 않는다.
 - **체크포인트 제안:** 공유 renderer·coordinator 계약 주석, 기존 engine regression 3파일·새 DigitalZero/InternalZero 테스트 2파일, 수정된 실제 built-in overlay, 관련 문서 3파일의 정확히 11파일을 단일 커밋으로 제안한다. 기존 구현의 관련 없는 변경은 없고 부분 staging은 필요하지 않다. 보호된 설정·diagnostic/Finder 파일과 ignored 증거는 제외한다. 제목 제안은 Render Digital Spectrum dots for valid zero bands이며 소유자 승인 전 Git 쓰기 작업은 하지 않는다.
+
+### 2026-11-17 DOC-ALIGN-01 현행 방향과 문서 정렬
+
+- **소유자 확정 방향 — DOC-ALIGN-01:** ON THE FRAME은 macOS의 **Composition-first Music Visual Editor**다. 음악 중심의 이미지·영상·오디오 배치와 합성, 자막, 오디오 반응형 Spectrum, Preview와 최종 영상 Export를 주된 흐름으로 한다. D-003·D-014의 음악 제작/기본 컷 편집 방향을 이 우선순위로 보완한다. 전체 Composition 시스템이 이미 구현됐다는 뜻이 아니며, 새로운 범용 편집 기능 전체를 첫 릴리스에 약속하지 않는다. 고급 전환은 **Deferred**다.
+- **참고 범위 보완:** D-008의 Audio Spectrum 참고 범위를 Composition 편집 개념·Audio Spectrum 속성·숫자 컨트롤과 편집 경험으로 넓힌다는 소유자 지시다. After Effects의 전체 기능·완전 호환·첫 릴리스 기능 집합을 채택한 것은 아니다. 과거 D-008과 원 brief의 범위는 당시 기록으로 보존한다.
+- **기존 승인과 현행 구현:** 여러 영상/오디오 레인·비리플 배치와 기존 리플 명령·Undo/Redo, 자막 생성/편집/효과는 각각 기존 승인 범위를 유지한다. Spectrum은 Digital/Analog × Above/Mirrored/Below, 선택한 오디오의 계보를 쓰며 자른 조각은 이어지고 복사본은 독립이다. clip/lane 음량·음소거·페이드 반영과 로그 밴드의 기존 승인을 유지한다. 현재 채널별 파워 평균 후 제곱근 구현은 측정·구현 근거와 구분해 기록하며 이를 임의의 새 채널/이펙트 정책 승인으로 넓히지 않는다.
+- **숫자 편집과 그리기:** 시작/끝 X·Y, 최대 높이, 두께, 반응 강도 7개는 정수 표시·명시적 정수 입력·숫자 자체의 수평 scrubbing을 쓴다. untouched 또는 원래 표시 정수로 돌아온 값은 원래 milli를 보존한다. live Preview·gesture 한 단계 Undo·안전 취소와 기존 sliders/ColorPicker를 유지한다. 유효하게 완료된 Digital 0높이 밴드는 기존 중심·두께·색·알파의 최소 원이며 가짜 분석값·0초 전용 placeholder가 아니다. 양수 막대·Analog·source/정확 PTS/seek token/generation/revision/epoch 검증과 활성 구간은 그대로다.
+- **승인되지 않은 잔여 선택:** D-S5의 잠정 분석 기본값을 제품 기본값으로 확정하는 일, 미래 FX의 의미·파라미터·범위, 두 색/부드러움 등 추가 구성과 지원 확대는 별도 결정 대상이다. 기존 `floorDB`와 이미 구현된 반응 강도를 새 FX 사양으로 재정의하지 않는다. P-001~P-006 전체나 원래 DR 항목 전체가 자동으로 승인된 것은 아니다.
+- **소유자가 정한 계획 순서:** `SPECTRUM-UX-02 → SPECTRUM-FX-01 → SPECTRUM-FX-02 → SPECTRUM-SHADOW-01`. UX-02의 선택/편집 가이드와 나머지 FX/Shadow는 **Not implemented / 계획**이며 착수·세부 계약은 각 작업 지시가 필요하다. 이 순서만으로 효과 파라미터나 구현 완료를 만들지 않는다.
+- **공개 범위와 형식:** 이미지 가져오기/편집/Preview는 `DEBUG && OTF_IMAGE_IMPORT` 컴파일 조건과 `-OTFEnableImageImport` 실행 인수가 함께 필요한 제한된 경로다. Spectrum 만들기는 Debug 전용이며 기존 Spectrum 고르기/편집은 별도다. 일반 자막 Export, gated 이미지 Export, 내부 Debug Spectrum slice와 계속 차단된 **public Spectrum Export**를 구분한다. 형식 5/6/7/8/9 기록은 역사적 이정표이고, 현행 저장·열기/raw codec 경계는 [PRODUCT 형식 표](PRODUCT.md#현행-프로젝트-형식과-기능-경계)를 따른다. 새 형식을 추가하지 않는다.
+- **게시된 체크포인트와 현재 기준:** feature/subtitles에는 Seek `15c721f5`, image playback intent `b7a571e0`, numeric scrubbing `30e02a54`, Finder ignore `783ae4ba`, Digital zero `f2b80444`가 게시됐다. 확인한 feature 기준은 **`f2b80444b439ad59a3870da3350a1385d388552a`**이며 문서 브랜치 `docs/audit-alignment-20261117`은 그 커밋에서 시작했다. 앞 절의 미커밋/승인 대기는 각 감사 당시 상태이며 소급 삭제하지 않는다. local main·remote main과 feature는 별도 참조다([현재 상태](ROADMAP.md#현행-기능과-검증-경계)).
+- **검증과 수락의 구분:** Seek는 시험한 5개 조건, image intent·scrubbing·Digital zero는 각각 시험한 6개 조건의 owner manual acceptance다. Digital zero의 6/6은 01B 실제 Mac 보고다. 01C 기존 실행은 engine 85·실제 built-in overlay 61·zero Preview 23·playback 146·image intent 130·scrubbing 138·Draft/Store 223 각각 PASS/0 FAIL/0 SKIP, Seek 캡처 18/18·raster 비교 66/66이었다. **이번 문서 작업에서 재실행하지 않았다.** 과거 진단 복사본을 실제 내장 검사 결과로 대신하거나 합성 native 입력·내부 레이어 관측을 물리 화면 FPS로 바꾸어 쓰지 않는다.
+- **남은 한계:** Native Inspector **7 FAIL/4 SKIP**과 내부 Undo/Redo Seek 설치 지연 **53.6→116.2ms** 조사는 OPEN이다. 장시간 안정성·다른 하드웨어·전체 Preview/Export parity는 미검증이며 공개 Spectrum Export는 비활성이다. 제한된 내부 Export 프레임/래스터 비교나 소유자 6/6 수락으로 전체 parity를 완료 처리하지 않는다. 01C의 `.DS_Store` 차이와 이전 실패·중지 증거는 당시 보존 경고로 유지한다.
+- **작업·귀속 정책 확인:** 커밋을 지시받았을 때는 검증된 소유자 Git identity를 사용하고 AI co-author trailer를 추가하지 않으며 실제 저자 귀속을 꾸미지 않는다. DOC-AUDIT-01에서 default main의 게시 이력 중 Claude 공동저자 trailer가 있는 19커밋을 확인했다. 이번 문서 정렬은 그 commit·identity 설정·`.mailmap`·Git history를 변경하지 않으며 GitHub Contributors 표시 제거 효과를 주장하지 않는다. 역사 귀속 정리는 별도 범위다. 이번 작업은 문서만 정렬하며 source/build script·새 기능·빌드/제품 테스트·commit/push/merge를 하지 않는다.
