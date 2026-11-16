@@ -1133,7 +1133,8 @@ struct SpectrumStyleAdjust: View {
     let item: SpectrumItem
     let project: Int, selectionRevision: Int
     @State private var generation: Int
-    @FocusState private var focusedPixel: String?
+    @State private var focusedPixel: String?
+    @State private var numericScrubToken: UUID?
     @State private var draft: SpectrumStyleDraft
     @State private var feedback: String?
     @State private var pickerActive = false
@@ -1190,9 +1191,9 @@ struct SpectrumStyleAdjust: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("1920×1080 기준 정수 px · 왼쪽 위가 원점")
                             .font(.caption2).foregroundStyle(.secondary)
-                        point("시작점", xTitle: "시작 X", x: $draft.startX, yTitle: "시작 Y", y: $draft.startY)
-                        point("끝점", xTitle: "끝 X", x: $draft.endX, yTitle: "끝 Y", y: $draft.endY)
-                        field("최대 높이", $draft.height)
+                        point("시작점", x: .startX, y: .startY)
+                        point("끝점", x: .endX, y: .endY)
+                        field(.height)
                     }.padding(.top, 4)
                 }
                 Divider()
@@ -1204,14 +1205,14 @@ struct SpectrumStyleAdjust: View {
                                 Text("Analog").tag(SpectrumItemStyle.Mode.analog)
                             }.labelsHidden().accessibilityLabel("표시 모드")
                         }
-                        field("두께", $draft.thickness)
+                        field(.thickness)
                         Slider(value: Binding(get: {
                             Double(SpectrumStyleDraft.wholePixels(store.timeline.spectrum(item.id)?.style.thicknessMilli ?? item.style.thicknessMilli))
                         }, set: { value in
                             draft.thickness = String(Int(value.rounded()))
                             commitLive(kind: "thickness-slider")
                         }), in: 1...64, step: 1, onEditingChanged: { editing in
-                            if editing { focusedPixel = nil; store.finishSpectrumLiveSession() }
+                            if editing { leaveNumericTextEditing(); store.finishSpectrumLiveSession() }
                             else { store.finishSpectrumLiveSession() }
                         })
                         .accessibilityLabel("스펙트럼 두께")
@@ -1241,7 +1242,7 @@ struct SpectrumStyleAdjust: View {
             }
             .disclosureGroupStyle(SpectrumDisclosureStyle())
             AdjustSection(title: "오디오 분석", horizontalInset: 2) {
-                field("반응 강도 (%)", $draft.reaction)
+                field(.reaction)
                 Slider(value: Binding(get: {
                     Double(store.timeline.spectrum(item.id)?.style.reactionPercent ?? item.style.reactionPercent)
                 }, set: { value in
@@ -1249,7 +1250,7 @@ struct SpectrumStyleAdjust: View {
                     commitLive(kind: "reaction-slider")
                 }), in: 0...200, step: 1, onEditingChanged: { editing in
                     if editing {
-                        focusedPixel = nil
+                        leaveNumericTextEditing()
                     }
                     store.finishSpectrumLiveSession()
                 })
@@ -1258,13 +1259,17 @@ struct SpectrumStyleAdjust: View {
             if let message = feedback ?? validation {
                 Text(message).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
-            Text("숫자는 Return 또는 입력란을 떠날 때 반영됩니다. 슬라이더는 한 번의 드래그, 색상은 패널 닫힘·다른 편집 전까지 한 단계로 묶습니다.")
+            Text("숫자를 좌우로 끌어 조정하고 Escape로 취소합니다. 클릭하면 직접 입력하며 Return 또는 입력란을 떠날 때 반영됩니다. 숫자·슬라이더 끌기는 각각 한 단계, 색상은 패널 닫힘·다른 편집 전까지 한 단계로 묶습니다.")
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .disabled(store.gestureBase != nil || !store.fileCommandsAvailable)
         .onAppear { pickerActive = true }
-        .onDisappear { pickerActive = false; store.finishSpectrumLiveSession() }
-        .onChange(of: focusedPixel) { old, _ in if old != nil { commitLive(kind: "numeric") } }
+        .onDisappear {
+            pickerActive = false
+            if let numericScrubToken { store.cancelSpectrumNumericScrub(numericScrubToken) }
+            if store.spectrumNumericScrubToken == nil, store.projectSession == project,
+               store.selection == item.id, store.spectrumSelectionRevision == selectionRevision { store.finishSpectrumLiveSession() }
+        }
         .onChange(of: draft.sides) { _, _ in commitLive(kind: "discrete") }
         .onChange(of: draft.mode) { _, _ in commitLive(kind: "discrete") }
         .onChange(of: store.generation) { _, value in
@@ -1276,16 +1281,16 @@ struct SpectrumStyleAdjust: View {
             if let rgb = SpectrumPickerRGB.channels(draft) { lastValidSwatch = SpectrumPickerRGB.color(rgb) }
         }
     }
-    private func field(_ title: String, _ value: Binding<String>) -> some View {
-        property(title) { input(title, value) }
+    private func field(_ number: SpectrumNumericProperty) -> some View {
+        property(number.title) { input(number) }
     }
-    private func point(_ title: String, xTitle: String, x: Binding<String>, yTitle: String, y: Binding<String>) -> some View {
+    private func point(_ title: String, x: SpectrumNumericProperty, y: SpectrumNumericProperty) -> some View {
         property(title, minimumControlWidth: 180) {
             SpectrumCoordinatePairLayout {
                 Text("X").font(.caption)
-                input(xTitle, x)
+                input(x)
                 Text("Y").font(.caption)
-                input(yTitle, y)
+                input(y)
             }
         }
     }
@@ -1295,13 +1300,55 @@ struct SpectrumStyleAdjust: View {
             control().frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
-    private func input(_ title: String, _ value: Binding<String>) -> some View {
-        TextField(title, text: value).textFieldStyle(.roundedBorder)
-            .font(.system(size: 11, design: .monospaced)).controlSize(.small)
-            .multilineTextAlignment(.trailing).frame(minWidth: 72, maxWidth: .infinity)
-            .accessibilityLabel("스펙트럼 " + title)
-            .focused($focusedPixel, equals: title)
-            .onSubmit { commitLive(kind: "numeric") }
+    private func numericText(_ number: SpectrumNumericProperty) -> Binding<String> {
+        switch number {
+        case .startX: $draft.startX
+        case .startY: $draft.startY
+        case .endX: $draft.endX
+        case .endY: $draft.endY
+        case .height: $draft.height
+        case .thickness: $draft.thickness
+        case .reaction: $draft.reaction
+        }
+    }
+    private func syncNumericDraft() {
+        guard store.projectSession == project, store.selection == item.id,
+              store.spectrumSelectionRevision == selectionRevision,
+              let current = store.timeline.spectrum(item.id) else { return }
+        generation = store.generation; draft = SpectrumStyleDraft(current.style)
+    }
+    private func leaveNumericTextEditing() {
+        if focusedPixel != nil, let window = store.editorWindow,
+           let editor = window.firstResponder as? NSTextView,
+           let field = editor.delegate as? NSTextField, field.superview is SpectrumNumericControl {
+            window.makeFirstResponder(nil)
+        }
+        focusedPixel = nil
+    }
+    private func input(_ number: SpectrumNumericProperty) -> some View {
+        SpectrumNumericField(property: number, text: numericText(number), focus: $focusedPixel, store: store,
+            commit: { commitLive(kind: "numeric") },
+            begin: { token in
+                guard pickerContextIsCurrent, validation == nil else {
+                    feedback = validation; return false
+                }
+                let started = store.beginSpectrumNumericScrub(token, id: item.id, property: number,
+                    project: project, revision: selectionRevision, expectedGeneration: generation)
+                if started { numericScrubToken = token }
+                return started
+            }, update: { token, value in
+                let result = store.updateSpectrumNumericScrub(token, value: value)
+                if result == .accepted { syncNumericDraft(); feedback = nil }
+                if result == .rejected { feedback = "현재 좌표·범위에서는 이 값을 적용할 수 없습니다. 시작점과 끝점의 거리는 1 px 이상이어야 합니다." }
+                return result
+            }, finish: { token in
+                store.finishSpectrumNumericScrub(token)
+                if numericScrubToken == token { numericScrubToken = nil; syncNumericDraft() }
+            }, cancel: { token in
+                store.cancelSpectrumNumericScrub(token)
+                if numericScrubToken == token { numericScrubToken = nil; syncNumericDraft(); feedback = nil }
+            })
+            .frame(minWidth: 72, maxWidth: .infinity)
     }
 }
 

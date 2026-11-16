@@ -125,6 +125,13 @@ enum KeyRouting {
 
     /// 판단과 실행. 처리하면 nil(소비), 아니면 이벤트를 그대로 돌려준다.
     static func handle(_ e: NSEvent, store: ProjectStore) -> NSEvent? {
+        // A Spectrum numeric drag is not an NSText editor. Keep editor commands
+        // from mutating its base; Escape still reaches the owning native control.
+        if store.spectrumNumericScrubToken != nil, eventWindowOK(e, store), e.keyCode != 53 {
+            if commandAction(keyCode: e.keyCode, charactersIgnoringModifiers: e.charactersIgnoringModifiers,
+                             modifiers: e.modifierFlags) != nil ||
+                bareKeyAction(keyCode: e.keyCode, modifiers: e.modifierFlags, isRepeat: e.isARepeat) != nil { return nil }
+        }
         if let cmd = commandAction(keyCode: e.keyCode, charactersIgnoringModifiers: e.charactersIgnoringModifiers, modifiers: e.modifierFlags) {
             return handleCommand(cmd, e, store: store)
         }

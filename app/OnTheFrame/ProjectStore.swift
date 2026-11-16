@@ -400,6 +400,7 @@ final class ProjectStore {
     ///   취소하면 아직 반영하지 않은 부분만 버린다.
     func importFiles(_ urls: [URL]) {
         guard !urls.isEmpty, !discardConfirmed, !editorClosedByUser else { return }
+        finishSpectrumNumericScrubIfAny()
         // 메뉴·미디어 목록·Finder 모두 같은 대기열을 쓴다. 이미지는 기존 이미지 검증으로,
         // 영상·소리는 기존 묶음 검사로 보내며, 섞어 고른 파일도 선택 순서대로 처리한다.
         pendingOps.append(.importFiles(urls))
@@ -611,6 +612,7 @@ final class ProjectStore {
     func importStillImage(at url: URL) async -> Bool {
         // The mutation boundary, not just the menu, enforces development gating.
         guard Self.imageImportEnabled else { statusMessage = "이 빌드에서는 이미지 가져오기를 사용할 수 없습니다."; return false }
+        finishSpectrumNumericScrubIfAny()
         guard !Task.isCancelled, !imageImportBusy, importTask == nil, exportTask == nil,
               openProgress == nil, !openRequested, !discardConfirmed, !editorClosedByUser,
               gestureBase == nil, fileCommandsAvailable else { return false }
@@ -1021,12 +1023,78 @@ final class ProjectStore {
     // finalization records exactly one transition from the original Timeline.
     struct SpectrumLiveSession {
         let id: UUID, project: Int, revision: Int, kind: String, base: Timeline
+        var scrubToken: UUID? = nil
+    }
+    private struct SpectrumNumericScrub {
+        let token: UUID, id: UUID, project: UUID
+        let session: Int, revision: Int, property: SpectrumNumericProperty
+        let original: SpectrumItemStyle
+        var generation: Int
+        var last: Timeline
+    }
+    private var spectrumNumericScrub: SpectrumNumericScrub?
+    var spectrumNumericScrubToken: UUID? { spectrumNumericScrub?.token }
+
+    @discardableResult
+    func beginSpectrumNumericScrub(_ token: UUID, id: UUID, property: SpectrumNumericProperty,
+                                   project: Int, revision: Int, expectedGeneration: Int) -> Bool {
+        guard project == projectSession, revision == spectrumSelectionRevision,
+              expectedGeneration == generation, selection == id, timeline.spectrum(id) != nil,
+              spectrumNumericEditingAvailable else { return false }
+        commitInlineEditIfAny()
+        pauseForEdit()
+        guard project == projectSession, revision == spectrumSelectionRevision,
+              selection == id, let item = timeline.spectrum(id), spectrumNumericEditingAvailable else { return false }
+        spectrumColorEventRevision &+= 1 // Retire bindings captured by an older ColorPicker session.
+        spectrumNumericScrub = SpectrumNumericScrub(token: token, id: id, project: projectID,
+            session: project, revision: revision, property: property, original: item.style,
+            generation: generation, last: timeline)
+        return true
+    }
+    private var spectrumNumericEditingAvailable: Bool {
+        gestureBase == nil && fileCommandsAvailable && !openRequested && openProgress == nil &&
+        importProgress == nil && !imageImportBusy && !relinkInProgress && exportPhase == .idle &&
+        !discardConfirmed && !editorClosedByUser
+    }
+    func updateSpectrumNumericScrub(_ token: UUID, value: Int) -> SpectrumNumericScrubUpdate {
+        guard var scrub = spectrumNumericScrub, scrub.token == token,
+              scrub.project == projectID, scrub.session == projectSession,
+              scrub.revision == spectrumSelectionRevision, selection == scrub.id,
+              scrub.generation == generation, timeline == scrub.last,
+              spectrumNumericEditingAvailable else { return .obsolete }
+        guard let style = scrub.property.applying(value, to: scrub.original) else { return .rejected }
+        guard updateSpectrumLiveStyle(scrub.id, style: style, project: scrub.session,
+            revision: scrub.revision, expectedGeneration: scrub.generation, kind: "numeric-scrub") else { return .obsolete }
+        scrub.generation = generation; scrub.last = timeline
+        spectrumNumericScrub = scrub
+        return .accepted
+    }
+    func finishSpectrumNumericScrub(_ token: UUID) {
+        guard spectrumNumericScrub?.token == token else { return }
+        finishSpectrumLiveSession()
+    }
+    private func finishSpectrumNumericScrubIfAny() {
+        if spectrumNumericScrub != nil { finishSpectrumLiveSession() }
+    }
+    func cancelSpectrumNumericScrub(_ token: UUID) {
+        guard let scrub = spectrumNumericScrub, scrub.token == token else { return }
+        spectrumNumericScrub = nil
+        guard let session = spectrumLiveSession, session.scrubToken == token else { return }
+        spectrumLiveSession = nil
+        // Only our own still-current model may be rolled back. A retired view never
+        // replaces a newer project, selection or external edit with its old Timeline.
+        guard scrub.project == projectID, scrub.session == projectSession,
+              scrub.revision == spectrumSelectionRevision, selection == scrub.id,
+              timeline == scrub.last else { return }
+        history.replaceWithoutUndo(session.base)
+        publishSpectrumStylePreview()
     }
     var spectrumLiveSession: SpectrumLiveSession?
     private(set) var spectrumColorEventRevision = 0
     @ObservationIgnored var spectrumColorPanelObserver: NSObjectProtocol?
     @ObservationIgnored var spectrumColorFocusObserver: NSObjectProtocol?
     func finishSpectrumLiveSession() {
+        spectrumNumericScrub = nil
         guard let session = spectrumLiveSession else { return }
         spectrumLiveSession = nil
         guard session.project == projectSession else { return }
@@ -1038,6 +1106,10 @@ final class ProjectStore {
     @discardableResult
     func updateSpectrumLiveStyle(_ id: UUID, style: SpectrumItemStyle, project: Int,
                                  revision: Int, expectedGeneration: Int, kind: String) -> Bool {
+        if kind == "numeric-scrub" {
+            guard let scrub = spectrumNumericScrub, scrub.id == id, scrub.session == project,
+                  scrub.revision == revision, scrub.generation == expectedGeneration else { return false }
+        }
         guard project == projectSession, revision == spectrumSelectionRevision,
               expectedGeneration == generation, selection == id, let item = timeline.spectrum(id),
               gestureBase == nil, fileCommandsAvailable, !openRequested, openProgress == nil,
@@ -1051,19 +1123,20 @@ final class ProjectStore {
         allowed.red = style.red; allowed.green = style.green; allowed.blue = style.blue
         allowed.reactionPercent = style.reactionPercent
         guard style == allowed, style.isValid else { return false }
+        if kind != "numeric-scrub" { finishSpectrumNumericScrubIfAny() }
         if let session = spectrumLiveSession, session.kind != kind { finishSpectrumLiveSession() }
         guard style != item.style else { return true }
         guard let changed = try? timeline.settingSpectrumStyle(id, style) else { return false }
         if spectrumLiveSession == nil {
-            commitInlineEditIfAny()
-            pauseForEdit()
-            spectrumLiveSession = SpectrumLiveSession(id: id, project: project, revision: revision, kind: kind, base: timeline)
+            if kind != "numeric-scrub" { commitInlineEditIfAny(); pauseForEdit() }
+            spectrumLiveSession = SpectrumLiveSession(id: id, project: project, revision: revision, kind: kind,
+                base: timeline, scrubToken: kind == "numeric-scrub" ? spectrumNumericScrub?.token : nil)
             if kind == "color", spectrumColorPanelObserver == nil {
                 spectrumColorPanelObserver = NotificationCenter.default.addObserver(forName: NSColorPanel.willCloseNotification, object: nil, queue: .main) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.finishSpectrumLiveSession() }
+                    MainActor.assumeIsolated { if self?.spectrumLiveSession?.kind == "color" { self?.finishSpectrumLiveSession() } }
                 }
                 spectrumColorFocusObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: NSColorPanel.shared, queue: .main) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.finishSpectrumLiveSession() }
+                    MainActor.assumeIsolated { if self?.spectrumLiveSession?.kind == "color" { self?.finishSpectrumLiveSession() } }
                 }
             }
         }
@@ -2305,6 +2378,7 @@ final class ProjectStore {
     func step(_ k: Int) { pauseForEdit(); seek(to: playhead + k) }
     @ObservationIgnored private(set) var seekToken = 0
     func seek(to frame: Int) {
+        finishSpectrumNumericScrubIfAny()
         #if DEBUG
         SpectrumContinuityTrace.record(62, Int64(frame), Int64(projectSession), Int64(generation))
         #endif
@@ -2815,6 +2889,7 @@ extension ProjectStore {
         pauseForEdit()
         interruptGesture(reason: "replaceProject", clearViewDrags: true)   // 끌기 중이면 취소하고 보기의 끌기 상태(옮기기 누름 대기 포함)도 지운다(D-031)
         inlineEdit = nil   // 남은 글 편집은 이 프로젝트에 넣지 않고 버린다(교체 요청 앞에서 이미 확정했다, §44)
+        spectrumNumericScrub = nil
         spectrumLiveSession = nil
         colorSession = nil   // 색 조정 세션도 버린다(회차 확인으로 늦은 패널 값이 새 프로젝트를 바꾸지 않음)
         SubtitleRenderer.shared.removeAll()   // 이전 프로젝트의 자막 그림을 놓는다(§49: 캐시는 상한 안이지만 프로젝트를 바꾸면 쓸 일이 없다)
