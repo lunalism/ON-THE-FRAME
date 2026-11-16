@@ -1,5 +1,14 @@
 # 로드맵 — ON THE FRAME
 
+**2026-11-16 · PREVIEW-SEEK-01C — 구현 완료·소유자 수락 기록 / 체크포인트 승인 대기.** 기준은 `feature/subtitles`, 게시 HEAD/upstream `c96a8f6f5cb9418ddb36fddc1e3e66344d0cfd38`다. PREVIEW-SEEK-01B의 임시 timing `nil` 처리 수정은 유효한 작업·결과를 기존 상한 안에서 보존하고, 복귀 시 정확한 현재 프레임과 원본 정체성을 재검증한다. 새 seek·세션/item/소스 교체 등 기존 definitive invalidation은 유지한다. 구현·회귀 3파일과 DECISIONS/ROADMAP 2파일, 총 **5파일**의 단일 로컬 체크포인트를 제안하며 staging·commit·push는 별도 승인 전까지 하지 않는다. 아래 이전 체크포인트·PARTIAL 기록은 당시 이력이다.
+
+- ✅ **시험한 동작의 소유자 수락 5/5 PASS:** 일반 ruler seek, seek 직후 즉시 재생, 재생 중 seek, 빠른 연속 seek, Undo/Redo 후 seek. 소유자는 PREVIEW-SEEK-01B Debug 앱의 이 다섯 조건에서 눈에 띄는 Spectrum 공백·비정상 동작을 느끼지 않았다고 보고했다. 모든 seek 조건·하드웨어·장시간 성능 수락으로 확대하지 않는다([결정·수락 범위](DECISIONS.md#2026-11-16-preview-seek-01b-구현과-소유자-수락)).
+- ✅ **구현 및 범위별 기존 자동 PASS:** playback 146(새 검사 23개 포함), Draft/Store/persistence 223, overlay 58. 전후 108개 내부 캡처에서 잘못된 frame/PTS 및 nil 중 표시 0표본, raster 378개 비교 불일치 0개. 이번 문서 작업에서 빌드·테스트를 재실행한 수치는 아니다.
+- ⏳ **자동 검증 한계:** native 입력 **105 PASS / 7 FAIL / 4 SKIP**. 이전 INPUT 바이너리에서도 같은 실패 7개가 재현됐으며 해결로 표시하지 않는다. 전체 자동 검사 PASS를 주장하지 않는다.
+- ⏳ **내부 설치 지연 성능 조사 OPEN:** 이미지 ruler seek 중앙값 **122.0→63.5 ms**, 재구성 완료 후 Undo/Redo seek **53.6→116.2 ms**(각 n=3). 내부 레이어 시각이며 화면 FPS가 아니다. 지연 증가·분산과 장시간 성능 미검증을 §S.6에서 유지한다. 전체 Preview/Export parity는 미검증, 공개 Spectrum Export는 비활성이다. 재구성 중 이미지 스타일 Undo/Redo 직후 즉시 play가 시작되지 않는 기존 별도 결함도 이번 "Undo/Redo 후 seek" 수락으로 닫지 않는다.
+
+---
+
 **SP-6D-03 · Format 10 / 반응 강도 개발 체크포인트 준비 (2026-11-13).** 현재 기준은 `feature/subtitles`, HEAD/upstream/live remote `8c4e12f8779802b6d53fea5d00f8136478a01bb9`, main `44943eadabdf5a37d5242d614e7279813126dfde`다. 제품·직접 시험 16파일과 ROADMAP/HANDOFF 2파일, 총 **18파일** 후보다. index는 비워 두며 별도 소유자 게시 승인이 필요하다. 아래 SP-5D 및 이전 승인 대기는 당시 역사 기록이다. **SP-6 전체 완료가 아니다.**
 
 **구현 구분.** (A) Int 0…200 `reactionPercent`, legacy 기본100, 실제 Spectrum이 있으면 형식10, 이미지 전용9·빈 Spectrum 레인/계보8의 기존 규칙을 유지한다. 앱의 이미지 인식 persistence 경계는 1…10을 처리하지만 저수준 temporal ProjectFile은 9·이미지 인식 문서를 직접 읽지 않는다. 새 형식의 필수 정수 토큰·범위·unknown-field 검증, 혼합 이미지/Spectrum·temporal projection을 포함한다. (B) 공유 renderer는 유한 0…1 밴드에 강도를 곱해 0…1로 제한하고 100%는 원래 밴드를 그대로 쓴다. 0%는 기존 empty/무음 의미, 200%는 두 배 후 제한이다. 분석/PCM cache·타이밍·계보와 분리하며 Inspector 숫자/정수 slider·pause-for-edit·기존 history/선택/session 보호를 쓴다. 두께·반응 slider 세션 kind는 분리한다. (C) ColorPicker binding revision/continuous 갱신 회귀를 고치며 기존 P3→extended-sRGB 유한 채널 clipping·8-bit 양자화·alpha/숨은 스타일·stale 보호를 유지한다. (D) SpectrumOverlaySelfTest async Scenario/동기 pixel probe 분해는 기존 65개 검사와 diagnostics를 유지하는 Debug 컴파일 메모리 개선이다. (E) SP-6C-02 pending-latest 요청 병합·동일 confirmed paused frame 유지·revision/stale/cancellation 검사는 **잠정 유지**이며 native stutter 해결이 입증된 정책이 아니다.
@@ -387,6 +396,7 @@ native finish 정지 시 job/temp/scope/slot도 계속 대기하므로 hard time
 
 ### S.6 프로젝트 보호·안정화 (단계 6) — 열린 문제 목록
 
+- ⏳ **PREVIEW-SEEK-01B 내부 설치 지연 조사 OPEN(2026-11-16):** 재구성 완료 후 Undo/Redo seek 중앙값 **53.6→116.2 ms**로 증가했고 ruler seek는 **122.0→63.5 ms**로 개선됐다(각 조건 n=3, 내부 레이어 설치 시각·화면 FPS 아님). 소유자의 시험한 seek 동작 5/5 PASS는 별도 수락이며 이 성능 우려를 해결한 근거가 아니다. 지연 분산·다른 조건·장시간 성능·전체 Preview/Export parity는 미검증, 공개 Spectrum Export는 비활성 유지. native 입력 105 PASS / 7 FAIL / 4 SKIP의 동일 기준선 실패도 유지한다([수락과 한계](DECISIONS.md#2026-11-16-preview-seek-01b-구현과-소유자-수락)).
 - ⏳ SP-6 native Preview 성능 부채(2026-11-13, SP-6D-03): 두께·반응 slider stutter는 소유자 FAIL·원인 미확정. SP-6C-02 요청 병합 잠정 유지, 효과 미입증 Timeline 생략/임시 profiling은 SP-6C-09에서 제거. 위 SP-6D-03 최신 절의 별도 bounded 성능 계획과 한계를 따른다. Format10의 Spectrum-only·혼합 native save/reopen PASS로 이 문제를 닫지 않는다.
 - ⏳ A-010 프리뷰 경로 프레임 0 불일치(가끔, 원인 미확정, E2와 별개): [diagnostics/A-010-preview-frame0.md](diagnostics/A-010-preview-frame0.md).
 - ⏳ E2 사용자 정의 합성기 원본 프레임 불일치(편집기는 기본 합성기를 써서 그 경로를 지나지 않음).

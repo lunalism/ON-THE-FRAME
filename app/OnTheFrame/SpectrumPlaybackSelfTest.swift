@@ -208,6 +208,7 @@ enum SpectrumPlaybackSelfTest {
             return
         }
         checks.append(contentsOf: await transitionTransportChecks())
+        checks.append(contentsOf: await temporaryTimingChecks(audioURL: folder.appendingPathComponent("sources/aud-wav48s.wav")))
         func check(_ name: String, _ pass: Bool, _ detail: String = "") {
             checks.append(Check(name: name, pass: pass, detail: detail)); LaneSelfTest.checkCountForMode = checks.count
         }
@@ -359,7 +360,8 @@ enum SpectrumPlaybackSelfTest {
             _ = await wait { c.pendingCount == 0 }
             check("retention.byteBudgetAndCurrentPriority", large != nil && c.retainedBytes <= PlaybackSpectrumController.byteLimit && c.currentOutcome(spectrum: id, frame: 60) != nil && c.retainedCount < 3)
             c.advance(frame: nil, timeline: timeline)
-            check("timing.unavailableClearsAllImages", c.currentFrame == nil && c.retainedCount == 0)
+            check("timing.unavailableHidesBoundedImages", c.currentFrame == nil && c.retainedCount > 0
+                  && c.currentOutcome(spectrum: id, frame: 60) == nil && c.retainedBytes <= PlaybackSpectrumController.byteLimit)
             c.advance(frame: 70, timeline: timeline)
             _ = await wait { delivery.waiting.count == 3 }
             delivery.release(id, 70, .overlap)
@@ -413,6 +415,94 @@ enum SpectrumPlaybackSelfTest {
         if persist("spectrum-playback-result.json"), admittedRun == runID, ownsEmptySession() {
             NSApp.terminate(nil)
         }
+    }
+
+    /// Nil revokes presentation, not the identity of otherwise eligible work.
+    /// Controlled terminal delivery tests lifetime fences independently of timing.
+    static func temporaryTimingChecks(audioURL: URL) async -> [Check] {
+        var checks: [Check] = []
+        func check(_ name: String, _ pass: Bool) {
+            checks.append(Check(name: "temporaryTiming." + name, pass: pass, detail: "bounded retention; no unverified presentation"))
+        }
+        let h = Controlled(), id = h.ids[0]
+        h.c.advance(frame: 60, timeline: h.timeline)
+        check("pendingSetup", await h.waiting(id, 60))
+        let requests = h.c.metrics.requested, cancelled = h.c.metrics.cancelled
+        for _ in 0..<1000 { h.c.advance(frame: nil, timeline: h.timeline) }
+        check("nilPreservesEligibleWork", h.c.currentFrame == nil && h.c.pendingCount == 3
+              && h.c.metrics.requested == requests && h.c.metrics.cancelled == cancelled)
+        h.send(id, 60, .ready(bands: [], frame: nil))
+        check("completionRetainedWhileHidden", await LaneSelfTest.waitUntil(10) { h.c.retainedCount == 1 })
+        check("nilCannotExposeRetainedOutcome", h.c.currentOutcome(spectrum: id, frame: 60) == nil)
+        h.c.advance(frame: 60, timeline: h.timeline)
+        check("sameFrameRecoversWithoutNewRequest", await LaneSelfTest.waitUntil(10) {
+            h.c.currentOutcome(spectrum: id, frame: 60) != nil && h.count(id, 60) == 1
+        })
+        check("noDuplicateWorkAfterRecovery", h.c.metrics.requested == requests)
+        h.c.advance(frame: nil, timeline: h.timeline)
+        h.c.advance(frame: 90, timeline: h.timeline)
+        check("differentFrameNeverUsesOldOutcome", h.c.currentOutcome(spectrum: id, frame: 60) == nil
+              && h.c.currentOutcome(spectrum: id, frame: 90) == nil)
+        await h.close()
+
+        for boundary in ["newSeekStop", "sourceRevision", "projectReset", "invalidFrame"] {
+            let x = Controlled(), sid = x.ids[0]
+            x.c.advance(frame: 40, timeline: x.timeline)
+            check(boundary + "Setup", await x.waiting(sid, 40))
+            x.c.advance(frame: nil, timeline: x.timeline)
+            switch boundary {
+            case "sourceRevision": x.session.update(timeline: x.timeline, media: [])
+            case "projectReset": x.session.resetProject()
+            case "invalidFrame": x.c.advance(frame: x.timeline.durationFrames, timeline: x.timeline)
+            default: x.c.stop()
+            }
+            x.session.transformOutcomeForTest = nil
+            x.delivery.releaseAll()
+            check(boundary + "RejectsLateResults", await LaneSelfTest.waitUntil(10) {
+                x.c.pendingCount == 0 && x.c.currentFrame == nil && x.c.retainedCount == 0
+            })
+            await x.close()
+        }
+
+        do {
+            // Mutate only this disposable copy; the regression fixture is read-only.
+            let copy = audioURL.deletingLastPathComponent().appendingPathComponent("nil-source-" + UUID().uuidString + ".wav")
+            try FileManager.default.copyItem(at: audioURL, to: copy)
+            let media = try await MediaProbe.inspect(copy), session = SpectrumPreviewSession(), delivery = Delivery()
+            var timeline = try Timeline().registering(media).placing(media: media.id, at: 0, videoLane: nil, audioLane: Lane.audioID)
+            timeline = try timeline.addingSpectrum(fromAudioClip: timeline.audioClips[0].id, newLaneName: "SP")
+            let sid = timeline.spectra[0].id, c = session.playback
+            session.update(timeline: timeline, media: [media])
+            // Configured sessions delay real outcomes; they never substitute them.
+            session.transformOutcomeForTest = { id, frame, _ in await delivery.hold(id, frame) }
+            c.advance(frame: 60, timeline: timeline)
+            check("realPendingSetup", await LaneSelfTest.waitUntil(10) { delivery.waiting.count == 3 })
+            c.advance(frame: nil, timeline: timeline)
+            delivery.releaseAll()
+            check("realImagesRetainedDuringNil", await LaneSelfTest.waitUntil(10) { c.pendingCount == 0 && c.retainedBytes > 0 })
+            let requestCount = c.metrics.requested
+            c.advance(frame: 60, timeline: timeline)
+            check("realRecoveryRevalidatesSource", await LaneSelfTest.waitUntil(10) {
+                if case .ready(_, .some)? = c.currentOutcome(spectrum: sid, frame: 60) { return true }
+                return false
+            })
+            check("realRecoveryAvoidsDuplicateRequest", c.metrics.requested == requestCount && c.metrics.sourceRevalidations > 0)
+            c.advance(frame: nil, timeline: timeline)
+            let file = try FileHandle(forWritingTo: copy); try file.seekToEnd(); try file.write(contentsOf: Data([0])); try file.close()
+            c.advance(frame: 60, timeline: timeline)
+            check("changedSourceRejectedOnRecovery", await LaneSelfTest.waitUntil(10) {
+                if case .mediaUnavailable? = c.currentOutcome(spectrum: sid, frame: 60) { return true }
+                return false
+            })
+            check("failedSourceDropsRasterBytes", c.metrics.sourceRejections == 1
+                  && c.currentFrame == 60 && c.retainedBytes <= PlaybackSpectrumController.byteLimit)
+            check("retentionBounds", c.pendingCount <= 8 && c.retainedCount <= 8
+                  && c.retainedBytes <= PlaybackSpectrumController.byteLimit && c.metrics.peakBytes <= PlaybackSpectrumController.byteLimit)
+            c.stop()
+            check("definitiveStopReleasesRetainedBytes", c.currentFrame == nil && c.retainedCount == 0 && c.retainedBytes == 0)
+            session.transformOutcomeForTest = nil; delivery.releaseAll(); session.resetProject()
+        } catch { check("realFixture", false) }
+        return checks
     }
 
     /// Run unchanged against both the original controller and its correction.

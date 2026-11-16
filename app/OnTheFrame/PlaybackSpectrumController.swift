@@ -147,6 +147,7 @@ final class PlaybackSpectrumController {
         var peakBytes = 0, peakRetained = 0, recoveryRequests = 0, evicted = 0, retentionFailures = 0
         var accepted = 0, latencyTotal = 0.0, latencyMax = 0.0
         var ticks = 0, tickSeconds = 0.0, maxTickSeconds = 0.0
+        var suspensions = 0, retainedWhileSuspended = 0, sourceRevalidations = 0, sourceRejections = 0
     }
     static let pendingLimit = 8, retainedLimit = 8, byteLimit = 16 * 1024 * 1024, lookahead = 2
     private weak var session: SpectrumPreviewSession?
@@ -160,6 +161,9 @@ final class PlaybackSpectrumController {
     private var recoveryAttempted: Set<Key> = [] // at most one recovery per key during one current-frame activation
     private var pending: [Key: Pending] = [:]
     private var retained: [Key: Stored] = [:]
+    private var needsSourceValidation: Set<Key> = []
+    private var validationTask: Task<Void, Never>?
+    private var validationSerial = 0
     private(set) var retainedBytes = 0
     private(set) var metrics = Metrics()
     var pendingCount: Int { pending.count }
@@ -171,6 +175,7 @@ final class PlaybackSpectrumController {
         SpectrumContinuityTrace.record(30, Int64(currentFrame ?? -1), Int64(serial), SpectrumContinuityTrace.tick)
         #endif
         serial &+= 1; currentFrame = nil; desired.removeAll(keepingCapacity: true)
+        cancelSourceValidation(); needsSourceValidation.removeAll(keepingCapacity: true)
         completed.removeAll(keepingCapacity: true); recoveryAttempted.removeAll(keepingCapacity: true)
         retained.removeAll(keepingCapacity: true); retainedBytes = 0
         cancelObsolete()
@@ -206,11 +211,26 @@ final class PlaybackSpectrumController {
             stop(detachTiming: false); epoch = session.epoch; revision = session.revision
             firstVideoFrame = timeline.clips.lazy.map(\.start).min() ?? Int.max
         }
-        guard let frame, frame >= 0, frame < timeline.durationFrames else {
-            if currentFrame != nil { stop(detachTiming: false) }
+        guard let frame else {
+            if currentFrame != nil {
+                // Timing permission is absent, but this seek/session's work can
+                // still finish. No currentOutcome is exposed until fresh timing
+                // and source validation both succeed.
+                needsSourceValidation.formUnion(desired)
+                cancelSourceValidation(); currentFrame = nil
+                metrics.suspensions += 1
+                #if DEBUG
+                SpectrumContinuityTrace.record(39, Int64(serial), Int64(pending.count), Int64(retained.count))
+                #endif
+            }
+            return
+        }
+        guard frame >= 0, frame < timeline.durationFrames else {
+            stop(detachTiming: false)
             return
         }
         guard currentFrame != frame else { metrics.reused += 1; return }
+        cancelSourceValidation()
         if retained.keys.contains(where: { $0.frame == frame }) { metrics.prefetchedCurrentHits += 1 }
         currentFrame = frame
         #if DEBUG
@@ -228,11 +248,12 @@ final class PlaybackSpectrumController {
             }
         }
         completed = completed.filter { desired.contains($0.key) }
+        needsSourceValidation = needsSourceValidation.filter { desired.contains($0) }
         recoveryAttempted.removeAll(keepingCapacity: true)
         for key in retained.keys where !desired.contains(key) {
             retainedBytes -= retained.removeValue(forKey: key)?.bytes ?? 0
         }
-        cancelObsolete(); pump()
+        cancelObsolete(); validateCurrentRetained(); pump()
     }
     private func pump() {
         guard let session, currentFrame != nil, epoch == session.epoch, revision == session.revision else { return }
@@ -267,7 +288,7 @@ final class PlaybackSpectrumController {
         guard let p = pending[key], p.serial == requestSerial else { metrics.stale += 1; return }
         pending[key] = nil
         guard let session, !p.cancelled, serial == requestSerial, epoch == session.epoch,
-              revision == session.revision, desired.contains(key), currentFrame != nil else {
+              revision == session.revision, desired.contains(key) else {
             metrics.stale += 1; pump(); return
         }
         #if DEBUG
@@ -295,6 +316,10 @@ final class PlaybackSpectrumController {
             }
             if retained.count < Self.retainedLimit, bytes <= Self.byteLimit - retainedBytes {
                 retained[key] = Stored(outcome: outcome, bytes: bytes); retainedBytes += bytes
+                if currentFrame == nil { metrics.retainedWhileSuspended += 1 }
+                #if DEBUG
+                SpectrumContinuityTrace.record(41, Int64(key.frame), Int64(serial), Int64(bytes), currentFrame == nil ? 1 : 0)
+                #endif
                 metrics.peakBytes = max(metrics.peakBytes, retainedBytes)
                 metrics.peakRetained = max(metrics.peakRetained, retained.count)
             } else if key.frame == currentFrame {
@@ -310,12 +335,56 @@ final class PlaybackSpectrumController {
         default:
             break // nil/error/unavailable/overlap/drop remain stable for this desired window
         }
-        pump()
+        validateCurrentRetained(); pump()
+    }
+
+    private func cancelSourceValidation() {
+        validationSerial &+= 1
+        // Keep the slot occupied until terminal completion: cancelling a Task
+        // cannot interrupt an in-progress file metadata syscall.
+        validationTask?.cancel()
+    }
+
+    private func validateCurrentRetained() {
+        guard validationTask == nil, let session, let frame = currentFrame else { return }
+        let keys = desired.filter { $0.frame == frame && needsSourceValidation.contains($0) && retained[$0] != nil }
+        guard !keys.isEmpty else { return }
+        let lifetime = serial, validation = validationSerial, e = epoch, r = revision
+        // Only keys are captured: an async check never holds extra raster bytes
+        // outside the controller's existing 16 MiB / eight-result budget.
+        validationTask = Task { @MainActor [weak self, weak session] in
+            defer {
+                self?.validationTask = nil
+                self?.validateCurrentRetained()
+            }
+            guard let session else { return }
+            for key in keys {
+                guard let self, !Task.isCancelled else { return }
+                let failure: SpectrumFrameOutcome?
+                if case .ready(_, .some)? = self.retained[key]?.outcome {
+                    self.metrics.sourceRevalidations += 1
+                    failure = await session.playbackMediaFailure(spectrum: key.spectrum)
+                } else { failure = nil }
+                guard !Task.isCancelled, self.serial == lifetime, self.validationSerial == validation,
+                      self.epoch == e, self.revision == r, session.epoch == e, session.revision == r,
+                      self.currentFrame == frame, self.desired.contains(key) else { return }
+                if let failure, let old = self.retained[key] {
+                    self.retainedBytes -= old.bytes
+                    self.retained[key] = Stored(outcome: failure, bytes: 0)
+                    self.metrics.sourceRejections += 1
+                }
+                self.needsSourceValidation.remove(key)
+                #if DEBUG
+                SpectrumContinuityTrace.record(42, Int64(key.frame), Int64(lifetime), failure == nil ? 1 : 0)
+                #endif
+            }
+        }
     }
     /// A future result may be retained, but can only be retrieved once that exact frame is current.
     func currentOutcome(spectrum: UUID, frame: Int) -> SpectrumFrameOutcome? {
         guard frame == currentFrame, let session, epoch == session.epoch, revision == session.revision else { return nil }
         let key = Key(spectrum: spectrum, frame: frame)
+        if needsSourceValidation.contains(key), case .ready(_, .some)? = retained[key]?.outcome { return nil }
         if completed[key] == .budgetFailure {
             return .failed(.render(.invalidCanvas("playback retained-image budget unavailable (16 MiB / 8 results)")))
         }

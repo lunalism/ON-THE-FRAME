@@ -53,13 +53,7 @@ final class SpectrumPreviewSession {
                 #endif
                 var accepted = outcome
                 if checkPlaybackMedia, case .ready(_, .some) = outcome {
-                    if let timeline = self.playbackTimeline, let entry = timeline.spectra.first(where: { $0.id == spectrum }),
-                       let id = timeline.spectrumMediaID(entry), let asset = self.playbackAssets[id] {
-                        let available = await Task.detached(priority: .userInitiated) {
-                            FileIdentity.of(asset.url) == asset.identity && FileManager.default.isReadableFile(atPath: asset.url.path)
-                        }.value
-                        if !available { accepted = .mediaUnavailable(id) }
-                    } else { accepted = .missingSource }
+                    if let failure = await self.playbackMediaFailure(spectrum: spectrum) { accepted = failure }
                 }
                 #if DEBUG
                 // Synthetic controller tests have no configured project or media.
@@ -89,4 +83,15 @@ final class SpectrumPreviewSession {
     }
 
     func cancel(_ ticket: SpectrumFrameTicket) { coordinator.cancel(ticket) }
+
+    /// Reused after a timing suspension too: a retained raster is not proof that
+    /// its source is still accessible. Callers fence epoch/revision after await.
+    func playbackMediaFailure(spectrum: UUID) async -> SpectrumFrameOutcome? {
+        guard let timeline = playbackTimeline, let entry = timeline.spectrum(spectrum),
+              let id = timeline.spectrumMediaID(entry), let asset = playbackAssets[id] else { return .missingSource }
+        let available = await Task.detached(priority: .userInitiated) {
+            FileIdentity.of(asset.url) == asset.identity && FileManager.default.isReadableFile(atPath: asset.url.path)
+        }.value
+        return available ? nil : .mediaUnavailable(id)
+    }
 }
