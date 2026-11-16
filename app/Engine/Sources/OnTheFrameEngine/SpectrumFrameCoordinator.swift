@@ -15,7 +15,8 @@ import os
 
 /// 한 프레임 요청의 결과. 요청마다 정확히 한 번 deliveryQueue에서 알린다.
 public enum SpectrumFrameOutcome: Sendable {
-    /// 밴드 값과 그린 프레임. frame이 nil이면 그릴 범위가 없다(디지털에서 모두 0 — 소스 조각이 없는 곳의 무음 포함). 프레임 화소는 그 값만 가진 버퍼(3A-1).
+    /// 밴드 값과 그린 프레임. 유효한 Digital 0높이는 최소 원이며, frame nil은 범위 밖 등 실제 빈 렌더 결과다(분석 대기/실패와 다름).
+    /// 프레임 화소는 그 값만 가진 버퍼(3A-1).
     case ready(bands: [Float], frame: SpectrumRenderedFrame?)
     /// 그 프레임에 스펙트럼이 보이지 않음 / 그 항목이 타임라인에 없음
     case notVisible, itemMissing

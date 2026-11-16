@@ -1,0 +1,100 @@
+import AVFoundation
+import Foundation
+@testable import OnTheFrameEngine
+import os
+import XCTest
+
+/// Compare the actual internal Export worker with the Preview coordinator.
+/// Generated media only, fresh output folder, public Spectrum Export stays gated.
+final class SpectrumInternalZeroTests: XCTestCase {
+    private func media(in folder: URL) async throws -> (MediaAsset, MediaAsset) {
+        let video = folder.appendingPathComponent("video.mp4"), audio = folder.appendingPathComponent("initial-silence.wav")
+        let writer = try AVAssetWriter(outputURL: video, fileType: .mp4)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: 320, AVVideoHeightKey: 180])
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey as String: 320, kCVPixelBufferHeightKey as String: 180])
+        writer.add(input)
+        guard writer.startWriting() else { throw writer.error! }
+        writer.startSession(atSourceTime: .zero)
+        for frame in 0..<360 {
+            while !input.isReadyForMoreMediaData { try Task.checkCancellation(); try await Task.sleep(nanoseconds: 1_000_000) }
+            var buffer: CVPixelBuffer?
+            let result = CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &buffer)
+            guard result == kCVReturnSuccess, let buffer else { throw SpectrumRenderError.invalidCanvas("fixture allocation") }
+            CVPixelBufferLockBaseAddress(buffer, [])
+            memset(CVPixelBufferGetBaseAddress(buffer), 64, CVPixelBufferGetDataSize(buffer))
+            CVPixelBufferUnlockBaseAddress(buffer, [])
+            guard adaptor.append(buffer, withPresentationTime: CMTime(value: Int64(frame), timescale: 30)) else { throw writer.error! }
+        }
+        input.markAsFinished(); writer.endSession(atSourceTime: CMTime(value: 12, timescale: 1))
+        await writer.finishWriting()
+        XCTAssertEqual(writer.status, .completed)
+        let frames = 48_000 * 12, dataBytes = frames * 4
+        var wav = Data()
+        func u16(_ v: UInt16) { wav.append(UInt8(v & 255)); wav.append(UInt8(v >> 8)) }
+        func u32(_ v: UInt32) { u16(UInt16(v & 65535)); u16(UInt16(v >> 16)) }
+        wav.append(Data("RIFF".utf8)); u32(UInt32(36 + dataBytes)); wav.append(Data("WAVEfmt ".utf8))
+        u32(16); u16(1); u16(2); u32(48_000); u32(192_000); u16(4); u16(16)
+        wav.append(Data("data".utf8)); u32(UInt32(dataBytes))
+        for n in 0..<frames {
+            let value = n < 24_000 ? Int16(0) : Int16((0.25 * 32767 * sin(2 * Double.pi * 440 * Double(n) / 48_000)).rounded())
+            u16(UInt16(bitPattern: value)); u16(UInt16(bitPattern: value))
+        }
+        try wav.write(to: audio, options: .withoutOverwriting)
+        return (try await MediaProbe.inspect(video), try await MediaProbe.inspect(audio))
+    }
+
+    func testValidZeroAndNonzeroFramesMatchActualInternalExportWorker() async throws {
+        let folder = ExportEndToEndTests.root.appendingPathComponent("spectrum-zero-internal-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let (video, audio) = try await media(in: folder), mediaByID = [video.id: video, audio.id: audio]
+        let spectrumLane = UUID(), subtitleLane = UUID(), id = UUID()
+        let clip = Clip(mediaID: audio.id, start: 0, sourceIn: 0, length: 360, lane: Lane.audioID)
+        var style = SpectrumItemStyle.provisionalDefault; style.bands = 8; style.thicknessMilli = 6_000
+        let spectrum = SpectrumItem(id: id, lane: spectrumLane, start: 0, length: 360, sourceKey: clip.lineageKey, style: style)
+        let subs = (0..<3).map { SubtitleItem(lane: subtitleLane, start: $0 * 120, length: 120, text: "Generated \($0)") }
+        let timeline = Timeline(clips: [Clip(mediaID: video.id, start: 0, sourceIn: 0, length: 360, lane: Lane.videoID)],
+            audioClips: [clip], subtitles: subs, spectra: [spectrum],
+            lanes: [Lane(id: subtitleLane, kind: .subtitle, name: "S"), Lane(id: spectrumLane, kind: .spectrum, name: "SP")] + Lane.defaults,
+            media: [MediaRef(video), MediaRef(audio)], mediaFrames: [video.id: video.frameCount, audio.id: audio.frameCount],
+            mediaHasAudio: [video.id: video.hasAudio, audio.id: audio.hasAudio], durationFrames: 360)
+        XCTAssertTrue(timeline.isValid)
+        let probeFrames: Set<Int> = [0, 1, 5, 29, 30]
+        typealias Result = (bands: [Float], frame: SpectrumRenderedFrame?)
+        let results = OSAllocatedUnfairLock(initialState: [Int: Result]())
+        var controls = SpectrumExportControls(stepTimeout: 10, jobTimeout: 120)
+        controls.prepared = { frame, bands, raster, bytes in
+            if probeFrames.contains(frame) { results.withLock { $0[frame] = (bands, raster) } }
+        }
+        var worker: SpectrumExportFrames? = try SpectrumExportFrames(timeline: timeline, assets: [video, audio], controls: controls)
+        let preview = SpectrumFrameCoordinator(deliveryQueue: DispatchQueue(label: "test.zero.preview"))
+        preview.update(timeline: timeline, media: [video, audio])
+        for frame in 0...30 {
+            let footprint = try await worker!.prepare(frame)
+            XCTAssertNotNil(footprint, "valid silent and sounding frames both produce footprints")
+            guard probeFrames.contains(frame) else { continue }
+            let outcome = await withCheckedContinuation { continuation in
+                preview.request(spectrum: id, frame: frame, canvasWidth: 1920, canvasHeight: 1080) { continuation.resume(returning: $0) }
+            }
+            guard case let .ready(bands, actual?) = outcome else { return XCTFail("Preview result was not ready") }
+            let exported = try XCTUnwrap(results.withLock { $0[frame] }), expected = try XCTUnwrap(exported.frame)
+            XCTAssertEqual(bands, exported.bands, "Preview/Export analysis remains identical frame \(frame)")
+            XCTAssertEqual(actual.drawRect, expected.drawRect)
+            XCTAssertEqual(SpectrumFrameRendererTests.bytes(actual.image), SpectrumFrameRendererTests.bytes(expected.image))
+            if frame < 6 {
+                XCTAssertTrue(bands.allSatisfy { $0 == 0 })
+                XCTAssertTrue(SpectrumFrameRendererTests.bytes(actual.image).contains { $0 != 0 })
+                XCTAssertLessThanOrEqual(actual.drawRect.height, 16)
+            } else { XCTAssertGreaterThan(bands.max()!, 0) }
+        }
+        worker = nil; preview.resetProject()
+        XCTAssertTrue(SpectrumExportFrames.isIdleForTest)
+        let plan = try await CompositionPlanner.plan(timeline, media: mediaByID)
+        let destination = folder.appendingPathComponent("public-gate.mp4")
+        let outcome = await ExportService.export(plan, to: .fromSavePanel(destination), sources: [video, audio]) { _ in }
+        if case .failed = outcome {} else { XCTFail("Public Spectrum Export must remain disabled") }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+}

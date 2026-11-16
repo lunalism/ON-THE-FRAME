@@ -3,6 +3,14 @@
 ON THE FRAME의 오디오 스펙트럼(R-10~R-12) 설계다. 표시:
 **[승인]** 소유자가 정한 것 · **[권고]** Claude Code 권고(소유자 미승인) · **[결정 필요]** 소유자가 정해야 하는 것 · **[근거]** 저장소 기록·코드·측정·Apple 문서.
 
+**2026-11-17 SPECTRUM-ZERO-01C 수락과 내장 검사 정리:** 소유자는 실제 Mac의 01B에서 paused 0초 점·모양/간격/색·음악 반응·활성 구간·편집/Undo·Seek/이미지 재생 6/6 PASS를 보고했다. 유효한 Digital 0높이는 기존 밴드 중심·두께·색·알파의 독립 원이며 missing/pending/stale/비활성 상태를 무음으로 대체하지 않는다. 이번에는 제품 기하를 바꾸지 않고 내장 overlay의 옛 nil 기대값을 ready-zero 래스터·프레임/소스·독립 기하 확인으로 정리했다. 현재 소스 Debug 빌드에서 **실제 내장 overlay 61 PASS/0 FAIL/0 SKIP**, 엔진 전체 재실행 **85 PASS/0 FAIL/0 SKIP**와 관련 앱 회귀를 확인했다. Preview/내부 Export의 5프레임 bands/래스터 일치·120프레임 checkpoint와 소유자 수락은 각각 범위가 다른 증거이며 전체 parity가 아니다. 정확한 결과·초기 진단 오류와 정정·남은 native 7 FAIL/4 SKIP·내부 Seek 지연은 [현재 수락·검증 기록](DECISIONS.md#2026-11-17-spectrum-zero-01c-소유자-수락과-회귀-계약-정리)을 따른다. 장시간·다른 하드웨어·전체 Preview/Export parity는 미검증, 공개 Spectrum Export는 비활성이다.
+
+체크포인트 보존 확인은 PARTIAL이다. 보호 루트 .DS_Store의 시작/최종 해시 차이는 원인이 미확인이고 현재 파일·증거를 보존한 채 제안에서 제외했다. 이는 렌더링 회귀 결과와 구분하며 상세 보존 상태는 위 수락·검증 기록을 따른다.
+
+아래 SPECTRUM-ZERO-01 절은 최초 구현 당시 상태다. Debug 복구·소유자 수락·내장 회귀의 최신 상태는 위 01C 기록을 따른다.
+
+**2026-11-17 SPECTRUM-ZERO-01 계약 갱신:** 아래 시제품·과거 실행 기록의 “Digital 모두0 → nil”은 당시 계약이다. 현재 공유 렌더러는 유효한 Digital 0높이를 기존 밴드 중심·색·알파·두께 직경의 독립 원으로 그린다. Reaction 0/최대 높이 0도 같은 기하를 쓰고 양수 막대·Analog·분석값은 유지한다. nil은 화면 밖 등 실제 빈 그리기 결과이며 missing/pending/stale/비활성 항목을 무음으로 대체하지 않는다. 엔진 범위 검증은 수행했지만 제품 Debug 빌드는 안전 중지되어 앱 회귀·수동 수락은 남아 있다. 현재 상태와 정확한 검증 경계는 [후속 구현 기록](DECISIONS.md#2026-11-17-spectrum-zero-01-digital-0높이-최소-요소)을 따른다.
+
 기준: 브랜치 `feature/subtitles` @ `2d843a0`. 관련: [PRODUCT.md](PRODUCT.md) R-10~R-12·DR-05·DR-06·DR-09·Q-05·Q-12, [DECISIONS.md](DECISIONS.md) D-004·D-006·D-007·D-018·D-028, [SUBTITLE-DESIGN.md](SUBTITLE-DESIGN.md) §31·§34·§35(BGRA 왕복 품질), §41~§43(구조 R), §49(자막 그림 메모리), 실험 `experiments/e1-fhd/Sources/E1Core/Spectrum.swift`. 이번 타당성 검사(§9)의 시제품은 엔진 시험 대상 `app/Engine/Tests/OnTheFrameEngineTests/SpectrumPrototype/`에 있고, SP-0 프리뷰 실험(§10)은 앱 Debug 전용 파일이 같은 원본을 기호 링크로 쓴다(제품 경로·Release 변경 없음).
 
 ## 0. 요약

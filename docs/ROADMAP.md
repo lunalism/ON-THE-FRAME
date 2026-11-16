@@ -1,5 +1,25 @@
 # 로드맵 — ON THE FRAME
 
+**2026-11-17 · SPECTRUM-ZERO-01C — 소유자 수락 6/6 PASS / 실제 내장 overlay 61 PASS / 보존 확인 PARTIAL / 11파일 체크포인트 승인 대기.** feature/subtitles @ 30e02a54ae67e36959d8baef10f04dd01e3d8eef, upstream/live remote와 일치한다. 기존 구현·회귀·문서 11파일을 단일 커밋으로 제안하며 staging/commit/push는 하지 않았다([수락·회귀 경계](DECISIONS.md#2026-11-17-spectrum-zero-01c-소유자-수락과-회귀-계약-정리)).
+
+- ✅ **소유자 수동 수락 6/6 PASS:** paused 0초 점, 모양·간격·색, 음악 반응, 활성 구간, 편집·Undo/Redo, 기존 Seek·이미지 재생을 실제 Mac의 01B에서 확인했다는 소유자 보고다. 자동 결과·장시간·다른 하드웨어·전체 parity 수락과 구분한다.
+- ✅ **계약 정리:** 유효한 Digital 0 분석을 nil로 기대한 내장 검사 한 곳을 실제 최소 원 래스터·독립 기하·프레임/소스 식별 검사로 바꿨다. 제품 렌더러·FFT·시간 매핑·모델·UI·검증 guard는 바꾸지 않았다. 기존 missing/pending/stale/비활성 검사도 유지한다.
+- ✅ **이번 자동 검증:** 엔진 전체 85, 실제 내장 overlay 61, zero Preview 23, playback 146, image intent 130, scrubbing 138, Draft/Store/지속성 223이 각각 PASS/0 FAIL/0 SKIP다. Seek 18/18·raster 66/66 일치이며 실제 내장 결과를 이전 임시 진단 복사본으로 대체하지 않았다. native Inspector 138 PASS/7 FAIL/4 SKIP 중 scrubbing 33/33·ColorPicker 5/5 PASS이고 기존 실패 7개는 그대로다. 최초 이미지 진단의 인자 오류 1 PASS/18 FAIL와 정정 후 130/130의 증거도 보존했다.
+- **빌드·검증 한계:** 새 Debug 빌드 1회 성공, current source/서명 확인. 기존 한도·예측 guard를 유지했고 task 최대 단일 약 1219.9MiB·aggregate 1879.8MiB·관리 디스크 15.78GiB·pressure 1, 자원 중지/자동 제품 재시도 없음이다. Preview/내부 Export 5프레임 전체 바이트 비교와 120프레임 checkpoint는 제한된 검사이며 전체 parity 수락이 아니다.
+- ⏳ **보존 확인 PARTIAL:** 보호 untracked 5파일 중 루트 .DS_Store만 시작/최종 해시가 다르며 원인은 확인되지 않았다. 현재 파일·증거 사본을 보존하고 stage/복원/삭제하지 않았다. 나머지 보호 파일·원본 미디어·기존 프로젝트/서명 앱/증거·main·복구 참조는 유지됐으며 이 메타데이터는 11파일 제안에서 제외한다.
+- ⏳ **열린 제한:** native Inspector 7 FAIL/4 SKIP, 내부 Undo/Redo Seek 지연 OPEN, 장시간·다른 하드웨어·전체 Preview/Export parity 미검증, 공개 Spectrum Export 비활성은 유지한다.
+
+아래 SPECTRUM-ZERO-01은 최초 구현 당시 기록이다. 01B에서 Debug 빌드를 복구했고 수동 수락과 내장 검사 정리의 현재 상태는 위 01C를 따른다.
+
+**2026-11-17 · SPECTRUM-ZERO-01 — 공유 렌더러 구현·엔진 범위 검증 / Debug 빌드 안전 중지, 앱 회귀·수동 수락 미완료.** feature/subtitles의 HEAD/upstream/live remote는 30e02a54ae67e36959d8baef10f04dd01e3d8eef다. 변경은 미커밋·미스테이징이며 commit/push/merge하지 않았다([구현·검증 경계·자원 중지](DECISIONS.md#2026-11-17-spectrum-zero-01-digital-0높이-최소-요소)).
+
+- ✅ **공유 렌더러:** 유효한 Digital 0높이 밴드는 기존 중심·색·알파·두께 직경의 독립 원이다. 0초 전용 placeholder·양수 amplitude floor·연결 기준선을 넣지 않았다. Reaction 0/최대 높이 0도 같은 원을 사용하고, 양수 막대·Analog·FFT·시간/소스 매핑·frame validation·Format 10은 유지한다.
+- ✅ **이번 엔진 검사:** 최초 85개 중 84 PASS/1 FAIL/0 SKIP, subpixel 8비트 색상 양자화의 기대값 정정 후 관련 7개는 7 PASS/0 FAIL/0 SKIP다. 나머지 78개와 합친 서로 다른 85개의 최신 결과가 PASS이며 전체 재실행은 아니다. 실제 내부 Export worker와 Preview coordinator의 5개 프레임 bands/래스터 일치, checkpoint 인코딩/디코딩과 public gate 거부를 포함한다.
+- ⏳ **빌드·앱 검증:** 제품 빌드 1회는 기존 예측 RSS 중지로 BUILD INTERRUPTED, 재시도하지 않았다. 실측 단일 최대 약 1086.6MiB·aggregate 약 1449.3MiB·관리 디스크 약 15.33GiB·pressure 1이며 기존 signed 앱은 보존했다. 새 실행 가능한 Debug 앱이 없어 이번 앱 overlay·Seek·image playback·numeric scrubbing 회귀와 소유자 수동 확인은 아직 실행하지 못했다. 엔진 통과만으로 SPECTRUM-ZERO-01 전체 완료를 표시하지 않는다.
+- ⏳ **기존 제한 유지:** native Inspector 7 FAIL/4 SKIP, 내부 Undo/Redo Seek 지연 OPEN, 장시간·다른 하드웨어·전체 Preview/Export parity 미검증, 공개 Spectrum Export 비활성. 선택 가이드/핸들 SPECTRUM-UX-02는 별도 미구현이다.
+
+아래 01C/01B는 당시 감사·검증 이력이다. scrubbing 체크포인트는 이후 위 30e02a54ae67e36959d8baef10f04dd01e3d8eef로 게시됐고, 당시의 SPECTRUM-ZERO-01 미구현 상태는 위 후속 구현 기록으로 갱신한다.
+
 **2026-11-16 · SPECTRUM-UX-01C — scrubbing 소유자 수락 6/6 PASS / 체크포인트 승인 대기.** feature/subtitles, HEAD/upstream/live remote는 b7a571e098c8e71c6f837dd0c8d345851bd1f2f6다. 일곱 파일의 구현·회귀·수락 문서 변경은 미커밋이며 staging/commit/push/merge하지 않았다([수락·체크포인트](DECISIONS.md#2026-11-16-spectrum-ux-01c-소유자-수락과-체크포인트-감사)).
 
 - ✅ **소유자 수동 수락 6/6 PASS:** 일곱 필드 scrubbing, 클릭·정수 입력, live Preview·Undo/Redo, Escape·포커스 상실 취소, 기존 slider·ColorPicker, 기존 Preview 회귀를 소유자가 직접 PASS로 보고했다. 이번 소유자 보고는 아래 01B 자동 검증과 별개이며 01C에서 새 빌드·테스트·앱 조작은 하지 않았다.
@@ -430,7 +450,7 @@ native finish 정지 시 job/temp/scope/slot도 계속 대기하므로 hard time
 ### S.6 프로젝트 보호·안정화 (단계 6) — 열린 문제 목록
 
 - ✅ **SPECTRUM-UX-01B 시험한 여섯 조건의 소유자 수락 6/6 PASS(2026-11-16):** 일곱 필드 scrubbing·직접 정수 입력·live Preview/Undo·취소·기존 slider/ColorPicker·Preview 회귀를 소유자가 PASS로 보고했다. native 7 FAIL/4 SKIP·내부 Seek 지연·장시간 성능·전체 parity 미검증을 닫지 않는다([수락 경계](DECISIONS.md#2026-11-16-spectrum-ux-01c-소유자-수락과-체크포인트-감사)).
-- ➡️ **SPECTRUM-ZERO-01 미구현:** 유효한 Digital 0진폭의 최소 요소·초기 paused0 표시를 공유 렌더링 계약에서 다룰 후속 작업이며 현재 nil 의미를 아직 변경하지 않았다. Spectrum 선택/편집 가이드는 필요 시 SPECTRUM-UX-02 제안으로 분리한다([소스 감사](DECISIONS.md#2026-11-16-spectrum-zero-01-미구현-요구와-소스-감사)).
+- ⏳ **SPECTRUM-ZERO-01C 수락·내장 회귀 정리 / 보존 확인 PARTIAL / 체크포인트 승인 대기:** 소유자의 실제 Mac 01B 수락 6/6 PASS를 기록했고 유효한 Digital 무음의 옛 nil 기대값을 실제 내장 검사에서 정리했다. 이번 엔진 85개 전체·실제 내장 overlay 61개 및 관련 앱 회귀가 통과했다. 보호 루트 .DS_Store의 원인 미확인 해시 차이는 현재 파일·증거를 보존한 채 제안에서 제외한다. native 7 FAIL/4 SKIP·내부 Seek 지연·장시간/다른 하드웨어/full parity 미검증·공개 Export 비활성은 유지한다. 선택 가이드/핸들 SPECTRUM-UX-02는 별도 미구현이다([현재 상태](DECISIONS.md#2026-11-17-spectrum-zero-01c-소유자-수락과-회귀-계약-정리)).
 - ✅ **PREVIEW-IMAGE-01B 시험한 동작의 소유자 수락 6/6 PASS(2026-11-16):** 구현·범위별 자동 검증과 별도로 소유자가 macOS에서 여섯 조건을 수동 PASS로 보고했다. 초기 재연결은 준비 상황이며 신규 결함으로 분류하지 않았다. 장시간·다른 하드웨어·전체 Preview/Export parity는 미검증이고 아래 내부 Undo/Redo Seek 성능 조사는 OPEN으로 유지한다([수락과 한계](DECISIONS.md#2026-11-16-preview-image-01c)).
 - ⏳ **PREVIEW-SEEK-01B 내부 설치 지연 조사 OPEN(2026-11-16):** 재구성 완료 후 Undo/Redo seek 중앙값 **53.6→116.2 ms**로 증가했고 ruler seek는 **122.0→63.5 ms**로 개선됐다(각 조건 n=3, 내부 레이어 설치 시각·화면 FPS 아님). 소유자의 시험한 seek 동작 5/5 PASS는 별도 수락이며 이 성능 우려를 해결한 근거가 아니다. 지연 분산·다른 조건·장시간 성능·전체 Preview/Export parity는 미검증, 공개 Spectrum Export는 비활성 유지. native 입력 105 PASS / 7 FAIL / 4 SKIP의 동일 기준선 실패도 유지한다([수락과 한계](DECISIONS.md#2026-11-16-preview-seek-01b-구현과-소유자-수락)).
 - ⏳ SP-6 native Preview 성능 부채(2026-11-13, SP-6D-03): 두께·반응 slider stutter는 소유자 FAIL·원인 미확정. SP-6C-02 요청 병합 잠정 유지, 효과 미입증 Timeline 생략/임시 profiling은 SP-6C-09에서 제거. 위 SP-6D-03 최신 절의 별도 bounded 성능 계획과 한계를 따른다. Format10의 Spectrum-only·혼합 native save/reopen PASS로 이 문제를 닫지 않는다.
