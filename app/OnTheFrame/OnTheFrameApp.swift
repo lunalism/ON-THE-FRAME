@@ -101,7 +101,9 @@ struct OnTheFrameApp: App {
                 Divider()
             }
             CommandMenu("재생") {
-                Button(store.isPlaying ? "일시정지  Space" : "재생  Space") { store.togglePlay() }.disabled(!store.canPlay)
+                Button(store.isPlaying ? "일시정지  Space" : store.playbackRequested ? "재생 대기 취소  Space" : "재생  Space") {
+                    store.togglePlay()
+                }.disabled(!store.canRequestPlayback)
                 Button("이전 프레임  ←") { store.step(-1) }.disabled(store.timeline.isEmpty)
                 Button("다음 프레임  →") { store.step(1) }.disabled(store.timeline.isEmpty)
                 Button("처음으로  Home") { store.pauseForEdit(); store.seek(to: 0) }.disabled(store.timeline.isEmpty)

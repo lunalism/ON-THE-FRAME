@@ -282,7 +282,9 @@ struct PreviewPane: View {
             }
             HStack(spacing: 14) {
                 Button { store.step(-1) } label: { Image(systemName: "backward.frame.fill") }.help("이전 프레임(←)")
-                Button { store.togglePlay() } label: { Image(systemName: store.isPlaying ? "pause.fill" : "play.fill").frame(width: 18) }.help("재생/일시정지(Space)")
+                Button { store.togglePlay() } label: { Image(systemName: store.playbackRequested ? "pause.fill" : "play.fill").frame(width: 18) }
+                    .disabled(!store.canRequestPlayback)
+                    .help(store.playbackRequested && !store.isPlaying ? "재생 대기 취소(Space)" : "재생/일시정지(Space)")
                 Button { store.step(1) } label: { Image(systemName: "forward.frame.fill") }.help("다음 프레임(→)")
                 Text("\(store.settings.timecode(store.playhead)) / \(store.settings.timecode(store.durationFrames))")
                     .font(.system(.body, design: .monospaced)).foregroundStyle(.secondary)

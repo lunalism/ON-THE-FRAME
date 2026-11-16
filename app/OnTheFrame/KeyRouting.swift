@@ -138,7 +138,7 @@ enum KeyRouting {
         guard eventWindowOK(e, store), editorAcceptsShortcuts(store), store.gestureBase == nil else { return e }
         switch action {
         case .playPause:
-            guard store.canPlay else { return e }
+            guard store.canRequestPlayback else { return e }
             store.togglePlay()
         case .stepBackward, .stepForward, .toStart, .toEnd:
             guard !store.timeline.isEmpty else { return e }

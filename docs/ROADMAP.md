@@ -1,5 +1,19 @@
 # 로드맵 — ON THE FRAME
 
+**2026-11-16 · PREVIEW-IMAGE-01C — 구현 완료·소유자 수락 6/6 PASS / 체크포인트 제안 승인 대기.** 기준은 feature/subtitles, 마지막 게시 HEAD/upstream 15c721f596ac0840a1a12d933988bfa7bd86b9dc다. 이미지 재구성 중 Play 의도 보존과 Pause/Toggle·버튼/Space/메뉴의 구현, 관련 회귀 검사와 수락 문서 총 7파일을 단일 체크포인트로 제안한다. 변경은 미커밋이며 staging/commit/push는 실행하지 않는다([구현·자동 검증](DECISIONS.md#2026-11-16-preview-image-01b), [소유자 수락·범위](DECISIONS.md#2026-11-16-preview-image-01c)).
+
+- ✅ **소유자 macOS 수동 수락 6/6 PASS:** 이미지 편집 직후 재생, Undo/Redo 직후 재생, Space·메뉴 재생, 반복 Undo/Redo와 Seek, Pause·Toggle, 기존 Spectrum Seek 회귀를 소유자가 직접 시험해 모두 PASS로 보고했다. 초기 미디어 재연결은 준비 상황으로 기록하며 별도 재현 근거 없이 재연결 자체를 새 결함으로 판정하지 않는다. 아래 자동 검증과 별도의 소유자 보고이며 장시간·다른 하드웨어·전체 Preview/Export 수락으로 확대하지 않는다.
+
+아래 자동 수치는 보존된 PREVIEW-IMAGE-01B 증거의 기존 보고다. 이번 PREVIEW-IMAGE-01C에서는 빌드·테스트를 재실행하지 않았다.
+
+- ✅ **기존 01B 집중 자동 검증 보고 130 PASS / 0 FAIL / 0 SKIP:** 보류 재생 한 번 소비, Pause 취소, 반복 Play, Toggle parity, 구세대·프로젝트·item 교체/실패, 설치 seek, AppKit 문맥 로컬 Space와 텍스트 입력 보호. 소유자 손 입력 검사가 아니다.
+- ✅ **기존 01B 동일 재생 58사례 최초 요청 성공 7→58건:** 두 계열 A–H 각 3회와 준비 완료/구세대/queued 대조다. 보류 51건은 각 한 번 소비되고 준비 전 transport 시작 및 표본 651개의 승인 PTS 불일치는 0이었다. 실제 화면 표시 시각이나 전체 Preview 검증을 뜻하지 않는다.
+- ✅ **기존 01B 빌드 회귀 보고:** playback 146(임시 nil 검사 23 포함), Draft/Store/persistence 223, overlay 58 모두 PASS. Seek 오디오/이미지 9개씩 총 18/18 캡처 완료, 잘못된 frame/PTS·nil 중 표시 0표본, authoritative style raster 66/66 일치다.
+- **자원·검사 한계:** 성공한 첫/최종 signed Debug를 모두 보존했다. 메모리 압력으로 A–H 배치를 35사례 뒤 중지하고 정상 압력 회복 후 남은 19사례를 별도 프로세스에서 완료했다. 첫 background 집중 검사 120 PASS/7 FAIL은 AppKit 문맥의 최종 130 PASS와 구분하며 보조 프로브 컴파일 실패도 보존했다. 이 자동 계측은 물리 입력이나 화면 scan-out 계측이 아니며 수동 수락은 위 소유자 보고에 따로 근거한다.
+- ⏳ **남은 성능 조사·미검증:** 소유자 6/6 수락과 별도로 내부 Undo/Redo Seek 53.6→116.2 ms 우려는 OPEN이다. 장시간 성능·다른 미디어/하드웨어·전체 Preview/Export parity는 미검증이며 공개 Spectrum Export는 계속 비활성이다.
+
+아래 PREVIEW-SEEK-01C 단락은 당시 체크포인트 준비 이력이다. 해당 체크포인트의 현재 게시 HEAD는 위 15c721f596ac0840a1a12d933988bfa7bd86b9dc이며 이번 6/6 수락은 소유자의 직접 보고에 별도 근거하며 아래 당시 기록을 소급 변경하지 않는다.
+
 **2026-11-16 · PREVIEW-SEEK-01C — 구현 완료·소유자 수락 기록 / 체크포인트 승인 대기.** 기준은 `feature/subtitles`, 게시 HEAD/upstream `c96a8f6f5cb9418ddb36fddc1e3e66344d0cfd38`다. PREVIEW-SEEK-01B의 임시 timing `nil` 처리 수정은 유효한 작업·결과를 기존 상한 안에서 보존하고, 복귀 시 정확한 현재 프레임과 원본 정체성을 재검증한다. 새 seek·세션/item/소스 교체 등 기존 definitive invalidation은 유지한다. 구현·회귀 3파일과 DECISIONS/ROADMAP 2파일, 총 **5파일**의 단일 로컬 체크포인트를 제안하며 staging·commit·push는 별도 승인 전까지 하지 않는다. 아래 이전 체크포인트·PARTIAL 기록은 당시 이력이다.
 
 - ✅ **시험한 동작의 소유자 수락 5/5 PASS:** 일반 ruler seek, seek 직후 즉시 재생, 재생 중 seek, 빠른 연속 seek, Undo/Redo 후 seek. 소유자는 PREVIEW-SEEK-01B Debug 앱의 이 다섯 조건에서 눈에 띄는 Spectrum 공백·비정상 동작을 느끼지 않았다고 보고했다. 모든 seek 조건·하드웨어·장시간 성능 수락으로 확대하지 않는다([결정·수락 범위](DECISIONS.md#2026-11-16-preview-seek-01b-구현과-소유자-수락)).
@@ -396,6 +410,7 @@ native finish 정지 시 job/temp/scope/slot도 계속 대기하므로 hard time
 
 ### S.6 프로젝트 보호·안정화 (단계 6) — 열린 문제 목록
 
+- ✅ **PREVIEW-IMAGE-01B 시험한 동작의 소유자 수락 6/6 PASS(2026-11-16):** 구현·범위별 자동 검증과 별도로 소유자가 macOS에서 여섯 조건을 수동 PASS로 보고했다. 초기 재연결은 준비 상황이며 신규 결함으로 분류하지 않았다. 장시간·다른 하드웨어·전체 Preview/Export parity는 미검증이고 아래 내부 Undo/Redo Seek 성능 조사는 OPEN으로 유지한다([수락과 한계](DECISIONS.md#2026-11-16-preview-image-01c)).
 - ⏳ **PREVIEW-SEEK-01B 내부 설치 지연 조사 OPEN(2026-11-16):** 재구성 완료 후 Undo/Redo seek 중앙값 **53.6→116.2 ms**로 증가했고 ruler seek는 **122.0→63.5 ms**로 개선됐다(각 조건 n=3, 내부 레이어 설치 시각·화면 FPS 아님). 소유자의 시험한 seek 동작 5/5 PASS는 별도 수락이며 이 성능 우려를 해결한 근거가 아니다. 지연 분산·다른 조건·장시간 성능·전체 Preview/Export parity는 미검증, 공개 Spectrum Export는 비활성 유지. native 입력 105 PASS / 7 FAIL / 4 SKIP의 동일 기준선 실패도 유지한다([수락과 한계](DECISIONS.md#2026-11-16-preview-seek-01b-구현과-소유자-수락)).
 - ⏳ SP-6 native Preview 성능 부채(2026-11-13, SP-6D-03): 두께·반응 slider stutter는 소유자 FAIL·원인 미확정. SP-6C-02 요청 병합 잠정 유지, 효과 미입증 Timeline 생략/임시 profiling은 SP-6C-09에서 제거. 위 SP-6D-03 최신 절의 별도 bounded 성능 계획과 한계를 따른다. Format10의 Spectrum-only·혼합 native save/reopen PASS로 이 문제를 닫지 않는다.
 - ⏳ A-010 프리뷰 경로 프레임 0 불일치(가끔, 원인 미확정, E2와 별개): [diagnostics/A-010-preview-frame0.md](diagnostics/A-010-preview-frame0.md).

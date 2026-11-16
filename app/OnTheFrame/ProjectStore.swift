@@ -102,6 +102,8 @@ final class ProjectStore {
     /// 타임라인 확대(프레임당 포인트). 보기를 다시 만들어도 유지한다.
     var timelineZoom: Double = 2
     private(set) var isPlaying = false
+    /// A queued Play changes the next toggle action, never the active transport state.
+    var playbackRequested: Bool { isPlaying || pendingImagePlay != nil }
     private(set) var imagePreviewError: String?
     var statusMessage: String?
     /// 표시 중인 알림(관찰·검사용 사본). 실제 표시는 AlertPresenter(AppKit 시트)가 맡고,
@@ -224,7 +226,9 @@ final class ProjectStore {
 
     let player = AVPlayer()
     /// 프리뷰 재구성 세대. 편집마다 1 늘고, 마지막 세대의 결과만 적용한다.
-    private(set) var generation = 0
+    private(set) var generation = 0 {
+        didSet { if generation != oldValue { invalidateImagePlaybackReconstruction() } }
+    }
     /// 프리뷰에 적용된 세대(재구성·탐색까지 끝난 것)
     private(set) var appliedGeneration = 0
     #if DEBUG
@@ -347,6 +351,17 @@ final class ProjectStore {
     }
 
     var canPlay: Bool { !timeline.isEmpty && player.currentItem != nil }
+    /// Keep canPlay's existing item-availability meaning for readiness consumers.
+    var canRequestPlayback: Bool {
+        if let rebuilding = imagePlaybackReconstruction, isCurrentImagePlaybackReconstruction(rebuilding) {
+            return !timeline.isEmpty
+        }
+        if Self.imageImportEnabled && InternalImagePreview.containsImages(timeline) {
+            return canPlay && imagePreviewEligibility(for: player.currentItem, session: projectSession,
+                                                     generation: generation) == .validatedAtInstallation
+        }
+        return canPlay
+    }
     var canSplit: Bool { !timeline.isEmpty && editorFocused && alert == nil && gestureBase == nil }
 
     /// ⌘Z: 편집기에 초점이 있으면 타임라인 실행 취소, 텍스트 입력·다른 창이면 응답자 체인(표준 텍스트 실행 취소)
@@ -1941,6 +1956,7 @@ final class ProjectStore {
     }
 
     private func invalidateImageEligibility(_ state: ImagePreviewEligibility) {
+        invalidateImagePlaybackReconstruction()
         invalidateImagePlaybackAccess()
         appliedImagePreview = nil
         imageEligibilityState = state
@@ -1948,13 +1964,82 @@ final class ProjectStore {
 
     @ObservationIgnored private var imagePreviewTask: Task<Void,Never>?
     @ObservationIgnored private var imagePreviewCache = InternalImagePreview.Cache()
+    /// One replacement lifecycle, not a queue or an owner of retired items/images.
+    @MainActor private final class ImagePlaybackReconstruction {
+        let project: UUID
+        let session, generation: Int
+        weak var item: AVPlayerItem?
+        var installed = false
+        var seekToken: Int?
+        var seekFinished: Bool?
+        var itemObservation, statusObservation: NSKeyValueObservation?
+        init(project: UUID, session: Int, generation: Int) {
+            self.project = project; self.session = session; self.generation = generation
+        }
+    }
+    @ObservationIgnored private var imagePlaybackReconstruction: ImagePlaybackReconstruction?
+    private var pendingImagePlay: ImagePlaybackReconstruction?
+
+    private func isCurrentImagePlaybackReconstruction(_ rebuilding: ImagePlaybackReconstruction) -> Bool {
+        guard imagePlaybackReconstruction === rebuilding, rebuilding.project == projectID,
+              rebuilding.session == projectSession, rebuilding.generation == generation,
+              !editorClosedByUser, !discardConfirmed, pendingImageRelinkID == nil else { return false }
+        if rebuilding.installed {
+            guard let item = rebuilding.item else { return false }
+            return player.currentItem === item
+        }
+        return player.currentItem == nil
+    }
+
+    /// An older task/observer may retire only its own lifecycle, never the next one.
+    private func invalidateImagePlaybackReconstruction(_ expected: ImagePlaybackReconstruction? = nil) {
+        if let expected, imagePlaybackReconstruction !== expected { return }
+        pendingImagePlay = nil
+        imagePlaybackReconstruction?.itemObservation = nil
+        imagePlaybackReconstruction?.statusObservation = nil
+        imagePlaybackReconstruction = nil
+    }
+
+    private func finishImagePlaybackReconstruction(_ rebuilding: ImagePlaybackReconstruction) {
+        guard imagePlaybackReconstruction === rebuilding else { return }
+        guard isCurrentImagePlaybackReconstruction(rebuilding) else {
+            invalidateImagePlaybackReconstruction(rebuilding); return
+        }
+        guard let item = rebuilding.item else { return }
+        guard item.status != .failed, rebuilding.seekFinished != false else {
+            invalidateImagePlaybackReconstruction(rebuilding); return
+        }
+        guard rebuilding.seekFinished == true else { return }
+        guard rebuilding.seekToken == seekToken else {
+            invalidateImagePlaybackReconstruction(rebuilding); return
+        }
+        // KVO supplies a readiness event if the exact seek finishes before status.
+        guard item.status == .readyToPlay else { return }
+        guard imagePreviewEligibility(for: item, session: rebuilding.session,
+                                      generation: rebuilding.generation) == .validatedAtInstallation else {
+            invalidateImagePlaybackReconstruction(rebuilding); return
+        }
+        let shouldPlay = pendingImagePlay === rebuilding
+        invalidateImagePlaybackReconstruction(rebuilding)
+        if shouldPlay {
+            #if DEBUG
+            imagePlayIntentApplicationsForTest += 1
+            #endif
+            startPlayback()
+        }
+    }
     #if DEBUG || OTF_PREVIEW_COMPAT_TESTS
     @ObservationIgnored var imageSourceValidatedForTest: ((UUID) -> Void)?
     @ObservationIgnored var imagePreviewPreparedForTest: ((Int) async -> Void)?
+    @ObservationIgnored var imagePreviewSeekCompletedForTest: ((Int, Bool) async -> Void)?
     @ObservationIgnored private(set) var imagePreviewStaleDropsForTest = 0
     func imagePreviewCacheStatisticsForTest() async -> InternalImagePreview.Cache.Statistics {
         await imagePreviewCache.statistics
     }
+    #endif
+    #if DEBUG
+    var imagePlayIntentPendingForTest: Bool { pendingImagePlay != nil }
+    @ObservationIgnored private(set) var imagePlayIntentApplicationsForTest = 0
     #endif
 
     /// 타임라인이 바뀌면 composition을 다시 만들고 오래된 결과는 버린다.
@@ -2075,7 +2160,7 @@ final class ProjectStore {
               revision == ProjectPersistence.imageRevision(timeline, mediaID: id) else { return }
 
         imageAccessRevision &+= 1
-        if appliedImagePreview != nil { invalidateImageEligibility(.invalidated) }
+        if !available || appliedImagePreview != nil { invalidateImageEligibility(.invalidated) }
         let reason = available ? nil : "이미지 원본을 검증하지 못했습니다(없음·권한·변경)."
         missingMedia[id] = reason
         // A later timeline rebuild can restore this revision's access binding again.
@@ -2100,6 +2185,13 @@ final class ProjectStore {
         previewHost?.spectrumOverlay.invalidate(forgetFrame:true)
         dropStill();updateWindowDocumentState()
         playhead=min(playhead,snap.durationFrames)
+        let rebuilding = ImagePlaybackReconstruction(project: projectID, session: session, generation: g)
+        imagePlaybackReconstruction = rebuilding
+        rebuilding.itemObservation = player.observe(\.currentItem, options: [.new]) { [weak self, weak rebuilding] _, _ in
+            Task { @MainActor [weak self, weak rebuilding] in
+                if let rebuilding { self?.finishImagePlaybackReconstruction(rebuilding) }
+            }
+        }
         imagePreviewTask=Task { @MainActor [weak self] in
             await previous?.value
             guard let self,!Task.isCancelled,g==self.generation,session==self.projectSession else{return}
@@ -2118,17 +2210,30 @@ final class ProjectStore {
                     #if DEBUG || OTF_PREVIEW_COMPAT_TESTS
                     self.imagePreviewStaleDropsForTest += 1
                     #endif
+                    self.invalidateImagePlaybackReconstruction(rebuilding)
                     return
                 }
                 let item=AVPlayerItem(asset:plan.composition);item.videoComposition=plan.videoComposition;item.audioMix=plan.audioMix
+                rebuilding.item = item; rebuilding.installed = true
                 self.currentPlan=plan;self.player.replaceCurrentItem(with:item)
+                rebuilding.statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self, weak rebuilding] _, _ in
+                    Task { @MainActor [weak self, weak rebuilding] in
+                        if let rebuilding { self?.finishImagePlaybackReconstruction(rebuilding) }
+                    }
+                }
                 self.previewHost?.setSubtitles(snap.renderedSubtitles,durationFrames:snap.durationFrames,fps:Double(s.fps),item:item)
                 self.observeEnd(item)
                 self.seekToken &+= 1
                 let token=self.seekToken,frame=min(self.playhead,max(0,snap.durationFrames-1))
+                rebuilding.seekToken = token
                 self.previewHost?.subtitleSeekRequested(token:token,frame:frame)
                 let finished=await self.player.seek(to:s.time(frame),toleranceBefore:.zero,toleranceAfter:.zero)
-                guard !Task.isCancelled,g==self.generation,session==self.projectSession,self.player.currentItem === item else{return}
+                #if DEBUG || OTF_PREVIEW_COMPAT_TESTS
+                await self.imagePreviewSeekCompletedForTest?(g, finished)
+                #endif
+                guard !Task.isCancelled,g==self.generation,session==self.projectSession,self.player.currentItem === item else{
+                    self.invalidateImagePlaybackReconstruction(rebuilding); return
+                }
                 self.appliedGeneration=g
                 if finished, plan.isImagePreviewOnly, self.currentPlan?.composition === plan.composition,
                    accessRevision == self.imageAccessRevision {
@@ -2140,6 +2245,8 @@ final class ProjectStore {
                 }
                 self.previewHost?.subtitleSeekFinished(token:token,frame:frame,finished:finished)
                 self.previewHost?.spectrumOverlay.refresh()
+                rebuilding.seekFinished = finished
+                self.finishImagePlaybackReconstruction(rebuilding)
             } catch {
                 guard !Task.isCancelled,g==self.generation,session==self.projectSession else{return}
                 self.invalidateImageEligibility(.failed)
@@ -2159,13 +2266,25 @@ final class ProjectStore {
         }
     }
 
-    func togglePlay() { isPlaying ? pause() : play() }
+    func togglePlay() { playbackRequested ? pause() : play() }
     func play() {
         #if DEBUG
         SpectrumContinuityTrace.record(60, Int64(playhead), Int64(projectSession), Int64(generation))
         #endif
         commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
-        guard !timeline.isEmpty, player.currentItem != nil else { return }
+        guard !timeline.isEmpty else { return }
+        if let rebuilding = imagePlaybackReconstruction {
+            guard isCurrentImagePlaybackReconstruction(rebuilding) else {
+                invalidateImagePlaybackReconstruction(rebuilding); return
+            }
+            if pendingImagePlay !== rebuilding { pendingImagePlay = rebuilding }
+            finishImagePlaybackReconstruction(rebuilding)
+            return
+        }
+        guard canRequestPlayback, player.currentItem != nil else { return }
+        startPlayback()
+    }
+    private func startPlayback() {
         if playhead >= timeline.durationFrames { seek(to: 0) }
         player.play(); setPlaying(true)
     }
@@ -2174,17 +2293,26 @@ final class ProjectStore {
         SpectrumContinuityTrace.record(61, Int64(playhead), Int64(projectSession), Int64(generation))
         #endif
         let wasPlaying = isPlaying
+        let awaitingImage = imagePlaybackReconstruction != nil
+        pendingImagePlay = nil
         player.pause(); setPlaying(false)
+        // A nil or not-yet-sought replacement has no authoritative playhead yet.
+        if awaitingImage && !wasPlaying { return }
         playhead = min(settings.frame(containing: player.currentTime()), timeline.durationFrames)
         if wasPlaying, !timeline.spectra.isEmpty, previewHost?.hasPendingSpectrumSeek == false { seek(to: playhead) }
     }
-    func pauseForEdit() { if isPlaying { pause() } }
+    func pauseForEdit() { pendingImagePlay = nil; if isPlaying { pause() } }
     func step(_ k: Int) { pauseForEdit(); seek(to: playhead + k) }
     @ObservationIgnored private(set) var seekToken = 0
     func seek(to frame: Int) {
         #if DEBUG
         SpectrumContinuityTrace.record(62, Int64(frame), Int64(projectSession), Int64(generation))
         #endif
+        // An external seek supersedes an installed replacement's initial seek.
+        // Planning without an item still uses the latest playhead at installation.
+        if let rebuilding = imagePlaybackReconstruction, rebuilding.installed {
+            invalidateImagePlaybackReconstruction(rebuilding)
+        }
         if hasPendingSubtitleEdits, frame != playhead { commitInlineEditIfAny() }   // 재생 헤드를 옮기면 글 편집 확정(§44)
         let f = max(0, min(frame, timeline.durationFrames))
         previewHost?.spectrumOverlay.flushPendingStyleBeforeTransition()
@@ -2208,6 +2336,7 @@ final class ProjectStore {
 
     /// 재생 중에만 디스플레이 유휴 절전을 막는다(E3-1: 디스플레이가 꺼지면 화면 표시가 멈춤).
     private func setPlaying(_ p: Bool) {
+        if !p { pendingImagePlay = nil }
         if p { previewHost?.spectrumOverlay.flushPendingStyleBeforeTransition() }
         if let host = previewHost, host.window != nil, let item = player.currentItem {
             spectrumPreview.playback.prepareForTransition(item: item, view: host)
@@ -2446,6 +2575,7 @@ final class ProjectStore {
     }
     /// 대기 중 작업을 버리고 진행 중인 가져오기·내보내기를 취소한다(버리기·창 닫기)
     private func abandonBackgroundWork() {
+        invalidateImagePlaybackReconstruction()
         pendingOps.removeAll()
         cancelImport()
         cancelExport()
