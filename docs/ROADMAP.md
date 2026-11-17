@@ -1,5 +1,48 @@
 # 로드맵 — ON THE FRAME
 
+## 현행 기능과 검증 경계
+
+**2026-11-17 · DOC-ALIGN-01 문서 정렬.** 소유자가 확정한 방향은 macOS **Composition-first Music Visual Editor**다. 음악 중심의 이미지·영상·오디오 구성, 자막·오디오 반응형 Spectrum, Preview·최종 영상 내보내기를 우선한다. 현재 완전한 Composition 시스템이나 After Effects 전체 기능이 구현됐다는 뜻은 아니다. 고급 전환은 **유보**한다([방향·문서 권위 amendment](DECISIONS.md#2026-11-17-doc-align-01-현행-방향과-문서-정렬)).
+
+| Git 구분 | 확인한 기준 |
+| --- | --- |
+| 게시된 feature/subtitles / origin/feature/subtitles / live remote | f2b80444b439ad59a3870da3350a1385d388552a, ahead/behind 0/0 |
+| 현재 문서 브랜치 | docs/audit-alignment-20261117, 위 feature 커밋에서 시작. 문서 정렬 변경은 미커밋·미스테이징 |
+| local main | 44943eadabdf5a37d5242d614e7279813126dfde, 자동 변경하지 않음 |
+| live remote main | fe79fd91997eebb951315a9e398942e6711ec2ae. 소유자가 GitHub 웹에서 이전 feature 기준30e02a54를 병합했다고 확인. 해당 기준과 tree 동일 |
+
+**상태 용어:** 구현 / 자동 검증 보고 / 소유자 수동 수락 / 커밋·게시 / 부분 / 미해결 / 미구현 / 유보는 별도 판정이다. 아래 소유자 수락과 자동 수치는 각 과거 실행의 범위이며 이번 문서 정렬에서 재실행하지 않았다. 공개 Release 지원·장시간·다른 하드웨어·전체 parity로 확대하지 않는다.
+
+| 게시된 체크포인트 | 커밋 | 수락·검증 상태 |
+| --- | --- | --- |
+| PREVIEW-SEEK-01 | 15c721f596ac0840a1a12d933988bfa7bd86b9dc | 구현·자동 검증 보고·시험한 seek 시나리오 owner 5/5 PASS·게시. 내부 Undo/Redo 지연 조사는 OPEN |
+| PREVIEW-IMAGE-01 | b7a571e098c8e71c6f837dd0c8d345851bd1f2f6 | playback intent 구현·자동 검증 보고·owner 6/6 PASS·게시 |
+| SPECTRUM-UX-01 | 30e02a54ae67e36959d8baef10f04dd01e3d8eef | 7필드 직접 scrub 구현·자동 검증 보고·owner 6/6 PASS·게시 |
+| GIT-HYGIENE-01 | 783ae4ba3a765b0e7f58d68a7af7b95099fd2efd | .DS_Store 무시 규칙만 게시. 로컬 파일을 삭제한 작업이 아님 |
+| SPECTRUM-ZERO-01 | f2b80444b439ad59a3870da3350a1385d388552a | 공유 zero 점·실제 내장 overlay 정정·자동 검증 보고·owner 6/6 PASS·게시 |
+
+| 현재 기능 | 구현과 노출·검증 경계 |
+| --- | --- |
+| 미디어·타임라인 | 영상·오디오 가져오기, 여러 레인·연결·트림·분할·이동·복사/붙여넣기·변형·오디오 gain/mute/fade·Undo/Redo 구현. 모든 포맷 지원을 뜻하지 않음 |
+| 이미지 | DEBUG && OTF_IMAGE_IMPORT 빌드와 -OTFEnableImageImport 실행 인수 모두 필요. 한정된4096px/ICC·Display P3 입력과 ColorSync→sRGB Preview 표현. 원본·전체 해상도 descriptor는 보존하며 검증/Preview용 일시적 proxy의 긴 변은 최대2048px다. full-resolution 4K Preview/Export·무제한 이미지·공개 Release 지원 아님 |
+| 자막 | 글·모양·효과·Preview·자막 포함 일반 Export 구현. 전체 Preview/Export parity 수락과 별개 |
+| Spectrum 생성·소스 | 생성은 Debug 전용. 기존 항목의 소스 선택·계보·이동·트림·편집은 별도 경로. sourceKey·시간/소스 매핑과 겹침/누락 판정 유지 |
+| Spectrum 숫자 | 7개 필드 정수 UI·숫자 자체 mouse scrub·live Preview·한 gesture Undo·취소 구현. untouched legacy milli를 몰래 정수화하지 않음. 기존 slider·ColorPicker 유지 |
+| Digital / Analog | Digital 양수 막대와 Analog 유지. 유효하게 완료된 정확한0높이 Digital은 기존 중심·밴드 수·두께·색·알파의 독립 점. missing/pending/stale·비활성 구간을 가짜 무음으로 바꾸지 않음 |
+| Seek·이미지 playback | temporary timing nil에서 eligible Spectrum 작업 보존, exact PTS/token/source/generation/revision/epoch 검증 유지. 이미지 재구성 중 Play는 session/generation/item/readiness/seek 확인 뒤1회 소비, Pause·무효화로 취소 |
+| 저장·열기 | 앱 persistence·image-aware codec·raw ProjectFile의 범위를 구분. [현행 형식 표](PRODUCT.md#현행-프로젝트-형식과-기능-경계)를 따르며 일괄 Format10 저장/모든 decoder의1–10 호환으로 설명하지 않음 |
+| Export | 일반 자막 포함 FHD30 SDR H.264/AAC 경로와 gated 내부 이미지·Spectrum 검증을 구분. **공개 Spectrum Export 비활성**. 내부 shared renderer 증거로 전체 parity를 선언하지 않음 |
+
+01C의 기존 실제 실행 보고: engine85·실제 내장 overlay61·zero Preview23·playback146·image intent130·scrub138·Draft/Store223 각각 PASS/0 FAIL/0 SKIP, Seek18/18 캡처·raster66/66 일치. Native Inspector는138 PASS/7 FAIL/4 SKIP이며 같은 기준선 실패가 남는다. 실제 내장 결과와 이전 진단 복사본·초기 실행기 오류·소유자 수락을 구분한 원본 기록은 아래에 보존한다. Preview/내부 Export의5프레임 비교·31프레임 prepare·120프레임 checkpoint는 한정된 증거다.
+
+**OPEN:** Native Inspector7 FAIL/4 SKIP, 내부 Undo/Redo Seek 설치 지연53.6→116.2ms median 조사(화면FPS 아님), 장시간 성능·다른 하드웨어·full Preview/Export parity 미검증, 공개 Spectrum Export 비활성. A-010 등 기존 독립 문제는 §S.6에서 그대로 추적한다. 과거01C의 .DS_Store 차이와 PARTIAL은 당시 보존 검사 기록이며 현재 체크포인트가 미게시라는 뜻이 아니다.
+
+후속 **미구현 계획 순서**는 SPECTRUM-UX-02 → SPECTRUM-FX-01 → SPECTRUM-FX-02 → SPECTRUM-SHADOW-01이다. UX-02의 별도 선택 가이드/핸들 제안과 각 FX의 상세 의미·파라미터·단계별 구현 승인은 구분한다. 이 순서만으로 새 효과나 모델 필드를 확정하지 않는다. 빌드·시험 전에는 [승인 절차와 자원 안전](../app/README.md#현재-실행-승인과-자원-안전)을 먼저 확인한다.
+
+## 이전 실행·수락 기록
+
+아래 날짜별 “현재”, 미커밋·승인 대기·PARTIAL은 작성 당시의 상태다. 기존 결정·실패·검증 범위를 보존하며 최신 게시·기능 판정은 위 현행 표를 따른다. §S의 현행 요약도 위 표와 함께 읽는다.
+
 **2026-11-17 · SPECTRUM-ZERO-01C — 소유자 수락 6/6 PASS / 실제 내장 overlay 61 PASS / 보존 확인 PARTIAL / 11파일 체크포인트 승인 대기.** feature/subtitles @ 30e02a54ae67e36959d8baef10f04dd01e3d8eef, upstream/live remote와 일치한다. 기존 구현·회귀·문서 11파일을 단일 커밋으로 제안하며 staging/commit/push는 하지 않았다([수락·회귀 경계](DECISIONS.md#2026-11-17-spectrum-zero-01c-소유자-수락과-회귀-계약-정리)).
 
 - ✅ **소유자 수동 수락 6/6 PASS:** paused 0초 점, 모양·간격·색, 음악 반응, 활성 구간, 편집·Undo/Redo, 기존 Seek·이미지 재생을 실제 Mac의 01B에서 확인했다는 소유자 보고다. 자동 결과·장시간·다른 하드웨어·전체 parity 수락과 구분한다.
@@ -399,8 +442,8 @@ native finish 정지 시 job/temp/scope/slot도 계속 대기하므로 hard time
 - ✅ 제품 정의·결정 기록·로드맵·환경 문서 작성(0단계 문서). [D] 제품 방향 D-011~D-017.
 - ➡️ 로드맵 단계 구성과 각 완료 기준 승인(P-001, 제안 그대로).
 - ➡️ 기술 스택(O-02)·최소 macOS·CPU(O-01). 현재 구현은 Swift + AVFoundation, 배포 대상 macOS 15(잠정, M1 선택)이며 P-003·P-004 승인이 아니다.
-- ➡️ 입출력 포맷·해상도·프레임레이트·HDR 정책(O-03, O-04), 성능 기준(O-09), 프리뷰·내보내기 일치 판정 기준(O-11; M1은 블록 PSNR 방법을 적용, A-009), UI 언어(O-07), 접근성(O-10), 일반 컷 편집 추가 범위(O-13), 스펙트럼 모양·소스 세부(O-05, O-12).
-- ✅ 프로젝트 파일 포맷(O-06 → D-023): `.ontheframe` 버전 있는 JSON. 이후 스키마 결정은 따로 없다.
+- ➡️ 입출력 포맷·해상도·프레임레이트·HDR 정책(O-03, O-04), 성능 기준(O-09), 프리뷰·내보내기 일치 판정 기준(O-11), UI 언어(O-07), 접근성(O-10)은 잔여 질문이다. Spectrum의 승인된 모드·소스·계보·정수 편집과 남은 defaults/FX 질문은 [현행 결정 amendment](DECISIONS.md#2026-11-17-doc-align-01-현행-방향과-문서-정렬)로 구분한다. 고급 전환은 유보한다.
+- ✅ 프로젝트 파일 포맷(O-06 → D-023과 후속 승인): `.ontheframe` 버전 있는 JSON, 자막·효과·계보·이미지·반응 강도의 후속 형식5–10 기록이 있다. [앱 persistence와 raw codec 표](PRODUCT.md#현행-프로젝트-형식과-기능-경계)를 따르며 새로운 형식을 도입한 문서 변경이 아니다.
 - [D] 지원 목표: 최대 3시간 프로젝트(D-015)와 4K 편집·내보내기(D-016)는 받아들인 **지원 목표**이며 입증된 능력이 아니다. 선택 확장 후보가 아니다. 검증(§S.2의 E3) 전에는 지원을 주장하지 않는다.
 
 ### S.2 기술 검증 실험 (실험 코드, 제품 코드 아님)
@@ -426,10 +469,12 @@ native finish 정지 시 job/temp/scope/slot도 계속 대기하므로 hard time
 - ✅ 체크포인트 전 리뷰 결함 수정(`8b01322`).
 - ✅ 프로젝트 열기 ↔ 저장하지 않은 변경 확인 흐름(`9d14a9f`): 소유자가 처음 보고한 저장·열기 증상이 해결되었다고 정성 보고. 실제 저장 패널 확인 뒤 열기 경로는 자동 검사하지 않았다(모의 결과만).
 - ✅ 타임라인 클립 복사·붙여넣기(`51cef3c`, R-02): 단일 선택 + 연결된 짝, 앱 안 클립보드. 소유자 정성 보고 네 가지(재생 헤드에 연결 쌍 붙여넣기, 실행 취소·다시 실행, 같은 위치 반복 붙여넣기가 겹치지 않는 맞는 레인 사용, 텍스트 칸 복사·붙여넣기). 엔진 전체 테스트는 통과가 아니다(§S.6).
-- ➡️ 이미지 가져오기와 배치(R-01): **정상 import UI는 미구현이며 원 요구사항은 미충족**. 엔진 편집·정상 format-9 persistence와 내부 게이트 import/preview를 구현·한정 검증했다. 공개 import UI·이미지 export는 미지원이며 owner native-panel/음성·전체 workflow와 창 생성 문제는 남아 있다(상단 IMG-CP-08 최신 기록).
-- 단계 2 완료 기준(아래 §2, 제안) 가운데 이미지 가져오기가 남아 있어 단계 2는 완료가 아니다.
+- ⏳ 이미지 가져오기와 배치(R-01): **gated Debug import·명시적 배치·편집·Preview·내부 Export는 한정 구현·검증됐지만 공개 Release workflow 완료는 아니다.** Format9 도입과 후속 Format10·고해상도/P3 경계는 [현행 표](#현행-기능과-검증-경계)를 따른다. CP-08 당시 native-panel/창 문제와 뒤 WINDOW·CP-14F 등의 보정·수락은 날짜별 이력으로 구분하며 전체 workflow 수락으로 일반화하지 않는다.
+- 단계 2의 제안 완료 기준을 현재 Release 지원 완료로 선언하지 않는다. 제한된 이미지 구현과 남은 공개·전체 workflow 검증을 별도로 추적한다.
 
 ### S.4 소유자 승인 순서 (D-028, D-029)와 그 뒤
+
+아래 번호와 긴 진행 문장은 D-028 이후의 날짜별 도입 이력이다. 당시 미구현·수락 대기를 현재 미구현 목록으로 읽지 않는다. 2026-11-17의 구현·노출·검증·게시 상태와 후속 계획은 [현행 표](#현행-기능과-검증-경계)를 따른다.
 
 1. ✅ 타임라인 클립 복사·붙여넣기(§S.3).
 2. ✅ 단축키 목록 정리와 V·C 도구 전환(D-027, D-030, 2026-10-11 커밋, [app/README.md](../app/README.md) §27). 자동: `tool-test` 32개(합성 이벤트)·관련 회귀·엔진 분할 테스트 통과(엔진 전체는 통과로 확인되지 않음). 소유자 수동 확인 다섯 가지 통과(소유자 보고: 툴바·가위 커서, 안내선, 연결 쌍 자르기·실행 취소, V 동작, 실제 한국어 입력 소스·텍스트 칸). 범위는 선택·자르기 도구이며, 더 넓은 도구·단축키는 각 기능과 함께 넣는다(D-027). 흔히 쓰는 기본 단축키를 대응 기능에 쓰고, 사용자에게 보이는 이름·도움말은 ON THE FRAME의 기능과 키로 설명한다(비교 상표 없이, 완전 호환 주장 없음). 각 도구의 정확한 동작은 그 작업에서 정한다.
@@ -444,13 +489,13 @@ native finish 정지 시 job/temp/scope/slot도 계속 대기하므로 hard time
 ### S.5 통합 내보내기 (단계 5)
 
 - ✅ 지금 내용(영상 레인·소리 레인·변형·클립 소리)의 FHD 30 fps SDR H.264/AAC MP4 내보내기: 진행률·취소·실패 안내·출력 보호·섞인 소리 트랙 하나.
-- ➡️ 자막·스펙트럼을 포함한 내보내기(§S.4의 3·4에 따름), 일치 판정 기준(O-11), 출력 정책(O-03, O-04).
-- 한계(소스 확인): 영상 원본 없이 소리 파일만 있으면 내보내기를 막는다.
+- ✅ 자막·효과를 포함한 일반 내보내기 경로 구현. ⏳ Spectrum은 내부 Debug slice의 한정 검증만 있고 **공개 Export는 비활성**이다. 전체 일치 판정(O-11)·출력 정책(O-03, O-04)·full Preview/Export parity는 열린 상태다.
+- 한계(소스 확인): 일반 temporal 경로는 소리 파일만 있는 경우 내보내기를 막는다. gated 내부 이미지 경로의 영상 carrier·원본 검증은 별도이며 공개 이미지/Spectrum 지원으로 확대하지 않는다.
 
 ### S.6 프로젝트 보호·안정화 (단계 6) — 열린 문제 목록
 
 - ✅ **SPECTRUM-UX-01B 시험한 여섯 조건의 소유자 수락 6/6 PASS(2026-11-16):** 일곱 필드 scrubbing·직접 정수 입력·live Preview/Undo·취소·기존 slider/ColorPicker·Preview 회귀를 소유자가 PASS로 보고했다. native 7 FAIL/4 SKIP·내부 Seek 지연·장시간 성능·전체 parity 미검증을 닫지 않는다([수락 경계](DECISIONS.md#2026-11-16-spectrum-ux-01c-소유자-수락과-체크포인트-감사)).
-- ⏳ **SPECTRUM-ZERO-01C 수락·내장 회귀 정리 / 보존 확인 PARTIAL / 체크포인트 승인 대기:** 소유자의 실제 Mac 01B 수락 6/6 PASS를 기록했고 유효한 Digital 무음의 옛 nil 기대값을 실제 내장 검사에서 정리했다. 이번 엔진 85개 전체·실제 내장 overlay 61개 및 관련 앱 회귀가 통과했다. 보호 루트 .DS_Store의 원인 미확인 해시 차이는 현재 파일·증거를 보존한 채 제안에서 제외한다. native 7 FAIL/4 SKIP·내부 Seek 지연·장시간/다른 하드웨어/full parity 미검증·공개 Export 비활성은 유지한다. 선택 가이드/핸들 SPECTRUM-UX-02는 별도 미구현이다([현재 상태](DECISIONS.md#2026-11-17-spectrum-zero-01c-소유자-수락과-회귀-계약-정리)).
+- ✅ **SPECTRUM-ZERO-01 게시:** 구현·기존 실제 내장 overlay61/61·관련 자동 검증 보고·소유자 수락6/6 PASS를 f2b80444로 게시했다. 이전01C의 .DS_Store 보존 PARTIAL은 원본 증거와 함께 역사로 남기며 당시 승인 대기는 위 게시 상태로 갱신됐다. native7 FAIL/4 SKIP·내부 Seek 지연·장시간/다른 하드웨어/full parity 미검증·공개 Export 비활성은 그대로다. UX-02는 별도 미구현 계획이다([현행 표](#현행-기능과-검증-경계)).
 - ✅ **PREVIEW-IMAGE-01B 시험한 동작의 소유자 수락 6/6 PASS(2026-11-16):** 구현·범위별 자동 검증과 별도로 소유자가 macOS에서 여섯 조건을 수동 PASS로 보고했다. 초기 재연결은 준비 상황이며 신규 결함으로 분류하지 않았다. 장시간·다른 하드웨어·전체 Preview/Export parity는 미검증이고 아래 내부 Undo/Redo Seek 성능 조사는 OPEN으로 유지한다([수락과 한계](DECISIONS.md#2026-11-16-preview-image-01c)).
 - ⏳ **PREVIEW-SEEK-01B 내부 설치 지연 조사 OPEN(2026-11-16):** 재구성 완료 후 Undo/Redo seek 중앙값 **53.6→116.2 ms**로 증가했고 ruler seek는 **122.0→63.5 ms**로 개선됐다(각 조건 n=3, 내부 레이어 설치 시각·화면 FPS 아님). 소유자의 시험한 seek 동작 5/5 PASS는 별도 수락이며 이 성능 우려를 해결한 근거가 아니다. 지연 분산·다른 조건·장시간 성능·전체 Preview/Export parity는 미검증, 공개 Spectrum Export는 비활성 유지. native 입력 105 PASS / 7 FAIL / 4 SKIP의 동일 기준선 실패도 유지한다([수락과 한계](DECISIONS.md#2026-11-16-preview-seek-01b-구현과-소유자-수락)).
 - ⏳ SP-6 native Preview 성능 부채(2026-11-13, SP-6D-03): 두께·반응 slider stutter는 소유자 FAIL·원인 미확정. SP-6C-02 요청 병합 잠정 유지, 효과 미입증 Timeline 생략/임시 profiling은 SP-6C-09에서 제거. 위 SP-6D-03 최신 절의 별도 bounded 성능 계획과 한계를 따른다. Format10의 Spectrum-only·혼합 native save/reopen PASS로 이 문제를 닫지 않는다.

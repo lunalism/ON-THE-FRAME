@@ -1,5 +1,7 @@
 # SP-4A-01 — 첫 deterministic spectrum MP4 내부 slice
 
+> **후속 계약 안내(2026-11-17):** 아래 Digital FFT 전체0의 nil raster는 당시 계약이다. SPECTRUM-ZERO-01 이후 유효한 완료 분석의 Digital 0높이는 최소 점 래스터이며 [현행 Spectrum 계약](../SPECTRUM-DESIGN.md#현행-spectrum-계약과-검증-상태)을 따른다. 공개 Spectrum Export 비활성은 유지한다. 아래 원래 실행·판정·수치·실패 기록을 소급 변경하지 않는다.
+
 2026-11-06. **FIRST SPECTRUM MP4 PASS — 생성 fixture 자동 검사 범위. OWNER MANUAL DEFERRED — NOT PASS.** 일반 내보내기 기능의 공개 활성화나 Stage 4 전체 완료가 아니다.
 
 ## 기준과 범위

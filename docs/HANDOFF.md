@@ -1,5 +1,30 @@
 # 인계 요약 — ON THE FRAME
 
+## 현행 인계 — 2026-11-17 DOC-ALIGN-01
+
+소유자가 확정한 방향은 macOS **Composition-first Music Visual Editor**다. 음악 중심의 이미지·영상·오디오 구성, 자막·오디오 반응형 Spectrum, Preview·최종 영상 내보내기를 우선한다. After Effects는 편집 개념·Spectrum 속성·숫자 조작의 참고이며 완전한 Composition 시스템이나 전체 AE 기능을 구현했다는 뜻이 아니다. 고급 전환은 유보한다.
+
+- 게시 feature/subtitles / origin/feature/subtitles / live feature: **f2b80444b439ad59a3870da3350a1385d388552a**, ahead/behind0/0.
+- 현재 docs/audit-alignment-20261117은 같은 커밋에서 시작한 로컬 문서 브랜치다. 이번 정렬은 문서만 수정하며 미커밋·미스테이징이고 docs 브랜치는 게시하지 않았다.
+- local main: **44943eadabdf5a37d5242d614e7279813126dfde**. live remote main: **fe79fd91997eebb951315a9e398942e6711ec2ae**. 원격 main은 소유자가 웹에서 이전 feature30e02a54를 병합한 결과로 해당 기준과 tree가 같다. local main과 tracking main을 자동 갱신하거나 feature의 새 두 커밋을 main에 병합한 상태가 아니다.
+- 최신 게시 두 커밋: **783ae4ba3a765b0e7f58d68a7af7b95099fd2efd**(.DS_Store exclusion), **f2b80444b439ad59a3870da3350a1385d388552a**(Digital zero 점). Seek·image intent·숫자 scrub 체크포인트도 feature 이력에 게시됐다.
+
+현재 기능·상태 정본은 [ROADMAP 현행 표](ROADMAP.md#현행-기능과-검증-경계)다. 영상·오디오·자막·Timeline/Undo/Redo와 Spectrum 계보·정수7필드·직접 scrub·Digital/Analog·valid-zero 점·Seek 연속성·image Play intent는 구현돼 있다. 이미지 import는 DEBUG && OTF_IMAGE_IMPORT 빌드와 -OTFEnableImageImport 인수 모두 필요하고 Spectrum 생성은 Debug 전용이다. 이미지 고해상도/P3는 한정 입력·sRGB Preview 표현이며 공개 Release 지원이 아니다. **공개 Spectrum Export는 비활성**이다.
+
+앱 저장/열기와 raw codec은 [현행 형식 표](PRODUCT.md#현행-프로젝트-형식과-기능-경계)를 따른다. Format10 경계가 모든 decoder의1–10 호환이나 모든 저장의10 강제를 뜻하지 않는다. 이전5/6/7/8/9 기록은 각각 당시 milestone이다.
+
+수락·검증·게시를 분리한다. Seek owner5/5, image intent·scrub·ZERO 각각 owner6/6 PASS는 시험한 조건의 소유자 보고다. 01C 실제 내장 overlay61/61·engine85 및 관련 회귀는 이전 실행 증거이며 임시 복사본 결과나 이번 문서 작업의 새 검사로 대체하지 않는다. 제한된 Preview/internal Export raster 비교도 전체 parity 수락이 아니다.
+
+**OPEN:** Native Inspector7 FAIL/4 SKIP, 내부 Undo/Redo Seek 설치 지연53.6→116.2ms median 조사(화면FPS 아님), 장시간 성능·다른 하드웨어·full Preview/Export parity 미검증. 기존 A-010 등 독립 문제도 유지한다. 01C 당시 root .DS_Store 차이·PARTIAL은 역사적 보존 기록으로 남기며 이후 exclusion/커밋/게시와 구분한다.
+
+다음은 이 문서 정렬의 소유자 검토다. 후속 개발의 제안 순서는 **SPECTRUM-UX-02 → SPECTRUM-FX-01 → SPECTRUM-FX-02 → SPECTRUM-SHADOW-01**이며 모두 미구현이다. 세부 FX 의미·파라미터·구현 범위는 후속 승인 전 확정하지 않는다. [문서 권위·방향 amendment](DECISIONS.md#2026-11-17-doc-align-01-현행-방향과-문서-정렬)를 따른다.
+
+실행 전에는 [승인 절차·자원 안전](../app/README.md#현재-실행-승인과-자원-안전)을 확인한다. 기본 build.sh/일반 swift test를 감시 없는 실행 승인으로 해석하지 않는다. 현재 범위는 문서 검사뿐이며 빌드·제품 테스트를 실행하지 않는다. 소유자 미디어·프로젝트·서명 빌드·증거·보호 untracked2개와 ignored .DS_Store, 복구 참조3개를 보존한다. 커밋은 소유자의 유효 Git identity로만 하고 AI co-author trailer를 추가하거나 귀속을 꾸며내지 않는다. 공개 이력의19개 Claude trailer는 수정 범위 밖이며 문서 변경으로 Contributors가 제거되지는 않는다.
+
+## 이전 인계 기록
+
+아래 “현재”, 대기·부분·실패·임시 프로세스/산출물 위치는 해당 날짜의 관찰이다. 본문을 소급 수정하지 않았으며 현재 작업 지시나 새 실행 승인으로 재사용하지 않는다.
+
 **SP-6D-03 · Format 10 / 반응 강도 개발 체크포인트 준비 (2026-11-13).** `feature/subtitles`, HEAD/upstream/live remote `8c4e12f8779802b6d53fea5d00f8136478a01bb9`; main `44943eadabdf5a37d5242d614e7279813126dfde`. 제품·직접 시험16파일 + ROADMAP/HANDOFF 총 **18파일** 후보, 빈 index, 별도 소유자 게시 승인 대기다. 아래 SP-5D와 이전 대기는 당시 역사 기록이다. [상세 구현·증거·한계](ROADMAP.md).
 
 보존 범위: (A) Int0…200 reactionPercent·legacy100·형식10·엄격한 wire 검증/혼합 이미지/temporal projection, (B) 공유 renderer 강도 변환·Inspector 숫자/정수 slider·pause-for-edit/history/선택·session 보호, (C) ColorPicker revision/continuous 회귀 수정·기존 P3 clipping/alpha 보호, (D) 기존65검사를 유지하는 Debug async Scenario 분해. (E) SP-6C-02 pending-latest 병합·confirmed paused layer 유지·stale/cancellation 검사는 **잠정 유지**, smoothness 해결 아님. SP-6C-09는 임시 native profiling과 SP-6C-07 Timeline 표시 생략 실험을 제거하고 원시 실패 기록·정당한 diagnostics를 보존했다.
