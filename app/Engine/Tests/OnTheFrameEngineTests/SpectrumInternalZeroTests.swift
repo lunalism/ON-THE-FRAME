@@ -97,4 +97,76 @@ final class SpectrumInternalZeroTests: XCTestCase {
         if case .failed = outcome {} else { XCTFail("Public Spectrum Export must remain disabled") }
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
     }
+
+    /// Bounded frame production, not an encoded Export or a full parity claim.
+    /// Reuse one generated 12s source pair; each worker still starts at frame zero
+    /// and advances sequentially through at most frame 60.
+    func testTimingControlsMatchActualInternalWorkerInDigitalAndAnalog() async throws {
+        let folder = ExportEndToEndTests.root.appendingPathComponent("spectrum-timing-internal-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let (video, audio) = try await media(in: folder)
+        let spectrumLane = UUID(), subtitleLane = UUID(), id = UUID()
+        let clip = Clip(mediaID: audio.id, start: 0, sourceIn: 0, length: 360, lane: Lane.audioID)
+        let subtitles = (0..<3).map { SubtitleItem(lane: subtitleLane, start: $0 * 120, length: 120, text: "Timing \($0)") }
+        let cases: [(name: String, ms: Int, offset: Int, mode: SpectrumItemStyle.Mode, last: Int)] = [
+            ("negative limit / Digital zero", 1, -10_000, .digital, 30),
+            ("positive limit / source end", 1000, 10_000, .digital, 60),
+            ("negative offset / Analog", 1000, -500, .analog, 30),
+            ("positive offset / Analog", 1, 500, .analog, 30)
+        ]
+        for c in cases {
+            var style = SpectrumItemStyle.provisionalDefault
+            style.windowMs = c.ms; style.offsetMs = c.offset; style.mode = c.mode
+            style.bands = 8; style.thicknessMilli = 6_000
+            let spectrum = SpectrumItem(id: id, lane: spectrumLane, start: 0, length: 360, sourceKey: clip.lineageKey, style: style)
+            let timeline = Timeline(clips: [Clip(mediaID: video.id, start: 0, sourceIn: 0, length: 360, lane: Lane.videoID)],
+                audioClips: [clip], subtitles: subtitles, spectra: [spectrum],
+                lanes: [Lane(id: subtitleLane, kind: .subtitle, name: "S"), Lane(id: spectrumLane, kind: .spectrum, name: "SP")] + Lane.defaults,
+                media: [MediaRef(video), MediaRef(audio)], mediaFrames: [video.id: video.frameCount, audio.id: audio.frameCount],
+                mediaHasAudio: [video.id: video.hasAudio, audio.id: audio.hasAudio], durationFrames: 360)
+            XCTAssertTrue(timeline.isValid)
+            XCTAssertEqual(timeline.audioClips, [clip], "Analysis settings do not move or retime the audio clip")
+            let probes: Set<Int> = c.last == 60 ? [0, 1, 29, 30, 59, 60] : [0, 1, 29, 30]
+            typealias Result = (bands: [Float], raster: SpectrumRenderedFrame?, bytes: Int)
+            let results = OSAllocatedUnfairLock(initialState: [Int: Result]())
+            var controls = SpectrumExportControls(stepTimeout: 10, jobTimeout: 120)
+            controls.prepared = { frame, bands, raster, bytes in
+                if probes.contains(frame) { results.withLock { $0[frame] = (bands, raster, bytes) } }
+            }
+            var worker: SpectrumExportFrames? = try SpectrumExportFrames(timeline: timeline, assets: [video, audio], controls: controls)
+            let preview = SpectrumFrameCoordinator(deliveryQueue: DispatchQueue(label: "test.timing.internal.preview"))
+            preview.update(timeline: timeline, media: [video, audio])
+            for frame in 0...c.last {
+                let footprint = try await worker!.prepare(frame)
+                guard probes.contains(frame) else { continue }
+                let outcome = await withCheckedContinuation { continuation in
+                    preview.request(spectrum: id, frame: frame, canvasWidth: 1920, canvasHeight: 1080) { continuation.resume(returning: $0) }
+                }
+                guard case let .ready(bands, actual) = outcome else { return XCTFail("\(c.name): Preview was not ready at \(frame)") }
+                let exported = try XCTUnwrap(results.withLock { $0[frame] })
+                XCTAssertEqual(bands, exported.bands, "\(c.name), frame \(frame)")
+                XCTAssertEqual(actual == nil, exported.raster == nil)
+                XCTAssertEqual(footprint == nil, exported.raster == nil)
+                XCTAssertLessThanOrEqual(exported.bytes, 8 << 20, "Existing internal PCM bound")
+                if let actual, let expected = exported.raster {
+                    XCTAssertEqual(actual.drawRect, expected.drawRect)
+                    XCTAssertEqual(SpectrumFrameRendererTests.bytes(actual.image), SpectrumFrameRendererTests.bytes(expected.image), "\(c.name), frame \(frame)")
+                }
+                if c.offset == -10_000 {
+                    XCTAssertTrue(bands.allSatisfy { $0 == 0 })
+                    let raster = try XCTUnwrap(actual, "Valid zero Digital frames retain their dots")
+                    XCTAssertTrue(SpectrumFrameRendererTests.bytes(raster.image).contains { $0 != 0 })
+                }
+                if c.offset == 10_000 {
+                    // Frame 59 centers on source frame 359; frame 60 straddles
+                    // the real source end. Existing zero padding retains the
+                    // earlier half of this 1000ms Hann window in both consumers.
+                    XCTAssertGreaterThan(bands.max() ?? 0, 0, "Valid source tail must not be discarded")
+                }
+            }
+            XCTAssertEqual(results.withLock { $0.count }, probes.count)
+            worker = nil; preview.resetProject()
+            XCTAssertTrue(SpectrumExportFrames.isIdleForTest)
+        }
+    }
 }

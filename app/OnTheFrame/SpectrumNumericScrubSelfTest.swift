@@ -8,6 +8,7 @@ import OnTheFrameEngine
 @MainActor enum SpectrumNumericScrubSelfTest {
     typealias Check = LaneSelfTest.Check
     private struct Failure: Error { let message: String }
+    private static let analysisProperties: [SpectrumNumericProperty] = [.lowHz, .highHz, .bands, .windowMs, .offsetMs]
     private static func settle() async { for _ in 0..<5 { await Task.yield() }; try? await Task.sleep(nanoseconds: 20_000_000) }
     private static func fixture(_ style: SpectrumItemStyle) throws -> Timeline {
         let lane = UUID()
@@ -74,6 +75,8 @@ import OnTheFrameEngine
             case .lowHz: draft.lowHz = text
             case .highHz: draft.highHz = text
             case .bands: draft.bands = text
+            case .windowMs: draft.windowMs = text
+            case .offsetMs: draft.offsetMs = text
             }
             guard let value = try? draft.style(from: style) else { return }
             _ = store.updateSpectrumLiveStyle(id, style: value, project: store.projectSession,
@@ -108,6 +111,8 @@ import OnTheFrameEngine
             check(property.rawValue + ".bounds", property.candidate(start: start, displacement: 1e100) == property.range.upperBound &&
                   property.candidate(start: start, displacement: -1e100) == property.range.lowerBound, "")
             check(property.rawValue + ".nonfinite", property.candidate(start: start, displacement: .infinity) == nil, "")
+            check(property.rawValue + ".malformed start", property.candidate(start: Int.min, displacement: -10) == nil &&
+                  property.candidate(start: Int.max, displacement: 10) == nil, "no overflowing candidate addition")
             check(property.rawValue + ".original", property.applying(start, to: legacy) == legacy, "")
             check(property.rawValue + ".outOfRange", property.applying(property.range.upperBound + 1, to: legacy) == nil, "")
         }
@@ -119,12 +124,14 @@ import OnTheFrameEngine
             var draft = SpectrumStyleDraft(legacy); draft.thickness = value
             check("invalid text " + value, (try? draft.style(from: legacy)) == nil, "")
         }
-        for property in [SpectrumNumericProperty.lowHz, .highHz, .bands] {
+        for property in analysisProperties {
             for value in ["1.5", "20.0", "1e2", "", "-", "+", String(Int.max), String(Int.min), String(Int.max) + "0"] {
                 var draft = SpectrumStyleDraft(legacy)
                 switch property {
                 case .lowHz: draft.lowHz = value
                 case .highHz: draft.highHz = value
+                case .windowMs: draft.windowMs = value
+                case .offsetMs: draft.offsetMs = value
                 default: draft.bands = value
                 }
                 check(property.rawValue + ".invalid text " + value, (try? draft.style(from: legacy)) == nil, "")
@@ -138,6 +145,16 @@ import OnTheFrameEngine
             check("bands boundary \(value)", SpectrumNumericProperty.bands.applying(value, to: legacy)?.bands == value, "")
         }
         check("bands zero rejected", SpectrumNumericProperty.bands.applying(0, to: legacy) == nil, "")
+        for value in [1, 1000] {
+            check("window boundary \(value)", SpectrumNumericProperty.windowMs.applying(value, to: legacy)?.windowMs == value, "")
+        }
+        for value in [-10000, 0, 10000] {
+            check("offset boundary \(value)", SpectrumNumericProperty.offsetMs.applying(value, to: legacy)?.offsetMs == value, "")
+        }
+        var invalidStyle = legacy; invalidStyle.offsetMs = Int.min
+        check("unchanged field rejects invalid offset style", SpectrumNumericProperty.bands.applying(legacy.bands, to: invalidStyle) == nil, "")
+        invalidStyle = legacy; invalidStyle.windowMs = 0
+        check("unchanged field rejects invalid window style", SpectrumNumericProperty.bands.applying(legacy.bands, to: invalidStyle) == nil, "")
         var pair = SpectrumStyleDraft(legacy); pair.lowHz = "22000"; pair.highHz = "24000"
         let atomic = try? pair.style(from: legacy)
         check("frequency pair atomic valid", atomic?.lowHz == 22000 && atomic?.highHz == 24000 &&
@@ -174,7 +191,7 @@ import OnTheFrameEngine
             x.store.redo()
             check(property.rawValue + ".redo exact", x.store.timeline == final, "")
         }
-        for property in [SpectrumNumericProperty.thickness, .lowHz, .highHz, .bands] {
+        for property in [SpectrumNumericProperty.thickness] + analysisProperties {
           for mode in ["net-zero", "escape", "deactivate", "window", "remove", "vertical"] {
             let x = try Context(property, legacy); defer { x.close() }
             x.mouse(.leftMouseDown)
@@ -280,10 +297,91 @@ import OnTheFrameEngine
     }
     private static func windowFocusAway(_ x: Context) { x.window.makeFirstResponder(nil) }
 
+    private static func timingNativeText(_ check: (String, Bool, String) -> Void) async throws {
+        var legacy = SpectrumItemStyle.provisionalDefault
+        legacy.offsetMs = -125; legacy.thicknessMilli = 3125; legacy.maxHeightMilli = 480250
+        for property in [SpectrumNumericProperty.windowMs, .offsetMs] {
+            let x = try Context(property, legacy); defer { x.close() }
+            x.mouse(.leftMouseDown, dispatch: true); x.mouse(.leftMouseUp, dispatch: true)
+            await settle()
+            guard let editor = x.control.field.currentEditor() as? NSTextView else {
+                throw Failure(message: property.rawValue + " timing native editor")
+            }
+            for invalid in ["", "-", "+", "1.5", "1e2", String(Int.min), String(Int.max) + "0"] {
+                editor.insertText(invalid, replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+                editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+                check(property.rawValue + ".native invalid Return " + invalid,
+                    x.store.timeline == x.initial && !x.store.isDirty && x.store.history.undoDepth == 0, "draft rejected atomically")
+            }
+            let first = property == .offsetMs ? -250 : 92
+            let second = property == .offsetMs ? -375 : 93
+            editor.insertText(String(first), replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+            editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+            check(property.rawValue + ".native Return exact", x.style == property.applying(first, to: legacy) &&
+                x.store.history.undoDepth == 1, "signed integer and untouched legacy milli fields")
+            editor.insertText(String(second), replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+            editor.doCommand(by: #selector(NSResponder.insertTab(_:)))
+            await settle()
+            let final = x.store.timeline
+            check(property.rawValue + ".native Tab exact", x.style == property.applying(second, to: legacy) &&
+                x.store.history.undoDepth == 2 && x.next.currentEditor() != nil, "native focus transition")
+            windowFocusAway(x); x.store.undo(); x.store.undo()
+            check(property.rawValue + ".negative base Undo restored", x.store.timeline == x.initial &&
+                x.style.offsetMs == -125 && !x.store.isDirty, "")
+            x.store.redo(); x.store.redo()
+            check(property.rawValue + ".native Redo exact", x.store.timeline == final && x.store.isDirty, "")
+        }
+        for property in [SpectrumNumericProperty.windowMs, .offsetMs] {
+            for boundary in [property.range.lowerBound, property.range.upperBound] {
+                let x = try Context(property, legacy); defer { x.close() }
+                x.mouse(.leftMouseDown, dispatch: true); x.mouse(.leftMouseUp, dispatch: true)
+                await settle()
+                guard let editor = x.control.field.currentEditor() as? NSTextView else {
+                    throw Failure(message: property.rawValue + " boundary native editor")
+                }
+                editor.insertText(String(boundary), replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+                editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+                check(property.rawValue + ".native boundary \(boundary)",
+                    x.style == property.applying(boundary, to: legacy) && x.store.history.undoDepth == 1, "")
+                windowFocusAway(x); x.store.undo()
+                check(property.rawValue + ".boundary Undo exact \(boundary)", x.store.timeline == x.initial && !x.store.isDirty, "")
+            }
+        }
+    }
+
+    private static func analysisOwnership(_ check: (String, Bool, String) -> Void) throws {
+        for property in analysisProperties {
+            let x = try Context(property, .provisionalDefault); defer { x.close() }
+            x.mouse(.leftMouseDown); x.mouse(.leftMouseDragged, 4 + 2 * property.pointsPerStep)
+            guard let old = x.store.spectrumNumericScrubToken else { throw Failure(message: "analysis ownership initial token") }
+            x.store.select(nil); let selected = x.store.timeline, depth = x.store.history.undoDepth
+            x.control.cancelTracking(); x.store.cancelSpectrumNumericScrub(old); x.mouse(.leftMouseUp, 600)
+            check(property.rawValue + ".selection retires ownership", x.store.timeline == selected &&
+                x.store.history.undoDepth == depth && x.store.spectrumNumericScrubToken == nil, "")
+            x.store.select(x.id)
+            let newer = UUID()
+            guard x.store.beginSpectrumNumericScrub(newer, id: x.id, property: property, project: x.store.projectSession,
+                revision: x.store.spectrumSelectionRevision, expectedGeneration: x.store.generation),
+                x.store.updateSpectrumNumericScrub(newer, value: property.displayed(x.style) + 1) == .accepted else {
+                throw Failure(message: "analysis ownership replacement token")
+            }
+            let current = x.store.timeline
+            x.store.finishSpectrumNumericScrub(old); x.store.cancelSpectrumNumericScrub(old)
+            NotificationCenter.default.post(name: NSColorPanel.willCloseNotification, object: NSColorPanel.shared)
+            check(property.rawValue + ".old callback and color cannot retire newer", x.store.spectrumNumericScrubToken == newer &&
+                x.store.timeline == current && x.store.history.undoDepth == depth, "")
+            x.store.resetProject(); let empty = x.store.timeline
+            x.store.cancelSpectrumNumericScrub(newer); x.store.finishSpectrumNumericScrub(newer); x.mouse(.leftMouseUp, 600)
+            check(property.rawValue + ".project retires ownership", x.store.timeline == empty && empty.isEmpty &&
+                x.store.history.undoDepth == 0 && !x.store.isDirty, "")
+        }
+    }
+
     private static func analysisEditing(_ folder: URL, _ check: (String, Bool, String) -> Void) async throws {
         var legacy = SpectrumItemStyle.provisionalDefault
         legacy.startXMilli = 192125; legacy.maxHeightMilli = 480250; legacy.thicknessMilli = 3125
-        for property in [SpectrumNumericProperty.lowHz, .highHz, .bands] {
+        legacy.offsetMs = -125
+        for property in analysisProperties {
             let x = try Context(property, legacy); defer { x.close() }
             let start = property.displayed(legacy), value = start + 2
             x.mouse(.leftMouseDown, dispatch: true); x.mouse(.leftMouseUp, dispatch: true)
@@ -304,11 +402,9 @@ import OnTheFrameEngine
                 selectionRevision: x.store.spectrumSelectionRevision, generation: x.store.generation)
             check(property.rawValue + ".explicit Apply allowed", error == nil && x.style == candidate, "")
             x.store.undo()
-            for restricted in ["window", "offset", "floor", "alpha"] {
+            for restricted in ["floor", "alpha"] {
                 var denied = legacy
                 switch restricted {
-                case "window": denied.windowMs += 1
-                case "offset": denied.offsetMs += 1
                 case "floor": denied.floorDB -= 1
                 default: denied.alpha -= 1
                 }
@@ -319,6 +415,20 @@ import OnTheFrameEngine
                     revision: x.store.spectrumSelectionRevision, expectedGeneration: x.store.generation, kind: "numeric")
                 check(property.rawValue + ".restricted " + restricted, explicit != nil && !live &&
                     x.store.timeline == before && x.store.history.undoDepth == depth, "both allowlists")
+            }
+            if property == .windowMs || property == .offsetMs {
+                let invalidValues = [property.range.lowerBound - 1, property.range.upperBound + 1, Int.min, Int.max]
+                for value in invalidValues {
+                    var denied = legacy
+                    if property == .windowMs { denied.windowMs = value } else { denied.offsetMs = value }
+                    let before = x.store.timeline, depth = x.store.history.undoDepth
+                    let explicit = x.store.setSpectrumStyle(x.id, style: denied, from: legacy, project: x.store.projectSession,
+                        selectionRevision: x.store.spectrumSelectionRevision, generation: x.store.generation)
+                    let live = x.store.updateSpectrumLiveStyle(x.id, style: denied, project: x.store.projectSession,
+                        revision: x.store.spectrumSelectionRevision, expectedGeneration: x.store.generation, kind: "numeric")
+                    check(property.rawValue + ".invalid entire style \(value)", explicit != nil && !live &&
+                        x.store.timeline == before && x.store.history.undoDepth == depth, "reject before timeline timing helpers")
+                }
             }
             x.mouse(.leftMouseDown); x.mouse(.leftMouseDragged, 4 + 2 * property.pointsPerStep)
             let saved = x.store.timeline
@@ -338,15 +448,30 @@ import OnTheFrameEngine
             let reopened = ProjectStore()
             let opened = await reopened.openProject(at: url)
             check(property.rawValue + ".app reopen", opened && reopened.timeline.spectrum(x.id)?.style == candidate && !reopened.isDirty, "")
+            if property == .offsetMs {
+                check("negative offset saved and reopened", candidate.offsetMs < 0 &&
+                    decoded.timeline.spectrum(x.id)?.style.offsetMs == candidate.offsetMs &&
+                    reopened.timeline.spectrum(x.id)?.style.offsetMs == candidate.offsetMs, "unchanged milli geometry retained")
+            }
             reopened.resetProject()
             var json = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
             // Corrupt only the selected style in an isolated in-memory document.
             if var spectra = json["spectra"] as? [[String: Any]], !spectra.isEmpty,
-               var style = spectra[0]["style"] as? [String: Any] {
+               let originalStyle = spectra[0]["style"] as? [String: Any] {
+                var style = originalStyle
                 style["lowHz"] = 2000; style["highHz"] = 20
                 spectra[0]["style"] = style; json["spectra"] = spectra
                 let corrupt = try JSONSerialization.data(withJSONObject: json)
                 check(property.rawValue + ".malformed project rejected", (try? ProjectPersistence.decode(corrupt)) == nil, "")
+                if property == .windowMs || property == .offsetMs {
+                    for value in [property.range.lowerBound - 1, property.range.upperBound + 1, Int.min, Int.max] {
+                        var invalid = originalStyle; invalid[property.rawValue] = value
+                        spectra[0]["style"] = invalid; json["spectra"] = spectra
+                        let malformed = try JSONSerialization.data(withJSONObject: json)
+                        check(property.rawValue + ".malformed timing project \(value)",
+                            (try? ProjectPersistence.decode(malformed)) == nil, "no invalid timing reaches overlap helpers")
+                    }
+                }
             } else { check(property.rawValue + ".malformed project fixture located", false, "unexpected Format10 structure") }
         }
         for property in [SpectrumNumericProperty.lowHz, .highHz] {
@@ -382,7 +507,10 @@ import OnTheFrameEngine
         do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false) }
         catch { check("fresh evidence directory", false, String(describing: error)); return checks }
         policies(check)
-        do { try gestures(check); try isolation(check); try await nativeText(check); try await analysisEditing(folder, check) }
+        do {
+            try gestures(check); try isolation(check); try analysisOwnership(check)
+            try await nativeText(check); try await timingNativeText(check); try await analysisEditing(folder, check)
+        }
         catch { check("native checks completed", false, String(describing: error)) }
         do {
             try JSONEncoder().encode(checks).write(to: folder.appendingPathComponent("numeric-scrub-checks.json"), options: .withoutOverwriting)

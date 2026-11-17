@@ -568,6 +568,200 @@ extension SpectrumFrameCoordinatorTests {
 }
 
 extension SpectrumFrameCoordinatorTests {
+    private func timingControlEdits(_ original: SpectrumItemStyle) -> [(String, SpectrumItemStyle)] {
+        var window = original; window.windowMs = 200
+        var earlier = original; earlier.offsetMs = -1
+        var later = original; later.offsetMs = 1
+        return [("windowMs", window), ("negative offsetMs", earlier), ("positive offsetMs", later)]
+    }
+
+    private func assertTimingCacheBounds(_ c: SpectrumFrameCoordinator, _ label: String) {
+        let s = c.scheduler.statistics, limits = c.scheduler.limits
+        XCTAssertLessThanOrEqual(s.peakPending, limits.maxPending, label)
+        XCTAssertLessThanOrEqual(s.peakActive, limits.maxConcurrent, label)
+        XCTAssertLessThanOrEqual(s.peakWaiters, limits.maxWaiters, label)
+        XCTAssertLessThanOrEqual(s.bandCacheEntries, limits.bandCacheEntries, label)
+        // The scheduler may retain its newest single chunk. This fixture is mono,
+        // 24000 Float samples per chunk; do not count only the newest band result.
+        XCTAssertLessThanOrEqual(s.peakChunkCacheBytes, limits.chunkCacheBytes + 24_000 * MemoryLayout<Float>.stride, label)
+    }
+
+    func testTimingControlsSeparateBandCacheRetainPCMAndRestore() async throws {
+        let (timeline, _, id, _) = try base()
+        let original = try XCTUnwrap(timeline.spectrum(id))
+        for (name, style) in timingControlEdits(original.style) {
+            let pcm = TonePCM(), c = coordinator(pcm)
+            defer { c.resetProject() }
+            c.update(timeline: timeline, media: [steady])
+            let baselineOutcome = await get(c, id, 50)
+            let baseline = try XCTUnwrap(Self.bands(baselineOutcome))
+            let warm = c.scheduler.statistics, decoded = pcm.decodes
+            let edited = try timeline.settingSpectrumStyle(id, style)
+            XCTAssertEqual(edited.audioClips, timeline.audioClips)
+            XCTAssertEqual(edited.spectrumPieces(edited.spectra[0]), timeline.spectrumPieces(original))
+            c.update(timeline: edited, media: [steady])
+            let outcome = await get(c, id, 50)
+            let expected = try await direct(edited, id, 50, TonePCM())
+            XCTAssertEqual(Self.bands(outcome), expected, name)
+            let changed = c.scheduler.statistics
+            XCTAssertEqual(changed.analyses, warm.analyses + 1, name)
+            XCTAssertEqual(changed.bandCacheEntries, warm.bandCacheEntries + 1, name)
+            XCTAssertEqual(changed.decodes, warm.decodes, "\(name): the needed PCM chunks were already retained")
+            XCTAssertEqual(pcm.decodes, decoded, name)
+            XCTAssertEqual(changed.chunkCacheBytes, warm.chunkCacheBytes, name)
+            XCTAssertEqual(changed.chunkCacheEntries, warm.chunkCacheEntries, name)
+            let repeated = await get(c, id, 50)
+            XCTAssertEqual(Self.bands(repeated), expected)
+            XCTAssertEqual(c.scheduler.statistics.analyses, changed.analyses)
+            c.update(timeline: timeline, media: [steady])
+            let restored = await get(c, id, 50)
+            XCTAssertEqual(Self.bands(restored), baseline, name)
+            XCTAssertEqual(c.scheduler.statistics.analyses, changed.analyses, "Restoration reuses the original band key")
+            XCTAssertEqual(pcm.decodes, decoded)
+            assertTimingCacheBounds(c, name)
+        }
+    }
+
+    func testTimingControlsPreserveTrimSplitMoveLineageAndAudioGain() async throws {
+        let (original, clip, id, _) = try base()
+        let key = try XCTUnwrap(original.clip(clip)).lineageKey
+        let reference = try XCTUnwrap(original.spectrum(id))
+        XCTAssertThrowsError(try original.trimming(clip: clip, sourceIn: 15, length: 120)) { error in
+            XCTAssertEqual(error as? EditError, .crossingContent, "The independent Spectrum spans the ripple trim boundary")
+        }
+        // Build the trimmed-source fixture through permitted edits: trim before
+        // restoring the exact independent Spectrum. Do not weaken ripple safety.
+        let trimmed = try original.liftingSpectrum(id).trimming(clip: clip, sourceIn: 15, length: 120)
+            .addingSpectrum(lane: reference.lane, at: reference.start, length: reference.length,
+                sourceKey: key, style: reference.style, id: reference.id)
+        XCTAssertEqual(trimmed.spectrum(id), reference)
+        let left = UUID(), right = UUID()
+        let moved = try trimmed.splitting(clip: clip, atFrame: 60, newIDs: (left, right))
+            .relocating(clip: right, toStart: 120, lane: Lane.audioID)
+        XCTAssertEqual(moved.clip(left)?.lineageKey, key)
+        XCTAssertEqual(moved.clip(right)?.lineageKey, key)
+        XCTAssertEqual(moved.clip(right)?.sourceIn, 55)
+        let pasted = try moved.pasting(try moved.copying(clip: left), at: 70) { _ in "Timing copy" }
+        let copy = try XCTUnwrap(pasted.ids[left])
+        XCTAssertNotEqual(pasted.timeline.clip(copy)?.lineageKey, key)
+        XCTAssertEqual(pasted.timeline.spectrumPieces(pasted.timeline.spectra[0]), moved.spectrumPieces(moved.spectra[0]),
+            "The selected original lineage must not analyze the copy")
+        let gained = try trimmed.settingClipAudio(clip: clip, volumePercent: 50, fadeInFrames: 60, fadeOutFrames: 30)
+            .settingLaneAudio(Lane.audioID, volumePercent: 70)
+        let muted = try gained.settingLaneAudio(Lane.audioID, muted: true)
+        let stages = [("base", original), ("trim/split/move/copy", pasted.timeline), ("gain/fades", gained), ("muted", muted)]
+        let settings = [(1, 0), (1000, 0), (1, 10_000), (1000, -10_000), (90, -500), (90, 500)]
+        let pcm = TonePCM(), c = coordinator(pcm)
+        defer { c.resetProject() }
+        for (name, timeline) in stages {
+            for (ms, offset) in settings {
+                var style = timeline.spectra[0].style; style.windowMs = ms; style.offsetMs = offset
+                let edited = try timeline.settingSpectrumStyle(id, style)
+                XCTAssertEqual(edited.audioClips, timeline.audioClips, name)
+                XCTAssertEqual(edited.spectrum(id)?.sourceKey, key, name)
+                c.update(timeline: edited, media: [steady])
+                // Original source's last included frame is 199 (= 20 + 179).
+                // Later stages also cover the moved cut and its intervening gap.
+                for frame in [0, 59, 90, 125, 199, 299] {
+                    let outcome = await get(c, id, frame)
+                    let expected = try await direct(edited, id, frame, TonePCM())
+                    XCTAssertEqual(Self.bands(outcome), expected, "\(name), window=\(ms), offset=\(offset), frame=\(frame)")
+                    XCTAssertEqual(Self.name(outcome), "ready")
+                    if name == "muted" { XCTAssertTrue(expected.allSatisfy { $0 == 0 }) }
+                }
+                assertTimingCacheBounds(c, name)
+            }
+        }
+    }
+
+    func testExtremeTimingPreservesConservativeOverlapRejection() async throws {
+        let (timeline, clip, id, _) = try base()
+        let left = UUID(), right = UUID(), lane = UUID()
+        let overlap = try timeline.splitting(clip: clip, atFrame: 60, newIDs: (left, right))
+            .addingLane(.audio, name: "Timing overlap", id: lane).relocating(clip: right, toStart: 50, lane: lane)
+        let pcm = TonePCM(), c = coordinator(pcm)
+        defer { c.resetProject() }
+        for offset in [-10_000, 10_000] {
+            var style = overlap.spectra[0].style; style.windowMs = 1; style.offsetMs = offset
+            let edited = try overlap.settingSpectrumStyle(id, style)
+            let spectrum = edited.spectra[0]
+            let exact = try SpectrumAnalysis.chunks(frame: 0, pieces: edited.spectrumPieces(spectrum), fps: 30,
+                rate: 48_000, settings: style.analysisSettings, chunkSamples: pcm.chunkSamples)
+            XCTAssertTrue(exact.isEmpty, "The exact shifted 1ms window is outside the source pieces")
+            XCTAssertEqual(edited.spectrumFrameState(spectrum, atFrame: 0), .overlap,
+                "The existing symmetric safety reach still includes the overlap at frames 50..<60")
+            c.update(timeline: edited, media: [steady])
+            let outcome = await get(c, id, 0)
+            XCTAssertEqual(Self.name(outcome), "overlap")
+        }
+        XCTAssertEqual(pcm.decodes, 0, "Do not reinterpret rejected overlap as silence")
+    }
+
+    func testTimingEditsAndRestorationRejectSupersededAsyncResults() async throws {
+        let (timeline, _, id, _) = try base()
+        var window = timeline.spectra[0].style; window.windowMs = 1000
+        var offset = timeline.spectra[0].style; offset.offsetMs = -500
+        for (name, style) in [("windowMs", window), ("offsetMs", offset)] {
+            let edited = try timeline.settingSpectrumStyle(id, style)
+            for proactive in [true, false] {
+                for (direction, before, after) in [("edit", timeline, edited), ("restore", edited, timeline)] {
+                    let pcm = TonePCM(gated: true), c = coordinator(pcm), log = Log()
+                    defer { pcm.release(); c.resetProject() }
+                    c.supersedeOnUpdate = proactive
+                    c.update(timeline: before, media: [steady])
+                    c.request(spectrum: id, frame: 50, canvasWidth: 1920, canvasHeight: 1080) { log.add("old", $0) }
+                    let started = await until(5) { pcm.started > 0 }
+                    guard started else { XCTFail("\(name): decode gate not reached"); continue }
+                    c.update(timeline: after, media: [steady])
+                    c.request(spectrum: id, frame: 50, canvasWidth: 1920, canvasHeight: 1080) { log.add("current", $0) }
+                    _ = c.diagnostics
+                    if !proactive { XCTAssertEqual(log.total, 0, "Completion fences must work without proactive cancellation") }
+                    pcm.release()
+                    let completed = await until(5) { log.total == 2 }
+                    XCTAssertTrue(completed, name)
+                    XCTAssertEqual(log.all("old").map(Self.name), ["superseded"], "\(name) \(direction)")
+                    let current = try XCTUnwrap(log.all("current").first)
+                    let expected = try await direct(after, id, 50, TonePCM())
+                    XCTAssertEqual(Self.bands(current), expected, "\(name) \(direction)")
+                    let drained = await until(5) { c.scheduler.statistics.active == 0 && c.diagnostics.waiting == 0 }
+                    XCTAssertTrue(drained)
+                    deliveries.sync {}
+                    XCTAssertEqual(log.total, 2, "One completion per request")
+                    assertTimingCacheBounds(c, name)
+                }
+            }
+        }
+    }
+
+    func testTimingZeroPendingAndUnavailableRemainDistinctInBothModes() async throws {
+        let (timeline, _, id, _) = try base()
+        for mode in [SpectrumItemStyle.Mode.digital, .analog] {
+            var style = timeline.spectra[0].style; style.mode = mode; style.windowMs = 1000; style.offsetMs = -500
+            let edited = try timeline.settingSpectrumStyle(id, style)
+            let pcm = TonePCM(gated: true), c = coordinator(pcm), log = Log()
+            defer { pcm.release(); c.resetProject() }
+            c.update(timeline: edited, media: [])
+            let unavailable = await get(c, id, 35)
+            XCTAssertEqual(Self.name(unavailable), "mediaUnavailable")
+            c.update(timeline: edited, media: [steady])
+            c.request(spectrum: id, frame: 35, canvasWidth: 1920, canvasHeight: 1080) { log.add("silent", $0) }
+            let started = await until(5) { pcm.started > 0 }
+            guard started else { XCTFail("\(mode): silent PCM gate not reached"); continue }
+            XCTAssertEqual(log.total, 0, "Pending is not a valid silent frame")
+            pcm.release()
+            let completed = await until(5) { log.total == 1 }
+            XCTAssertTrue(completed)
+            let result = try XCTUnwrap(log.all("silent").first)
+            guard case let .ready(bands, raster) = result else { XCTFail(Self.name(result)); continue }
+            XCTAssertTrue(bands.allSatisfy { $0 == 0 })
+            XCTAssertNotNil(raster, "Both valid-zero display modes retain their existing geometry")
+            if let raster { XCTAssertTrue(SpectrumFrameRendererTests.bytes(raster.image).contains { $0 != 0 }) }
+            let outside = await get(c, id, 300)
+            XCTAssertEqual(Self.name(outside), "notVisible", "No timing offset extends Spectrum visibility")
+            assertTimingCacheBounds(c, mode.rawValue)
+        }
+    }
+
     private func frequencyControlEdits(_ original: SpectrumItemStyle) -> [(String, SpectrumItemStyle)] {
         var low = original; low.lowHz = 200
         var high = original; high.highHz = 800

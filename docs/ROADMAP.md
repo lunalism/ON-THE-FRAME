@@ -2,6 +2,8 @@
 
 ## 현행 기능과 검증 경계
 
+**2026-11-18 · SPECTRUM-FX-01C-CLOSE-01 구현 완료·소유자 핵심 수락:** `feature/spectrum-effects` @ `6f4de7908fa38457c41469e65105485c575d75c3` 위의 Analysis Window·Audio Offset 구현에 대해 소유자가 실제 Mac에서 확인한 **핵심 직접 관찰 9항목 PASS**를 기록한다. 이전 자동 8개 앱/helper 그룹의 1230 PASS와 엔진 fixture 정정 이력은 별도 증거이며 이번 CLOSE에서 빌드·제품 검사를 재실행하지 않는다. 수락 범위·물리 미시험 경계는 [아래 기록](#spectrum-fx-01c-핵심-수락과-다음-제안), 로컬 커밋 승인은 [결정 기록](DECISIONS.md#2026-11-18-spectrum-fx-01c-close-01-핵심-수락과-로컬-체크포인트)을 따른다. 원격 push·merge와 FX-02 구현 승인은 없으며 아래 FX-01B-CLOSE-01·DOC-ALIGN-01 문단은 당시 이력이다.
+
 **2026-11-18 · SPECTRUM-FX-01B-CLOSE-01 현재 상태:** `feature/spectrum-effects`는 통합 main `90ce4db48ea07e216afe709a5f920628f005eb2a`에서 시작했다. 시작/끝 주파수·밴드 수 세 Inspector 필드는 구현 완료이며, 이전 RECOVERY의 **763 PASS / 0 FAIL / 0 SKIP**와 소유자가 직접 확인한 **핵심 관찰 10항목 PASS**를 구분한다. 이번 CLOSE-01에서는 빌드·제품 검사를 재실행하지 않는다. 최초 memory-pressure 중지와 별도 승인 복구 성공 이력, 수동 미시험 항목은 [아래 수락 범위](#spectrum-fx-01b-핵심-수락과-다음-단계)에 남긴다. 이번 승인은 로컬 체크포인트 범위이며 원격 게시·merge 승인이 아니다. 아래 DOC-ALIGN-01 Git 표와 과거 실행 수치는 당시 이력이다. UX-02는 planned v1.1 deferred WIP·미수락이며 현재 FX 브랜치에 없다([수락·체크포인트 경계](DECISIONS.md#2026-11-18-spectrum-fx-01b-close-01-핵심-수락과-로컬-체크포인트)).
 
 **2026-11-17 · DOC-ALIGN-01 문서 정렬.** 소유자가 확정한 방향은 macOS **Composition-first Music Visual Editor**다. 음악 중심의 이미지·영상·오디오 구성, 자막·오디오 반응형 Spectrum, Preview·최종 영상 내보내기를 우선한다. 현재 완전한 Composition 시스템이나 After Effects 전체 기능이 구현됐다는 뜻은 아니다. 고급 전환은 **유보**한다([방향·문서 권위 amendment](DECISIONS.md#2026-11-17-doc-align-01-현행-방향과-문서-정렬)).
@@ -29,7 +31,7 @@
 | 이미지 | DEBUG && OTF_IMAGE_IMPORT 빌드와 -OTFEnableImageImport 실행 인수 모두 필요. 한정된4096px/ICC·Display P3 입력과 ColorSync→sRGB Preview 표현. 원본·전체 해상도 descriptor는 보존하며 검증/Preview용 일시적 proxy의 긴 변은 최대2048px다. full-resolution 4K Preview/Export·무제한 이미지·공개 Release 지원 아님 |
 | 자막 | 글·모양·효과·Preview·자막 포함 일반 Export 구현. 전체 Preview/Export parity 수락과 별개 |
 | Spectrum 생성·소스 | 생성은 Debug 전용. 기존 항목의 소스 선택·계보·이동·트림·편집은 별도 경로. sourceKey·시간/소스 매핑과 겹침/누락 판정 유지 |
-| Spectrum 숫자 | 기존7개와 FX-01B 주파수/밴드3개 필드의 정수 UI·숫자 자체 mouse scrub·live Preview·한 gesture Undo·취소 구현. FX-01B 이전 자동 회귀763 PASS와 소유자 핵심10관찰 PASS. Escape·deactivation 등 이번 FX 수동 미시험 경계는 아래 기록을 따름. untouched legacy milli를 몰래 정수화하지 않음. 기존 slider·ColorPicker 유지 |
+| Spectrum 숫자 | 기존7개와 FX-01B 주파수/밴드3개·FX-01C 창/오프셋2개 필드의 정수 UI·숫자 자체 mouse scrub·live Preview·한 gesture Undo·취소 구현. FX-01B 이전 자동763 PASS·소유자 핵심10관찰, FX-01C 이전 자동1230 PASS·소유자 핵심9관찰을 구분. Escape·deactivation 등 물리 미시험 경계는 아래 기록을 따름. untouched legacy milli를 몰래 정수화하지 않음. 기존 slider·ColorPicker 유지 |
 | Digital / Analog | Digital 양수 막대와 Analog 유지. 유효하게 완료된 정확한0높이 Digital은 기존 중심·밴드 수·두께·색·알파의 독립 점. missing/pending/stale·비활성 구간을 가짜 무음으로 바꾸지 않음 |
 | Seek·이미지 playback | temporary timing nil에서 eligible Spectrum 작업 보존, exact PTS/token/source/generation/revision/epoch 검증 유지. 이미지 재구성 중 Play는 session/generation/item/readiness/seek 확인 뒤1회 소비, Pause·무효화로 취소 |
 | 저장·열기 | 앱 persistence·image-aware codec·raw ProjectFile의 범위를 구분. [현행 형식 표](PRODUCT.md#현행-프로젝트-형식과-기능-경계)를 따르며 일괄 Format10 저장/모든 decoder의1–10 호환으로 설명하지 않음 |
@@ -61,7 +63,27 @@
 - **입력 준비와 미해결 UI 경계:** 앞선 이미지 fixture 실행·원본 재연결 문제 이력은 보존하며, 이후 이미지와 WAV의 재연결 성공은 위 소유자 관찰로 확인됐다. 실제로 사용한 재연결 절차나 launcher는 확정하지 않는다. 이미지 기능은 기존 build/runtime gate를 그대로 요구하며, gate-off에서 이미지 재연결 행이 숨겨지고 File > 미디어 재연결의 이미지 처리가 동작하지 않는 별도 UX 문제는 이번 FX에서 수정하거나 닫지 않았다.
 - **호환·범위:** 기존 analysis 필드와 Format 10 persistence를 사용하며 schema·FFT·오디오 시간 의미를 바꾸지 않았다. 공개 Spectrum Export는 비활성이다. 한정된 내부 Export 검사와 핵심 수락으로 full Preview/Export parity를 선언하지 않는다.
 
-DOC-ALIGN-01 당시 **미구현 계획 순서**는 SPECTRUM-UX-02 → SPECTRUM-FX-01 → SPECTRUM-FX-02 → SPECTRUM-SHADOW-01이었다. 후속 소유자 지시로 UX-02는 **planned v1.1 deferred WIP·미수락**으로 분리했고 FX-01B 세 분석 필드의 구현과 핵심 수락을 먼저 마쳤다. **다음 계획은 FX-01C의 Analysis Window(`windowMs`)·Audio Offset(`offsetMs`) UI 노출과 검증**이며 아직 구현하지 않았다. 기존 centered window·offset 부호·오디오 경계·trim/move 시간 의미를 유지할 세부 범위의 별도 승인이 필요하고, Adobe Audio Duration과의 완전한 동등성을 확정하지 않는다. 이번 CLOSE-01은 FX-01C 구현 승인이 아니다. 다른 FX·Shadow와 UX-02의 별도 가이드/핸들 작업도 자동으로 승인하지 않는다. 빌드·시험 전에는 [승인 절차와 자원 안전](../app/README.md#현재-실행-승인과-자원-안전)을 먼저 확인한다.
+DOC-ALIGN-01 당시 **미구현 계획 순서**는 SPECTRUM-UX-02 → SPECTRUM-FX-01 → SPECTRUM-FX-02 → SPECTRUM-SHADOW-01이었다. 후속 소유자 지시로 UX-02는 **planned v1.1 deferred WIP·미수락**으로 분리했고 FX-01B 세 분석 필드의 구현과 핵심 수락을 먼저 마쳤다. **CLOSE-01 당시 다음 계획은 FX-01C의 Analysis Window(`windowMs`)·Audio Offset(`offsetMs`) UI였으며, 후속 명시적 FX-01C 작업 승인으로 현재 구현·한정 자동 검증과 핵심 수락을 확인했다.** centered window·offset 부호·오디오 경계·trim/move 의미를 유지하고 Adobe Audio Duration 동등성은 미검증이다. CLOSE-01 자체가 FX-01C 구현을 승인했던 것으로 소급 해석하지 않는다. 다른 FX·Shadow와 UX-02의 별도 가이드/핸들 작업도 자동으로 승인하지 않는다. 빌드·시험 전에는 [승인 절차와 자원 안전](../app/README.md#현재-실행-승인과-자원-안전)을 먼저 확인한다.
+
+### SPECTRUM-FX-01C 핵심 수락과 다음 제안
+
+소유자는 실제 Mac에서 아래 **9개 핵심 관찰을 PASS**로 보고했고, 이 확인 중 추가 문제는 보고하지 않았다. 모든 조건의 수동 회귀를 검증했다는 뜻은 아니다.
+
+1. Analysis Window 정수 입력.
+2. Analysis Window 숫자 자체의 수평 scrubbing.
+3. Audio Offset +500ms 입력.
+4. Audio Offset −500ms 입력.
+5. Offset 변경 뒤 Preview가 눈에 보이게 갱신됨.
+6. Analysis Window Undo/Redo.
+7. Audio Offset Undo/Redo.
+8. 저장·다시 열기 뒤 Analysis Window 300ms 유지.
+9. 저장·다시 열기 뒤 Audio Offset −500ms 유지.
+
+- **구현 완료 범위:** 오디오 분석의 창 길이(1–1000ms, 2pt/ms)·오프셋(−10000–10000ms, 1pt/ms), 기존4pt 문턱·정수 native 편집·전체 style 검증·한 scrub Undo·취소를 연결했다. Store 두 허용 목록 외 모델/FFT/renderer/schema/계보 변경은 없다. Maximum Height와 다른 필드 위치를 유지한다.
+- **시간·안전:** centered half-open 분석 창·기존 표본 반올림·offset 부호·clip/file 밖0·보수적 overlap 거절·정확 frame/source/세대 검증을 유지한다. 한정 내부 Export 결과로 full parity를 선언하지 않는다.
+- **이전 FX-01C 자동 증거(이번 CLOSE에서 재실행하지 않음):** 첫 시도의 Debug1회 성공·서명/App Sandbox/source152 일치. 8개 앱/helper 그룹 합계 **1230 PASS/0 FAIL/0 SKIP**이며 numeric443·실제Inspector95·설치Preview190·playback146·image130·overlay61·cached자막10·실제미디어155가 각각 PASS/0 FAIL/0 SKIP, Seek18개/raster66/66·잘림0. 엔진 최초99개는98 PASS/새fixture1 FAIL, 기존ripple안전 규칙에 맞게 fixture만 정정한1개 재실행은1 PASS다. 서로 다른99개의 최신 결과가 PASS이며 전체재실행은 아니다. 합성 timing/경계/계보·한정 실제 internal worker4설정154prepare/18비교를 포함하며 자세한 범위는 [결정 기록](DECISIONS.md#2026-11-18-spectrum-fx-01c-분석-창과-오디오-오프셋)을 따른다. 최대 단일1226.4MiB·aggregate1746.8MiB·관리약17.00GiB·pressure1, 자원중지/자동재시도0. 기존 FX-01B 수치와 owner 핵심10관찰은 과거 별도 증거다.
+- **물리 미시험과 입력 경계:** Escape·앱/창 deactivation 취소·모든 focus/keyboard edge case·물리 UI의 극단 offset 경계·장시간·다른 하드웨어·측정 FPS·전체 Preview/internal Export parity는 소유자 수락에 포함되지 않는다. 저장값300/−500은 소유자의 직접 관찰이며 특정 디스크 파일·경로를 이번에 검사했다는 뜻이 아니다. 사용한 launcher·재연결 절차도 추정하지 않는다. 이미지가 든 프로젝트의 custom Debug와 `-OTFEnableImageImport` 요구 및 helper bookmark가 owner sandbox 접근을 보장하지 않는 제약은 그대로다.
+- **유지되는 OPEN과 다음 제안:** native Inspector7 FAIL/4 SKIP·내부 Undo/Redo Seek 지연·image gate-off 재연결 UI, 장시간/다른 하드웨어/full Preview/Export parity 미검증·public Spectrum Export OFF. schema·migration 변경은 없다. UX-02는 planned v1.1 deferred WIP·미수락이다. **다음 제안 단계는 SPECTRUM-FX-02 설계 검토**이며 범위·구현은 미승인·미구현이다. 별도 소유자 검토 전 시작하지 않는다. 이번 CLOSE는 수락 기록과 로컬 체크포인트만 승인하며 push·merge는 하지 않는다.
 
 ## 이전 실행·수락 기록
 

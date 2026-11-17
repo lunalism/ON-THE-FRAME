@@ -1,5 +1,9 @@
 # 오디오 스펙트럼 — 첫 구현 설계와 기술 타당성 검사(2026-10-24, 제품 구현 전)
 
+**2026-11-18 SPECTRUM-FX-01C-CLOSE-01 현행 수락:** Analysis Window·Audio Offset 구현 범위를 완료했고 소유자가 실제 Mac에서 확인한 **핵심 직접 관찰 9항목 PASS**를 기록한다. 이전 8개 앱/helper 그룹1230 PASS와 엔진 최초98 PASS/fixture1 FAIL→fixture만 정정한1개 재검사PASS(99개 최신 개별 결과·전체 재실행 아님)는 과거 자동 증거다. 이번 CLOSE에서 빌드·제품 검사는 재실행하지 않는다. 물리 미시험 경계·공개 Spectrum Export 비활성·Format 10과 기존 시간 계약은 유지하며 **FX-02는 다음 제안일 뿐 미승인·미구현**이다. 로컬 체크포인트 승인과 원격 게시를 구분한다([수락 범위](DECISIONS.md#2026-11-18-spectrum-fx-01c-close-01-핵심-수락과-로컬-체크포인트)). 아래 FX-01C 구현 기록의 수락 대기와 FX-01B-CLOSE-01의 다음 계획은 작성 당시 이력이다.
+
+**2026-11-18 SPECTRUM-FX-01C 현행 amendment:** 기존 창/오프셋 모델 필드를 Audio Analysis Inspector에 연결했다. 창1–1000ms·오프셋±10000ms 정수, 창2pt/ms·오프셋1pt/ms와 기존4pt scrub 문턱·native 편집·gesture Undo/취소를 사용한다. 새 Debug 빌드·서명/App Sandbox·source152를 확인했고 numeric443·실제Inspector95·설치Preview190·실제미디어155 및 기존 앱 회귀가 PASS다. 엔진 최초98 PASS/fixture1 FAIL 뒤 해당1개만 정정·재실행PASS하여 서로 다른99개 최신결과가PASS다(전체 재실행 아님). 내부 worker4설정154prepare/18비교는 한정된 증거다. **owner 물리 수락은 대기**다. 아래 FX-01B-CLOSE-01의 “다음 계획”은 당시 상태로 보존하며 이번 별도 승인이 그 후속이다([현행 기록](DECISIONS.md#2026-11-18-spectrum-fx-01c-분석-창과-오디오-오프셋)).
+
 **2026-11-18 SPECTRUM-FX-01B-CLOSE-01:** 기존 모델의 시작 주파수·끝 주파수·밴드 수를 Inspector 오디오 분석 그룹에 노출한 구현은 완료됐다. 48kHz product-style 계약의 1≤시작<끝≤24000Hz, 밴드1–1024 정수와 기존 숫자 직접 입력·수평 scrub(4pt 문턱, 주파수1pt/Hz·밴드4pt/개), live Preview·gesture 한 Undo·취소 구조를 사용한다. 반대 주파수를 자동 변경하지 않고 untouched legacy milli를 보존한다. 이전 RECOVERY의 **763 PASS/0 FAIL/0 SKIP**, 소유자의 **핵심 관찰10항목 수동 PASS**, 아래 미시험 경계는 각각 별도다. 이번 CLOSE-01에서는 빌드·제품 검사를 재실행하지 않는다. 최초 memory-pressure 중지·별도 승인 복구 성공·이미지/WAV 재연결 관찰은 보존한다. Format 10·기존 FFT/renderer·오디오 시간 의미·공개 Spectrum Export 비활성은 유지한다. FX-01C의 windowMs/offsetMs UI는 다음 계획이고 이번에 구현하지 않는다. UX-02는 planned v1.1 deferred WIP·미수락이며 FX 브랜치에 포함하지 않는다([핵심 수락·로컬 체크포인트](DECISIONS.md#2026-11-18-spectrum-fx-01b-close-01-핵심-수락과-로컬-체크포인트)).
 
 ON THE FRAME의 오디오 스펙트럼(R-10~R-12) 설계다. 표시:
@@ -15,15 +19,23 @@ ON THE FRAME의 오디오 스펙트럼(R-10~R-12) 설계다. 표시:
 |---|---|---|---|---|
 | SPECTRUM-UX-01 | 기존 숫자 7필드 자체의 직접 scrubbing, 정수 입력, live Preview, 드래그별 Undo와 취소. untouched legacy milli 정밀도 유지 | 집중 scrubbing 138 PASS, 실제 Inspector의 합성 scrubbing 33/33 PASS. 물리 입력 수락과 별개 | 시험한 Mac의 6개 시나리오 **6/6 PASS** | `30e02a54ae67e36959d8baef10f04dd01e3d8eef`, feature에 게시됨 |
 | SPECTRUM-FX-01B | 시작/끝 주파수와 밴드 수의 기존 모델 필드를 정수 입력·직접 scrub으로 편집. 분석 revision/과거 결과 거부와 기존 cache 한도 유지 | 이전 RECOVERY 합계763 PASS/0 FAIL/0 SKIP. Seek18개 캡처·한정 raster66/66은 별도. CLOSE-01 재실행 없음 | 이미지/WAV 재연결부터 저장·다시 열기까지 [명시된 핵심10관찰 PASS](ROADMAP.md#spectrum-fx-01b-핵심-수락과-다음-단계). Escape·deactivation 등 미시험 범위 유지 | CLOSE-01은 로컬 체크포인트 승인 범위이며 원격 게시·merge 승인이 아님 |
+| SPECTRUM-FX-01C | 기존 windowMs/offsetMs 정수 입력·직접 scrub과 분석 revision 경로 연결 완료. FFT/renderer/Format 10·시간 계약 유지 | 이전8개 앱/helper 그룹1230 PASS/0 FAIL/0 SKIP. 엔진 최초98 PASS/1 fixture FAIL 뒤 그1개만 정정·재검사PASS하여99개 최신 개별 결과PASS(전체 재실행 아님). Seek18/raster66·내부4설정154prepare/18비교는 별도 | 시험한 Mac의 [명시된 핵심9관찰 PASS](ROADMAP.md#spectrum-fx-01c-핵심-수락과-다음-제안). 물리 미시험 경계는 아래에 유지 | FX-01C-CLOSE-01은 로컬1커밋 승인 범위. 원격 push·merge 없음 |
 | SPECTRUM-ZERO-01 | 유효한 Digital 0높이 최소 점과 실제 내장 overlay의 새 ready-zero 계약 | 01C 엔진 85·실제 내장 overlay 61·zero Preview 23이 각각 PASS/0 FAIL/0 SKIP. Seek 캡처 18/18·한정 raster 비교 66/66 일치 | 시험한 Mac의 paused0·점 모양/간격/색·음악 반응·활성 구간·편집/Undo·Seek/이미지 재생의 **6/6 PASS** | `f2b80444b439ad59a3870da3350a1385d388552a`, feature에 게시됨 |
 
-이 표의 수치는 각 작업의 기존 실행 결과다. 이번 CLOSE-01에서는 빌드·제품 테스트를 재실행하지 않는다. 구현, 자동 검증, 소유자 수락, Git 게시를 각각 구분하며 어느 하나가 전체 제품 완료를 뜻하지 않는다. Spectrum 만들기는 Debug 전용이고, 이미 존재하는 Spectrum의 편집·소스 계보·Preview 경로와 공개 Release 준비 상태는 별도로 판단한다.
+이 표의 수치는 각 작업의 기존 실행 결과다. 이번 FX-01C-CLOSE-01에서는 빌드·제품 테스트를 재실행하지 않는다. 구현, 자동 검증, 소유자 수락, Git 게시를 각각 구분하며 어느 하나가 전체 제품 완료를 뜻하지 않는다. Spectrum 만들기는 Debug 전용이고, 이미 존재하는 Spectrum의 편집·소스 계보·Preview 경로와 공개 Release 준비 상태는 별도로 판단한다.
 
 - **현행 zero 계약:** 유효하고 완료된 분석의 Digital 밴드 높이가 0이면 기존 밴드 중심에 설정 두께 직경의 독립 원을 그린다. 기존 위치·밴드 수·간격·색·알파·표시 방향을 사용한다. 양수 막대와 Analog 기하는 유지하며 Reaction 0·최대 높이 0도 같은 0높이 기하다. FFT 값에 양수 바닥을 더하거나 0초 전용 placeholder를 만들지 않는다.
 - **가용성·시간 경계:** missing·unavailable·pending·실패·stale 결과를 유효한 무음으로 바꾸지 않고, Spectrum의 활성 구간 밖에서는 표시하지 않는다. 정확 PTS·seek token·player item·source identity·generation/revision/epoch 검증과 원래 오디오 시간 매핑을 유지한다. 이전 프레임을 현재 프레임으로 승인하지 않는다.
 - **공유 그리기와 Export 범위:** Preview와 내부 Export는 같은 분석·`SpectrumFrameRenderer` 계약을 사용한다. 실제 내부 worker와 Preview의 일부 프레임 bands·전체 raster, 120프레임 checkpoint 인코딩/디코딩 검증은 한정 증거다. **전체 Preview/Export parity는 미검증이고 공개 Spectrum Export는 계속 비활성**이다. 내부 Debug slice의 통과를 일반 Export 지원으로 표시하지 않는다.
 - **열린 제한:** Native Inspector **7 FAIL/4 SKIP**을 유지한다. 내부 Undo/Redo Seek 설치 지연 **53.6→116.2ms median** 조사는 OPEN이며 화면 FPS 측정이 아니다. 장시간 성능·다른 하드웨어·전체 Preview/Export parity는 미검증이다. 이전 소유자 수락은 시험한 시나리오 밖으로 확대하지 않는다.
-- **후속 계획 — 이력과 현행 구분:** DOC-ALIGN-01 당시 순서는 **SPECTRUM-UX-02 → SPECTRUM-FX-01 → SPECTRUM-FX-02 → SPECTRUM-SHADOW-01**이었다. 후속 소유자 지시로 UX-02는 planned v1.1 deferred WIP·미수락으로 분리하고 FX-01B의 세 분석 필드를 먼저 구현·핵심 수락했다. 다음 계획인 **FX-01C의 Analysis Window/Audio Offset UI**와 다른 FX·Shadow는 별도 구현 승인이 필요하다. 이번 CLOSE-01은 windowMs/offsetMs 노출이나 의미 변경을 구현하는 승인이 아니다.
+- **후속 계획 — 이력과 현행 구분:** DOC-ALIGN-01 당시 순서는 **SPECTRUM-UX-02 → SPECTRUM-FX-01 → SPECTRUM-FX-02 → SPECTRUM-SHADOW-01**이었다. 후속 소유자 지시로 UX-02는 planned v1.1 deferred WIP·미수락으로 분리하고 FX-01B 세 분석 필드와 FX-01C 창/오프셋의 구현·핵심 수락을 마쳤다. 다음 제안은 **SPECTRUM-FX-02 설계 검토**이며 세부 범위·구현은 미승인·미구현이다. 다른 FX·Shadow도 별도 승인이 필요하고 과거 CLOSE-01이 후속 구현을 승인했던 것으로 소급하지 않는다.
+
+### FX-01C 핵심 수락과 다음 제안
+
+- **소유자 직접 관찰 9항목 PASS:** (1) Analysis Window 정수 입력, (2) 창 숫자의 수평 scrubbing, (3) Audio Offset +500ms 입력, (4) −500ms 입력, (5) offset 변경 뒤 눈에 보이는 Preview 갱신, (6) 창 Undo/Redo, (7) offset Undo/Redo, (8) 저장·다시 열기 뒤 창300ms 유지, (9) 저장·다시 열기 뒤 offset−500ms 유지다. 해당 확인 중 추가 문제는 보고되지 않았다. 전체 수동 회귀 수락은 아니며 저장 관찰을 특정 파일·launcher·재연결 절차의 검사로 확대하지 않는다([정확한 관찰 목록](ROADMAP.md#spectrum-fx-01c-핵심-수락과-다음-제안)).
+- **이전 자동 증거:** 앱/helper8그룹1230 PASS/0 FAIL/0 SKIP와 첫 시도 Debug 성공, 엔진 최초98 PASS/1 fixture FAIL→그1개만 fixture 정정·재검사PASS,99개 최신 개별 결과를 구분한다. 전체 엔진 suite 재실행은 없었고 최초 실패를 보존한다. Seek18/18·raster66/66·내부 worker4설정154순차프레임/18비교는 한정 증거다. 이 CLOSE에서 빌드·제품 검사를 다시 실행하지 않았으며 CGImage/layer 설치·합성 native 입력을 화면 FPS나 물리 수락으로 해석하지 않는다.
+- **물리 미시험·유지되는 제한:** Escape·앱/창 deactivation 취소, 모든 focus/keyboard edge case, 물리 UI의 극단 offset 경계, 장시간·다른 하드웨어·측정 FPS·전체 Preview/internal Export parity는 미검증이다. Native Inspector7 FAIL/4 SKIP·내부 Undo/Redo Seek 지연·image gate-off 재연결 UX는 OPEN이며 public Spectrum Export는 OFF다. custom Debug/image runtime gate와 sandbox 권한 요구도 유지한다.
+- **호환과 다음 제안:** 기존 centered window·sample rounding·signed offset·clip/source zero-fill·보수적 overlap·trim/split/move/계보·FFT/renderer와 Format 10을 유지하며 schema/migration 변경은 없다. 이번 승인은 로컬 체크포인트 범위다. **FX-02는 다음 제안 단계로 설계 검토 준비 상태일 뿐 미승인·미구현**이며 소유자 별도 검토 전 착수하지 않는다. UX-02는 planned v1.1 deferred WIP·미수락이다.
 
 ### FX-01B 수락 범위와 후속 UI
 
@@ -31,7 +43,7 @@ ON THE FRAME의 오디오 스펙트럼(R-10~R-12) 설계다. 표시:
 - **이번 FX 수동 미시험:** Escape·앱/창 deactivation 취소, 모든 focus/keyboard edge case, 빠른 반복 scrub, 성능/화면 FPS, 장시간·다른 하드웨어·full Preview/Export parity는 소유자 수락에 포함되지 않는다. 이전 Native Inspector7 FAIL/4 SKIP과 내부 Undo/Redo Seek 지연도 OPEN이다.
 - **자동 증거와 이력:** 최초 FX-01B 엔진89·실제 미디어 엔진42 PASS와 memory pressure2에 의한 Debug 안전 중지(exit −15)를 보존한다. 별도 승인 RECOVERY 제품 빌드1회가 성공했고 서명·소스 fingerprint를 검증했다. 그 RECOVERY의 numeric284·실제 Inspector43·FX Preview87·playback146·image130·overlay61·cached subtitle10·한정 internal Export2의 합계가 **763/763 PASS**이며 Seek18개/raster66/66은 별도다. 이 CLOSE-01에서 재실행하거나 최초 엔진89/42를 다시 합산하지 않았다. 설치 layer/CGImage·합성 native 이벤트는 화면-level presentation이나 owner 손 입력을 대신하지 않는다.
 - **분석·호환 경계:** 분석 속성 변경과 Escape 복원은 authoritative revision 선행 갱신→이전 paused batch/raster 정리→새 결과 요청을 사용한다. geometry-only retention, source/정확 PTS/seek token/player item/generation/revision/epoch 검증, bounded PCM/band cache를 유지한다. 기존 Codable 필드로 Format 10을 유지했고 schema 변경이나 공개 Spectrum Export 활성화는 없다. 이전 fixture 실행·원본 재연결 문제 뒤 owner의 이미지/WAV 재연결 성공을 기록하되, image gate-off의 행 숨김/File > 미디어 재연결의 이미지 처리 불일치는 별도 미해결 UX 문제로 남긴다.
-- **FX-01C 계획:** 기존 centered analysis window와 offset의 타임라인/소스 시간·부호·경계 처리를 유지할 UI/검증 범위의 별도 승인이 필요하다. Adobe Audio Duration과 완전 동등하다고 확정하지 않으며 windowMs/offsetMs UI는 아직 구현하지 않았다. Maximum Height는 기존 control을 유지한다. UX-02의 Preview 선택·가이드·body/endpoint drag·gesture Undo/Redo는 planned v1.1 deferred·미완료·미수락 상태로 분리한다.
+- **FX-01C 후속 승인·구현:** 기존 centered analysis window와 offset의 타임라인/소스 시간·부호·경계 처리를 유지하는 UI/검증 범위가 별도로 승인됐다. 두 필드는 연결됐으며 자동 검증·물리 수락 상태는 위 현행 amendment를 따른다. Adobe Audio Duration과 완전 동등하다는 주장은 없다. Maximum Height는 기존 control을 유지한다. UX-02의 Preview 선택·가이드·body/endpoint drag·gesture Undo/Redo는 planned v1.1 deferred·미완료·미수락 상태로 분리한다.
 
 아래 표제·초기 설계·날짜별 실행 및 수락 기록은 당시 이력으로 보존한다. 옛 “Digital 모두0 → nil”, 빌드 중지, 수락·게시 대기는 그때의 상태이며 위 현행 계약과 게시 상태가 후속 상태다. 이전 실패·검증 한계·미승인 제안과 소유자 결정은 소급 삭제하거나 변경하지 않는다.
 
@@ -150,6 +162,8 @@ ON THE FRAME의 오디오 스펙트럼(R-10~R-12) 설계다. 표시:
 - 시간 다듬기: 첫 단계는 없음(미룸). 결정적인 다듬기는 가능하다 — 그 프레임과 앞 고정 개수 프레임의 분석 값만으로 계산하면(같은 함수로 다시 계산) 탐색 순서와 무관하다. 넣을 때 계산 비용(프레임마다 앞 프레임 몇 개 더)을 재야 한다.
 
 ### 2.5 오프셋·무음·끝
+
+**FX-01C 편집 계약(기존 알고리즘 유지):** `N = windowMs * sampleRate / 1000`, `start = frameSample + offsetSamples - N/2`, `[start, start+N)`을 사용한다. ms→표본 정수 변환은0쪽 절삭이며 frame→sample의 기존 반올림을 바꾸지 않는다. Inspector 범위는1–1000ms(기존 최소2표본)와−10000–10000ms이고 전체 style 유효성을 먼저 검사한다. 양수는 뒤의 오디오·음수는 앞의 오디오, 표시 PTS/클립 길이·속도는 불변이다. clip/file 경계 밖은0이며 missing/pending·stale는 valid silence가 아니다. source lineage·split/trim/move·gain/fade/mute, 현재 프레임 주변 `window/2 + abs(offset)`의 보수적 overlap 거절을 유지한다. exact-shifted-window 정책으로 바꾸지 않는다. FFT·renderer·Format 10 Codable 필드는 불변이다. window/offset 변경과 Escape 복원은 FX-01B의 authoritative revision/paused batch 정리 경로를 재사용하고 bounded PCM/band caches를 보존한다. 공개 Spectrum Export OFF·전체 parity 미검증이다.
 
 - 오프셋: 분석 중심을 정수 표본으로 옮긴다(+ = 뒤의 소리를 지금 보임).
 - 무음 상태: 모든 밴드 0 — 디지털은 그리지 않음, 아날로그는 기준선에 선 하나 **[권고]**.

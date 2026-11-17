@@ -205,3 +205,113 @@ final class SpectrumAnalysisTests: XCTestCase {
         print("SPECTRUM alac441 resampled: chunked-vs-whole max diff \(diff[worst]) at \(worst) (chunk 12000), mean \(diff.reduce(0, +) / Float(diff.count)), tone band \(v[k])")
     }
 }
+
+extension SpectrumAnalysisTests {
+    /// Hand-calculated ranges pin centered, half-open windows and signed integer
+    /// conversion independently of the FFT output and the UI's millisecond fields.
+    func testTimingWindowBoundsRoundingAndFFTLengths() {
+        let cases: [(rate: Int, fps: Int, frame: Int, ms: Int, offset: Int, lower: Int, upper: Int)] = [
+            (48_000, 30, 0, 1, 0, -24, 24),
+            (48_000, 30, 0, 1000, 0, -24_000, 24_000),
+            (48_000, 30, 90, 1, 0, 143_976, 144_024),
+            (48_000, 30, 179, 1000, 0, 262_400, 310_400),
+            (48_000, 30, 0, 1, 10_000, 479_976, 480_024),
+            (48_000, 30, 0, 1000, -10_000, -504_000, -456_000),
+            (48_000, 30, 90, 1000, 10_000, 600_000, 648_000),
+            (48_000, 30, 179, 1000, -10_000, -217_600, -169_600),
+            // 44.1 samples/ms truncates to 44 for both +1 and -1ms.
+            // Frame 1 is 1838 samples; frame -1 is -1837 (existing half-up rule).
+            (44_100, 24, 1, 1, -1, 1772, 1816),
+            (44_100, 24, 1, 1, 1, 1860, 1904),
+            (44_100, 24, -1, 1, -1, -1903, -1859),
+            (44_100, 24, 1, 3, -1, 1728, 1860),
+            (8_000, 24, 1, 1, 0, 329, 337)
+        ]
+        for c in cases {
+            let settings = SpectrumAnalysisSettings(windowMs: c.ms, offsetMs: c.offset)
+            XCTAssertNil(settings.validationError(rate: c.rate))
+            XCTAssertEqual(SpectrumAnalysis.window(frame: c.frame, fps: c.fps, rate: c.rate, settings: settings), c.lower..<c.upper)
+        }
+        XCTAssertEqual(SpectrumFFT(n: 48).n, 48)
+        XCTAssertEqual(SpectrumFFT(n: 48).m, 64)
+        XCTAssertEqual(SpectrumFFT(n: 48_000).n, 48_000)
+        XCTAssertEqual(SpectrumFFT(n: 48_000).m, 65_536)
+    }
+
+    func testTimingExtremesKeepClipAndFileZeroFillDistinctFromMissingPCM() async throws {
+        let pieces = [piece(180)] // Six seconds, source [0, 288000).
+        let spans: [(frame: Int, ms: Int, lower: Int, upper: Int)] = [
+            (0, 1, 0, 24), (0, 1000, 0, 24_000),
+            (90, 1, 143_976, 144_024), (90, 1000, 120_000, 168_000),
+            (179, 1, 286_376, 286_424), (179, 1000, 262_400, 288_000)
+        ]
+        for c in spans {
+            let window = SpectrumAnalysis.window(frame: c.frame, fps: 30, rate: 48_000, settings: .init(windowMs: c.ms))
+            let actual = SpectrumAnalysis.sourceSpans(pieces, window: window, fps: 30, rate: 48_000)
+            XCTAssertEqual(actual.count, 1)
+            XCTAssertEqual(actual.first?.timeline, c.lower..<c.upper)
+            XCTAssertEqual(actual.first?.sourceStart, c.lower)
+        }
+        for ms in [1, 1000] {
+            for offset in [-10_000, 10_000] {
+                let settings = SpectrumAnalysisSettings(windowMs: ms, offsetMs: offset)
+                for frame in [0, 90, 179] {
+                    let chunks = try SpectrumAnalysis.chunks(frame: frame, pieces: pieces, fps: 30, rate: 48_000, settings: settings, chunkSamples: 24_000)
+                    XCTAssertTrue(chunks.isEmpty, "The entire shifted window is outside this clip")
+                    var reads = 0
+                    let zero = try SpectrumAnalysis.bands(frame: frame, pieces: pieces, fps: 30, rate: 48_000, channelCount: 1,
+                        chunkSamples: 24_000, settings: settings) { _ in reads += 1; return nil }
+                    XCTAssertEqual(zero, [Float](repeating: 0, count: settings.bands))
+                    XCTAssertEqual(reads, 0, "Known out-of-clip silence needs no invented PCM")
+                }
+            }
+        }
+        let source = try await open("aud-steady48s.wav")
+        for ms in [1, 1000] {
+            // An intentionally longer analysis piece reaches beyond the real six-
+            // second file. The real provider supplies file-end zero padding.
+            let zero = try await bands(source, frame: 200, pieces: [piece(600)], settings: .init(windowMs: ms))
+            XCTAssertTrue(zero.allSatisfy { $0 == 0 })
+        }
+        XCTAssertThrowsError(try SpectrumAnalysis.bands(frame: 90, pieces: pieces, fps: 30, rate: 48_000, channelCount: 1,
+            chunkSamples: 24_000, settings: .init(windowMs: 1000)) { _ in nil }) { error in
+            guard case .decodeFailed = error as? SpectrumAnalysisError else { return XCTFail("Missing PCM became silence: \(error)") }
+        }
+    }
+
+    func testSignedOffsetsMatchShiftedFramesAndContinuousCuts() async throws {
+        let source = try await open("aud-wav48s.wav")
+        let audio = ClipAudio(volumePercent: 80, fadeIn: .init(length: 60), fadeOut: .init(length: 30))
+        let weighted = [piece(100, audio: audio, lane: 0.7)]
+        for ms in [1, 90, 1000] {
+            for (offset, frameShift) in [(-500, -15), (500, 15)] {
+                for frame in [15, 30, 45] {
+                    let shifted = try await bands(source, frame: frame, pieces: weighted, settings: .init(windowMs: ms, offsetMs: offset))
+                    let reference = try await bands(source, frame: frame + frameShift,
+                        pieces: weighted, settings: .init(windowMs: ms))
+                    XCTAssertEqual(shifted, reference, "Signed sampling shift preserves per-sample gain/fade, ms=\(ms), offset=\(offset)")
+                }
+            }
+        }
+        for ms in [1, 1000] {
+            for offset in [-500, 0, 500] {
+                let settings = SpectrumAnalysisSettings(windowMs: ms, offsetMs: offset)
+                let whole = try await bands(source, frame: 50, pieces: [piece(100)], settings: settings)
+                let cut = try await bands(source, frame: 50,
+                    pieces: [piece(50), piece(50, start: 50, sourceIn: 50)], settings: settings)
+                XCTAssertEqual(whole, cut, "A contiguous split does not restart the analysis window")
+            }
+        }
+    }
+
+    func testInvalidTimingExtremesAreRejectedBeforeWindowArithmetic() {
+        let invalid = [SpectrumAnalysisSettings(windowMs: 0), .init(windowMs: 1001), .init(windowMs: Int.min), .init(windowMs: Int.max),
+            .init(offsetMs: -10_001), .init(offsetMs: 10_001), .init(offsetMs: Int.min), .init(offsetMs: Int.max)]
+        for settings in invalid {
+            let error = SpectrumAnalysis.requestError(frame: 0, pieces: [piece(180)], fps: 30, rate: 48_000, settings: settings)
+            guard case .invalidSettings = error else { XCTFail("Invalid timing accepted: \(settings)"); continue }
+            XCTAssertThrowsError(try SpectrumAnalysis.chunks(frame: 0, pieces: [piece(180)], fps: 30, rate: 48_000,
+                settings: settings, chunkSamples: 24_000))
+        }
+    }
+}

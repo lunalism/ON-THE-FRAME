@@ -1014,6 +1014,7 @@ final class ProjectStore {
         allowed.red = style.red; allowed.green = style.green; allowed.blue = style.blue
         allowed.reactionPercent = style.reactionPercent
         allowed.lowHz = style.lowHz; allowed.highHz = style.highHz; allowed.bands = style.bands
+        allowed.windowMs = style.windowMs; allowed.offsetMs = style.offsetMs
         guard style == allowed, style.isValid else { return "위치·높이·두께·RGB·주파수·밴드 수 범위를 확인해 주세요." }
         guard style != original else { return nil }
         commit({ try $0.settingSpectrumStyle(id, style) }, focus: id)
@@ -1126,6 +1127,7 @@ final class ProjectStore {
         allowed.red = style.red; allowed.green = style.green; allowed.blue = style.blue
         allowed.reactionPercent = style.reactionPercent
         allowed.lowHz = style.lowHz; allowed.highHz = style.highHz; allowed.bands = style.bands
+        allowed.windowMs = style.windowMs; allowed.offsetMs = style.offsetMs
         guard style == allowed, style.isValid else { return false }
         if kind != "numeric-scrub" { finishSpectrumNumericScrubIfAny() }
         if let session = spectrumLiveSession, session.kind != kind { finishSpectrumLiveSession() }
