@@ -76,7 +76,7 @@ final class SpectrumFrameRendererTests: XCTestCase {
             }
         } } }
         XCTAssertEqual(cases, 54)
-        XCTAssertEqual(nils, 9, "디지털 모두 0만 nil(위·거울·아래 × 밴드 1·64·1024)")
+        XCTAssertEqual(nils, 0, "유효한 Digital 모두 0도 밴드별 최소 원을 그린다")
     }
 
     /// 가장자리 잘림·캔버스 전체 덮음·다른 캔버스 크기(16×16, 4K)·색: 내부와 같은 바이트, 범위 밖 투명
@@ -112,8 +112,10 @@ final class SpectrumFrameRendererTests: XCTestCase {
         let crop = style(.analog, .above, bands: 64), cropV = Self.values(64, seed: 5)
         let a = try XCTUnwrap(r.render(bands: fullV, style: full)), aBytes = Self.bytes(a.image)
         let b = try XCTUnwrap(r.render(bands: cropV, style: crop)), bBytes = Self.bytes(b.image)
-        // 캔버스를 비우는 그리기(디지털 모두 0 → nil)와 다른 모양들을 여러 번
-        XCTAssertNil(try r.render(bands: [Float](repeating: 0, count: 64), style: style(.digital, .mirrored, bands: 64)))
+        // 작은 0높이 원, 범위 밖 nil, 다른 모양들을 그려도 앞 프레임은 그대로
+        XCTAssertNotNil(try r.render(bands: [Float](repeating: 0, count: 64), style: style(.digital, .mirrored, bands: 64)))
+        XCTAssertNil(try r.render(bands: fullV, style: style(.digital, .above, bands: 1024,
+            start: (0, -5_000_000), end: (1_920_000, -5_000_000))))
         for k in 0..<20 { _ = try r.render(bands: Self.values(64, seed: UInt64(k)), style: style(k % 2 == 0 ? .digital : .analog, .mirrored, bands: 64, rgba: (k * 10, 0, 255, 255))) }
         XCTAssertEqual(Self.bytes(a.image), aBytes, "전체 덮음 프레임이 뒤 그리기 뒤에도 그대로")
         XCTAssertEqual(Self.bytes(b.image), bBytes, "잘라 낸 프레임이 뒤 그리기 뒤에도 그대로")
@@ -221,8 +223,8 @@ final class SpectrumFrameRendererTests: XCTestCase {
     func testEmptyResultSemantics() throws {
         let r = try SpectrumFrameRenderer(width: 1920, height: 1080), ref = try SpectrumCanvas(width: 1920, height: 1080)
         let v = Self.values(64, seed: 3)
-        // 범위 없음: 디지털 모두 0, 캔버스 밖 전체
-        XCTAssertNil(try r.render(bands: [Float](repeating: 0, count: 64), style: style(.digital, .above, bands: 64)))
+        // Digital 모두 0은 이제 유효한 최소 원 래스터다. 범위 밖 전체는 여전히 nil.
+        XCTAssertNotNil(try r.render(bands: [Float](repeating: 0, count: 64), style: style(.digital, .above, bands: 64)))
         let off = style(.analog, .above, bands: 64, start: (0, -5_000_000), end: (1_920_000, -5_000_000))
         XCTAssertNil(try r.render(bands: v, style: off)); XCTAssertNil(try ref.render(v, style: off.renderStyle))
         // 범위는 있으나 칠한 화소 없음: 알파 0

@@ -35,6 +35,12 @@ final class SpectrumExportCheckpointTests: XCTestCase {
             let x = expectedX(i), h = expectedH(v[i])
             switch mode {
             case .digital:
+                if v[i] == 0 {
+                    if !painted(x, base) || painted(x, base - 5) || painted(x, base + 5) || painted(x + 8, base) {
+                        f.append("band \(i) zero-height dot geometry")
+                    }
+                    continue
+                }
                 let top = (1...(Int(maxHeight) + 10)).prefix { painted(x, base - $0) }.count, bot = (1...(Int(maxHeight) + 10)).prefix { painted(x, base + $0) }.count
                 if abs(top - (up ? h : 0)) > (up ? 4 : 0) { f.append("band \(i) up run \(top) vs \(up ? h : 0)") }
                 if abs(bot - (down ? h : 0)) > (down ? 4 : 0) { f.append("band \(i) down run \(bot) vs \(down ? h : 0)") }
@@ -117,20 +123,21 @@ final class SpectrumExportCheckpointTests: XCTestCase {
                 XCTAssertFalse(Self.geometryFailures(v, mode: m, sides: sd, bands: bands, painted: painted).isEmpty, "음성 대조 \(name)를 \(m) \(sd) 확인이 잡아야 함")
             }
         } }
-        // 모두 0인 밴드: 디지털은 그리지 않음, 아날로그는 기준선 선 하나(시제품 그리기 규칙 그대로 — 제품 결정 아님)
+        // SPECTRUM-ZERO-01: Digital 0은 밴드별 원, Analog는 기존 기준선 그대로.
         let zero = [Float](repeating: 0, count: 64)
-        XCTAssertNil(try canvas.render(zero, style: style(.digital, .mirrored)))
+        XCTAssertNotNil(try canvas.render(zero, style: style(.digital, .mirrored)))
+        XCTAssertEqual(Self.geometryFailures(zero, mode: .digital, sides: .mirrored, bands: [0, 1, 32, 63], painted: painted), [])
         let az = try XCTUnwrap(try canvas.render(zero, style: style(.analog, .mirrored)))
         XCTAssertLessThanOrEqual(az.bounds.height, 10)
     }
 
-    /// 엔진 그리기 = 시제품 그리기(같은 입력 → 같은 바이트, 전체 캔버스), 1080p·4K
-    func testEngineRendererMatchesPrototypeBytes() throws {
+    /// 양수 엔진 그리기 = 이전 시제품 그리기(같은 입력 → 같은 바이트, 전체 캔버스), 1080p·4K
+    func testNonzeroEngineRendererMatchesPrototypeBytes() throws {
         var rng = SystemRandomNumberGenerator()
         for (w, h) in [(1920, 1080), (3840, 2160)] {
             let canvas = try SpectrumCanvas(width: w, height: h)
             for m in [SpectrumStyle.Mode.digital, .analog] { for sd in [SpectrumStyle.Sides.above, .mirrored, .below] {
-                let v = (0..<64).map { _ in Float.random(in: 0...1, using: &rng) }
+                let v = (0..<64).map { _ in Float.random(in: 0.001...1, using: &rng) }
                 let st = style(m, sd)
                 var ps = ProtoSpectrumStyle(); ps.start = st.start; ps.end = st.end; ps.maxHeight = CGFloat(st.maxHeight); ps.thickness = CGFloat(st.thickness)
                 ps.mode = m == .digital ? .digital : .analog; ps.sides = sd == .above ? .above : (sd == .mirrored ? .mirrored : .below)
@@ -227,7 +234,10 @@ final class SpectrumExportCheckpointTests: XCTestCase {
             XCTAssertEqual(c.bands, d, "내보내기 분석 = 바로 계산 frame \(c.k)")
             XCTAssertEqual(c.paintedOutsideBounds, 0)
             let subVisible = (40..<60).contains(c.k)
-            if d.max()! == 0 && !subVisible { XCTAssertTrue(c.out.y == c.src.y && c.out.c == c.src.c, "무음 프레임은 영상 그대로 frame \(c.k)") }
+            if d.max()! == 0 && !subVisible {
+                XCTAssertFalse(c.out.y == c.src.y, "유효한 무음 프레임도 최소 원을 합성 frame \(c.k)")
+                XCTAssertLessThanOrEqual(c.spectrumBounds.height, 10)
+            }
             let region = (c.spectrumBounds.isNull ? CGRect.null : c.spectrumBounds.insetBy(dx: -2, dy: -2)).union(subVisible ? subRect : .null)
             var outside = 0
             for y in 0..<1080 { for x in 0..<1920 where !region.contains(CGPoint(x: x, y: y)) { if c.out.y[y * 1920 + x] != c.src.y[y * 1920 + x] { outside += 1 } } }
@@ -275,10 +285,13 @@ final class SpectrumExportCheckpointTests: XCTestCase {
         let xh = Self.expectedX(bandHigh)
         XCTAssertGreaterThan(Self.barRun(b[48]!.y, a[48]!.y, x: xh, from: base - 1, step: -1, max: 200), Self.barRun(b[45]!.y, a[45]!.y, x: xh, from: base - 1, step: -1, max: 200) + 20,
                              "디코딩 출력에서도 소리 사건 프레임(48)의 높은 밴드가 더 김(프레임 시점)")
-        for k in [5, 100] {   // 무음 프레임: 스펙트럼 영역에 막대 없음(기준과 차이 작음)
-            var mx = 0; for y in 700..<1060 { for x in 150..<1770 { mx = max(mx, abs(Int(b[k]!.y[y * 1920 + x]) - Int(a[k]!.y[y * 1920 + x]))) } }
-            print("SPECTRUM checkpoint silent frame \(k) max |ΔY| in spectrum area \(mx)")
-            XCTAssertLessThan(mx, 40, "무음 frame \(k)")
+        for k in [5, 100] {   // 무음 프레임: 기준선 원은 보이고 그 위·아래 긴 막대는 없음.
+            let x = Self.expectedX(20), y = Int(Self.baseline)
+            XCTAssertGreaterThan(Int(b[k]!.y[y * 1920 + x]) - Int(a[k]!.y[y * 1920 + x]), 40, "무음 최소 원 frame \(k)")
+            for offset in [-20, 20] {
+                XCTAssertLessThan(abs(Int(b[k]!.y[(y + offset) * 1920 + x]) - Int(a[k]!.y[(y + offset) * 1920 + x])), 40,
+                                  "무음에 긴 막대 없음 frame \(k)")
+            }
         }
         let union = cap.map(\.spectrumBounds).filter { !$0.isNull }.reduce(CGRect.null) { $0.union($1) }.insetBy(dx: -16, dy: -16)
         var sumOut = 0, cnt = 0, maxOut = 0, big = 0

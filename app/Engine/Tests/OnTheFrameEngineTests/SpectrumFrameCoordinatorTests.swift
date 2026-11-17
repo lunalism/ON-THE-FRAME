@@ -98,7 +98,42 @@ final class SpectrumFrameCoordinatorTests: XCTestCase {
     func assertSilent(_ o: SpectrumFrameOutcome, _ msg: String, file: StaticString = #filePath, line: UInt = #line) {
         guard case let .ready(b, f) = o else { return XCTFail("\(msg): \(Self.name(o))", file: file, line: line) }
         XCTAssertEqual(b.max(), 0, msg, file: file, line: line)
-        XCTAssertNil(f, "\(msg): 디지털 무음은 그릴 범위 없음", file: file, line: line)
+        XCTAssertNotNil(f, "\(msg): 유효한 Digital 무음은 최소 원을 그린다", file: file, line: line)
+        if let f { XCTAssertTrue(SpectrumFrameRendererTests.bytes(f.image).contains { $0 != 0 }, msg, file: file, line: line) }
+    }
+
+    func testValidSilentZeroAndLaterFramesRespectTheActiveInterval() async throws {
+        let (t, _, id, _) = try base(), c = coordinator(TonePCM())
+        c.update(timeline: t, media: [steady])
+        for frame in [0, 1, 10, 35, 100, 299] { assertSilent(await get(c, id, frame), "valid silent frame \(frame)") }
+        let end = await get(c, id, 300)
+        XCTAssertEqual(Self.name(end), "notVisible")
+        let later = try t.trimmingSpectrum(id, start: 40, end: 90)
+        c.update(timeline: later, media: [steady])
+        let before = await get(c, id, 0)
+        XCTAssertEqual(Self.name(before), "notVisible", "a later clip never gets a zero-time placeholder")
+        assertSilent(await get(c, id, 40), "first active frame")
+        let after = await get(c, id, 90)
+        XCTAssertEqual(Self.name(after), "notVisible")
+    }
+
+    func testPendingSilentAnalysisAndItsStaleResultNeverBecomePlaceholderDots() async throws {
+        let (t, _, id, _) = try base()
+        for invalidate in [false, true] {
+            let pcm = TonePCM(gated: true), c = coordinator(pcm), log = Log()
+            c.update(timeline: t, media: [steady])
+            c.request(spectrum: id, frame: 35, canvasWidth: 1920, canvasHeight: 1080) { log.add("zero", $0) }
+            let started = await until { pcm.started > 0 }; XCTAssertTrue(started)
+            XCTAssertEqual(log.total, 0, "valid silence must still finish analysis before drawing")
+            if invalidate { c.resetProject() }
+            pcm.release()
+            let completed = await until { log.total == 1 }; XCTAssertTrue(completed)
+            if invalidate { XCTAssertEqual(Self.name(log.all("zero")[0]), "superseded") }
+            else { assertSilent(log.all("zero")[0], "completed valid silence") }
+            let drained = await until { c.scheduler.statistics.active == 0 }; XCTAssertTrue(drained)
+            XCTAssertEqual(log.total, 1)
+            c.resetProject()
+        }
     }
 
     // MARK: 시간·소스 대응
@@ -527,7 +562,7 @@ extension SpectrumFrameCoordinatorTests {
             XCTAssertEqual(coordinator.scheduler.statistics.analyses, analyses)
             XCTAssertEqual(pcm.decodes, decodes)
             guard case let .ready(_, frame) = result else { return XCTFail(Self.name(result)) }
-            if percent == 0 { XCTAssertNil(frame) } else { XCTAssertNotNil(frame) }
+            XCTAssertNotNil(frame, "반응 0도 유효한 분석의 0높이 원을 표시한다")
         }
     }
 }

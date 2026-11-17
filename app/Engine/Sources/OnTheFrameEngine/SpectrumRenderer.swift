@@ -49,21 +49,21 @@ package enum SpectrumGeometry {
         let pts = (0..<bands).map { i -> CGPoint in let t = (CGFloat(i) + 0.5) / CGFloat(bands); return CGPoint(x: a.x + dx * t, y: a.y + dy * t) }
         return (pts, up, sy)
     }
-    /// 칠할 범위(막대·선 끝점 ± 두께 절반 + 앤티에일리어싱 1 px, 캔버스 안, 정수). 칠할 것이 없으면 null(디지털에서 모두 0).
+    /// 칠할 범위(막대·선 끝점 또는 Digital 0높이 원 ± 두께 절반 + 앤티에일리어싱 1 px, 캔버스 안, 정수).
     package static func bounds(_ v: [Float], style s: SpectrumStyle, canvas: CGSize) -> CGRect {
         let g = points(s, bands: v.count, canvas: canvas)
         let th = CGFloat(s.thickness) * g.scaleY
         var r = CGRect.null
         for (p, f) in zip(g.points, v) {
             let hh = CGFloat(f) * CGFloat(s.maxHeight) * g.scaleY
-            guard s.mode == .analog || hh > 0 else { continue }
             let up = s.sides == .below ? 0 : hh, down = s.sides == .above ? 0 : hh
             for d in [up, -down] { r = r.union(CGRect(x: p.x + g.up.dx * d, y: p.y + g.up.dy * d, width: 0, height: 0)) }
         }
         guard !r.isNull else { return .null }
         return r.insetBy(dx: -(th / 2 + 1), dy: -(th / 2 + 1)).integral.intersection(CGRect(origin: .zero, size: canvas))
     }
-    /// 위 왼쪽 원점으로 뒤집은 문맥에 그린다(디지털: 밴드마다 맞대 끝 막대, 아날로그: 둥근 이음·끝 꺾은선 — 거울이면 위·아래 두 줄)
+    /// 위 왼쪽 원점으로 뒤집은 문맥에 그린다(Digital: 양수는 맞대 끝 막대, 0높이는 기준점 중심의 두께 직경 원).
+    /// Analog는 기존 둥근 이음·끝 꺾은선(거울이면 위·아래 두 줄)을 유지한다.
     static func draw(_ v: [Float], style s: SpectrumStyle, canvas: CGSize, into ctx: CGContext) {
         let g = points(s, bands: v.count, canvas: canvas)
         let color = CGColor(srgbRed: CGFloat(s.red), green: CGFloat(s.green), blue: CGFloat(s.blue), alpha: CGFloat(s.alpha))
@@ -78,6 +78,14 @@ package enum SpectrumGeometry {
                 ctx.move(to: pt(p, top)); ctx.addLine(to: pt(p, -bottom))
             }
             ctx.strokePath()
+            // Valid collapsed heights (including strength/maximum height 0) stay
+            // locatable without changing analysis values or positive bar geometry.
+            // Separate ellipses never connect adjacent bands into a baseline.
+            ctx.setFillColor(color)
+            for (p, hh) in zip(g.points, hs) where hh == 0 {
+                ctx.addEllipse(in: CGRect(x: p.x - th / 2, y: p.y - th / 2, width: th, height: th))
+            }
+            ctx.fillPath()
         case .analog:
             ctx.setStrokeColor(color); ctx.setLineWidth(th); ctx.setLineJoin(.round); ctx.setLineCap(.round)
             for sign in (s.sides == .mirrored ? [1.0, -1.0] : (s.sides == .above ? [1.0] : [-1.0])) as [CGFloat] {
@@ -178,7 +186,8 @@ public final class SpectrumFrameRenderer {
     public init(width: Int, height: Int) throws { canvas = try SpectrumCanvas(width: width, height: height) }
 
     /// 밴드 값(분석 결과, 0~1 유한, 개수 = style.bands)을 그 모양으로 그린다. 잘못된 모양·값이면 그리기 전에 던진다(캔버스·앞서 돌려준 프레임 모두 그대로).
-    /// 결과(내부 SpectrumCanvas.render 의미 그대로): 그릴 범위가 없으면 nil(디지털 모두 0, 범위가 캔버스 밖 전체). 범위는 있으나 칠한 화소가 없으면
+    /// Digital 0높이 밴드는 기존 중심·색·두께의 작은 원이다. 양수 높이와 Analog는 기존 기하를 유지한다.
+    /// 결과(내부 SpectrumCanvas.render 의미 그대로): 그릴 범위가 캔버스 밖 전체면 nil. 범위는 있으나 칠한 화소가 없으면
     /// (알파 0, 아날로그 밴드 1개 등) 투명 1×1 프레임. 그 밖에는 칠한 부분을 16 px 단위로 자른 프레임.
     public func render(bands v: [Float], style: SpectrumItemStyle) throws -> SpectrumRenderedFrame? {
         guard v.count == style.bands else { throw SpectrumRenderError.invalidValues("count \(v.count) ≠ style bands \(style.bands)") }

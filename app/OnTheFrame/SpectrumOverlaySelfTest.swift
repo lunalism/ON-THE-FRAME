@@ -50,6 +50,38 @@ enum SpectrumOverlaySelfTest {
         return PixelProbe(context: ctx, painted: painted, wrong: wrong, outside: outside)
     }
 
+    /// Independent fixture geometry: a dot at each band center, empty gaps and
+    /// no amplitude-height extension along either normal of the diagonal baseline.
+    static func hasZeroBandGeometry(_ frame: SpectrumRenderedFrame, style: SpectrumItemStyle) -> Bool {
+        guard style.mode == .digital, let data = frame.image.dataProvider?.data,
+              let pixels = CFDataGetBytePtr(data) else { return false }
+        let sx = Double(frame.canvasWidth) / 1920, sy = Double(frame.canvasHeight) / 1080
+        let ax = Double(style.startXMilli) / 1000 * sx, ay = Double(style.startYMilli) / 1000 * sy
+        let dx = Double(style.endXMilli - style.startXMilli) / 1000 * sx
+        let dy = Double(style.endYMilli - style.startYMilli) / 1000 * sy
+        let length = hypot(dx, dy), radius = Double(style.thicknessMilli) / 2000 * sy
+        guard length > 0, style.bands > 0 else { return false }
+        func alpha(_ x: Double, _ y: Double) -> UInt8 {
+            let px = Int(floor(x)) - Int(frame.drawRect.minX), py = Int(floor(y)) - Int(frame.drawRect.minY)
+            guard (0..<frame.image.width).contains(px), (0..<frame.image.height).contains(py) else { return 0 }
+            return pixels[py * frame.image.bytesPerRow + px * 4 + 3]
+        }
+        return withExtendedLifetime(data) {
+            for i in 0..<style.bands {
+                let t = (Double(i) + 0.5) / Double(style.bands), x = ax + dx * t, y = ay + dy * t
+                guard alpha(x, y) > 0 else { return false }
+                for sign in [-1.0, 1.0] {
+                    guard alpha(x + sign * dy / length * (radius + 2), y - sign * dx / length * (radius + 2)) == 0 else { return false }
+                }
+                if i + 1 < style.bands {
+                    let gap = Double(i + 1) / Double(style.bands)
+                    guard alpha(ax + dx * gap, ay + dy * gap) == 0 else { return false }
+                }
+            }
+            return true
+        }
+    }
+
     @MainActor final class Report {
         let s: ProjectStore
         let folder: URL
@@ -156,6 +188,28 @@ enum SpectrumOverlaySelfTest {
             return await seek(frame, count: count)
         }
 
+        func hasValidZeroMinimum(_ id: UUID, frame: Int, source: MediaAsset) async -> Bool {
+            guard let entry = s.timeline.spectrum(id), entry.visible(atFrame: frame),
+                  s.timeline.spectrumMediaID(entry) == source.id, let item = s.player.currentItem else { return false }
+            let token = s.seekToken, generation = s.generation, project = s.projectSession
+            let epoch = s.spectrumPreview.epoch, revision = s.spectrumPreview.revision
+            let outcome: SpectrumFrameOutcome = await withCheckedContinuation { continuation in
+                s.spectrumPreview.request(spectrum: id, frame: frame) { continuation.resume(returning: $0) }
+            }
+            guard case let .ready(bands, rendered?) = outcome, bands.count == entry.style.bands,
+                  bands.allSatisfy({ $0 == 0 }), let installed = image(id), let layer = overlay.layers[id],
+                  !s.isPlaying, s.projectSession == project, s.generation == generation, s.appliedGeneration == generation,
+                  s.seekToken == token, overlay.confirmedFrame == frame, s.player.currentItem === item,
+                  CMTimeCompare(s.player.currentTime(), CMTime(value: Int64(frame), timescale: 30)) == 0,
+                  s.spectrumPreview.epoch == epoch, s.spectrumPreview.revision == revision,
+                  s.timeline.spectrum(id) == entry, FileIdentity.of(source.url) == source.identity,
+                  FileManager.default.isReadableFile(atPath: source.url.path) else { return false }
+            return layer.frame == PausedSpectrumOverlay.layerRect(rendered.drawRect) &&
+                installed.width == rendered.image.width && installed.height == rendered.image.height &&
+                (installed.dataProvider!.data! as Data) == (rendered.image.dataProvider!.data! as Data) &&
+                SpectrumOverlaySelfTest.hasZeroBandGeometry(rendered, style: entry.style)
+        }
+
         func initialAndSources() async throws -> Bool {
             let s: ProjectStore = self.s
             let view: PlayerNSView = self.view
@@ -223,7 +277,24 @@ enum SpectrumOverlaySelfTest {
             check("ready.transparentReplaces", self.image(high)?.width == 1 && transparentAlpha == 0)
             s.loadTimelineForTest(t); _ = await self.settleEdit()
             s.commit({ try $0.settingClipAudio(clip: ac, muted: true) }, focus: ac); _ = await self.settleEdit()
-            check("ready.nilOnMuteClearsBoth", self.image(high) == nil && self.image(low) == nil)
+            check("ready.mutedAnalysisKeepsMinimumElements", self.image(high) != nil && self.image(low) != nil)
+            let silent = s.timeline
+            var atZero = try silent.relocatingSpectrum(high, toStart: 0, lane: t.spectrum(high)!.lane)
+                .relocatingSpectrum(low, toStart: 0, lane: t.spectrum(low)!.lane)
+            for id in [high, low] {
+                var horizontal = atZero.spectrum(id)!.style
+                horizontal.startYMilli = 540_000; horizontal.endYMilli = 540_000
+                atZero = try atZero.settingSpectrumStyle(id, horizontal)
+            }
+            s.loadTimelineForTest(atZero)
+            let zeroReady = await self.settleEdit(0)
+            check("zero.pausedActiveSilenceVisible", zeroReady && !s.isPlaying && overlay.confirmedFrame == 0 &&
+                  self.image(high) != nil && self.image(low) != nil)
+            check("zero.validDotsHaveSmallHeight", (self.image(high)?.height ?? 1080) <= 16 &&
+                  (self.image(low)?.height ?? 1080) <= 16)
+            s.loadTimelineForTest(silent)
+            let inactive = await self.settleEdit(0, count: 0)
+            check("zero.laterClipRemainsHidden", inactive && overlay.layers.isEmpty)
             s.loadTimelineForTest(t); _ = await self.settleEdit()
             s.assetCache[audio.url.standardizedFileURL.path] = nil; s.timelineChanged(); _ = await self.settleEdit()
             check("source.mediaUnavailableClears", self.image(high) == nil && self.image(low) == nil)
@@ -314,7 +385,8 @@ enum SpectrumOverlaySelfTest {
                 .placing(media: audio.id, at: 120, videoLane: nil, audioLane: alternativeLane, clipID: alternativeClip)
             guard let alternativeKey = alternative.clip(alternativeClip)?.lineageKey else { check("fixture.alternative", false); finish(); return false }
             s.loadTimelineForTest(try alternative.settingSpectrumSource(high, alternativeKey)); _ = await self.settleEdit()
-            check("source.reassignmentOutsideCoverageSilent", self.image(high) == nil && self.image(low) != nil)
+            let validMinimum = await hasValidZeroMinimum(high, frame: 30, source: audio)
+            check("source.reassignmentOutsideCoverageMinimum", validMinimum && self.image(low) != nil)
             s.loadTimelineForTest(t); _ = await self.settleEdit()
 
             return true
