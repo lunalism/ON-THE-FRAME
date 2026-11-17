@@ -71,6 +71,9 @@ import OnTheFrameEngine
             case .height: draft.height = text
             case .thickness: draft.thickness = text
             case .reaction: draft.reaction = text
+            case .lowHz: draft.lowHz = text
+            case .highHz: draft.highHz = text
+            case .bands: draft.bands = text
             }
             guard let value = try? draft.style(from: style) else { return }
             _ = store.updateSpectrumLiveStyle(id, style: value, project: store.projectSession,
@@ -116,6 +119,34 @@ import OnTheFrameEngine
             var draft = SpectrumStyleDraft(legacy); draft.thickness = value
             check("invalid text " + value, (try? draft.style(from: legacy)) == nil, "")
         }
+        for property in [SpectrumNumericProperty.lowHz, .highHz, .bands] {
+            for value in ["1.5", "20.0", "1e2", "", "-", "+", String(Int.max), String(Int.min), String(Int.max) + "0"] {
+                var draft = SpectrumStyleDraft(legacy)
+                switch property {
+                case .lowHz: draft.lowHz = value
+                case .highHz: draft.highHz = value
+                default: draft.bands = value
+                }
+                check(property.rawValue + ".invalid text " + value, (try? draft.style(from: legacy)) == nil, "")
+            }
+        }
+        check("frequency equal rejected", SpectrumNumericProperty.lowHz.applying(legacy.highHz, to: legacy) == nil &&
+              SpectrumNumericProperty.highHz.applying(legacy.lowHz, to: legacy) == nil, "")
+        check("frequency effective bounds", SpectrumNumericProperty.lowHz.effectiveRange(in: legacy) == 1...1999 &&
+              SpectrumNumericProperty.highHz.effectiveRange(in: legacy) == 21...24000, "48 kHz product contract")
+        for value in [1, 1024] {
+            check("bands boundary \(value)", SpectrumNumericProperty.bands.applying(value, to: legacy)?.bands == value, "")
+        }
+        check("bands zero rejected", SpectrumNumericProperty.bands.applying(0, to: legacy) == nil, "")
+        var pair = SpectrumStyleDraft(legacy); pair.lowHz = "22000"; pair.highHz = "24000"
+        let atomic = try? pair.style(from: legacy)
+        check("frequency pair atomic valid", atomic?.lowHz == 22000 && atomic?.highHz == 24000 &&
+              atomic?.thicknessMilli == legacy.thicknessMilli && atomic?.maxHeightMilli == legacy.maxHeightMilli, "")
+        pair.highHz = "24001"
+        check("Nyquist exceeded rejected", (try? pair.style(from: legacy)) == nil, "")
+        var malformed = legacy; malformed.highHz = Int.min; malformed.lowHz = Int.max
+        check("malformed peer no range overflow", SpectrumNumericProperty.lowHz.effectiveRange(in: malformed) == nil &&
+              SpectrumNumericProperty.highHz.effectiveRange(in: malformed) == nil, "")
     }
 
     private static func gestures(_ check: (String, Bool, String) -> Void) throws {
@@ -143,8 +174,9 @@ import OnTheFrameEngine
             x.store.redo()
             check(property.rawValue + ".redo exact", x.store.timeline == final, "")
         }
-        for mode in ["net-zero", "escape", "deactivate", "window", "remove", "vertical"] {
-            let x = try Context(.thickness, legacy); defer { x.close() }
+        for property in [SpectrumNumericProperty.thickness, .lowHz, .highHz, .bands] {
+          for mode in ["net-zero", "escape", "deactivate", "window", "remove", "vertical"] {
+            let x = try Context(property, legacy); defer { x.close() }
             x.mouse(.leftMouseDown)
             if mode == "vertical" { x.mouse(.leftMouseDragged, 2, 20) }
             else { x.mouse(.leftMouseDragged, 10) }
@@ -158,8 +190,9 @@ import OnTheFrameEngine
             }
             x.mouse(.leftMouseUp, 500)
             x.mouse(.leftMouseDragged, 30); x.mouse(.leftMouseUp, 30)
-            check(mode + ".exact restoration no history", x.store.timeline == x.initial && !x.store.isDirty &&
+            check(property.rawValue + "." + mode + ".exact restoration no history", x.store.timeline == x.initial && !x.store.isDirty &&
                 x.store.history.undoDepth == 0 && x.store.spectrumNumericScrubToken == nil, "")
+          }
         }
         let x = try Context(.thickness, legacy); defer { x.close() }
         x.mouse(.leftMouseDown, dispatch: true); x.mouse(.leftMouseDragged, 10, dispatch: true)
@@ -247,6 +280,91 @@ import OnTheFrameEngine
     }
     private static func windowFocusAway(_ x: Context) { x.window.makeFirstResponder(nil) }
 
+    private static func analysisEditing(_ folder: URL, _ check: (String, Bool, String) -> Void) async throws {
+        var legacy = SpectrumItemStyle.provisionalDefault
+        legacy.startXMilli = 192125; legacy.maxHeightMilli = 480250; legacy.thicknessMilli = 3125
+        for property in [SpectrumNumericProperty.lowHz, .highHz, .bands] {
+            let x = try Context(property, legacy); defer { x.close() }
+            let start = property.displayed(legacy), value = start + 2
+            x.mouse(.leftMouseDown, dispatch: true); x.mouse(.leftMouseUp, dispatch: true)
+            await settle()
+            guard let editor = x.control.field.currentEditor() as? NSTextView else {
+                throw Failure(message: property.rawValue + " click did not enter native editor")
+            }
+            editor.insertText(String(value), replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+            check(property.rawValue + ".native draft only", x.style == legacy && !x.store.isDirty, "")
+            editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+            check(property.rawValue + ".native integer commit", property.displayed(x.style) == value && x.store.history.undoDepth == 1, "")
+            windowFocusAway(x); x.store.undo()
+            check(property.rawValue + ".native undo exact milli", x.style == legacy && !x.store.isDirty, "")
+
+            // Explicit Apply and live publication must share the same narrow capability set.
+            let candidate = property.applying(value, to: legacy)!
+            let error = x.store.setSpectrumStyle(x.id, style: candidate, from: legacy, project: x.store.projectSession,
+                selectionRevision: x.store.spectrumSelectionRevision, generation: x.store.generation)
+            check(property.rawValue + ".explicit Apply allowed", error == nil && x.style == candidate, "")
+            x.store.undo()
+            for restricted in ["window", "offset", "floor", "alpha"] {
+                var denied = legacy
+                switch restricted {
+                case "window": denied.windowMs += 1
+                case "offset": denied.offsetMs += 1
+                case "floor": denied.floorDB -= 1
+                default: denied.alpha -= 1
+                }
+                let before = x.store.timeline, depth = x.store.history.undoDepth
+                let explicit = x.store.setSpectrumStyle(x.id, style: denied, from: legacy, project: x.store.projectSession,
+                    selectionRevision: x.store.spectrumSelectionRevision, generation: x.store.generation)
+                let live = x.store.updateSpectrumLiveStyle(x.id, style: denied, project: x.store.projectSession,
+                    revision: x.store.spectrumSelectionRevision, expectedGeneration: x.store.generation, kind: "numeric")
+                check(property.rawValue + ".restricted " + restricted, explicit != nil && !live &&
+                    x.store.timeline == before && x.store.history.undoDepth == depth, "both allowlists")
+            }
+            x.mouse(.leftMouseDown); x.mouse(.leftMouseDragged, 4 + 2 * property.pointsPerStep)
+            let saved = x.store.timeline
+            let url = folder.appendingPathComponent(property.rawValue + "-active-save.ontheframe")
+            // Existing menu save path, with a task-owned destination and no panel.
+            x.store.projectURL = url
+            x.store.saveProject()
+            check(property.rawValue + ".active save finalizes once", x.store.spectrumNumericScrubToken == nil &&
+                  x.store.history.undoDepth == 1 && !x.store.isDirty && x.store.timeline == saved, "")
+            x.mouse(.leftMouseUp, 600)
+            let decoded = try ProjectPersistence.decode(Data(contentsOf: url))
+            check(property.rawValue + ".Format10 saved", decoded.version == 10 && decoded.timeline.spectrum(x.id)?.style == candidate, "")
+            x.store.undo()
+            check(property.rawValue + ".undo after save dirty", x.style == legacy && x.store.isDirty, "")
+            x.store.redo()
+            check(property.rawValue + ".redo saved clean", x.store.timeline == saved && !x.store.isDirty, "")
+            let reopened = ProjectStore()
+            let opened = await reopened.openProject(at: url)
+            check(property.rawValue + ".app reopen", opened && reopened.timeline.spectrum(x.id)?.style == candidate && !reopened.isDirty, "")
+            reopened.resetProject()
+            var json = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+            // Corrupt only the selected style in an isolated in-memory document.
+            if var spectra = json["spectra"] as? [[String: Any]], !spectra.isEmpty,
+               var style = spectra[0]["style"] as? [String: Any] {
+                style["lowHz"] = 2000; style["highHz"] = 20
+                spectra[0]["style"] = style; json["spectra"] = spectra
+                let corrupt = try JSONSerialization.data(withJSONObject: json)
+                check(property.rawValue + ".malformed project rejected", (try? ProjectPersistence.decode(corrupt)) == nil, "")
+            } else { check(property.rawValue + ".malformed project fixture located", false, "unexpected Format10 structure") }
+        }
+        for property in [SpectrumNumericProperty.lowHz, .highHz] {
+            var close = legacy; close.lowHz = 100; close.highHz = 103
+            let x = try Context(property, close); defer { x.close() }
+            let sign: CGFloat = property == .lowHz ? 1 : -1
+            x.mouse(.leftMouseDown); x.mouse(.leftMouseDragged, sign * 5)
+            let last = x.store.timeline
+            x.mouse(.leftMouseDragged, sign * 50)
+            check(property.rawValue + ".cross holds last valid", x.rejected > 0 && x.store.timeline == last &&
+                  x.store.history.undoDepth == 0, "opposite frequency unchanged")
+            x.mouse(.leftMouseDragged, sign * 6)
+            check(property.rawValue + ".cross returns valid", property.displayed(x.style) == property.displayed(close) + Int(sign) * 2, "")
+            x.control.cancelOperation(nil)
+            check(property.rawValue + ".cross Escape exact", x.store.timeline == x.initial && !x.store.isDirty && x.store.history.undoDepth == 0, "")
+        }
+    }
+
     static func run(folder: URL) async -> [Check] {
         var checks: [Check] = []
         func check(_ name: String, _ pass: Bool, _ detail: String = "") { checks.append(Check(name: name, pass: pass, detail: detail)) }
@@ -261,11 +379,12 @@ import OnTheFrameEngine
         let activationDeadline = ProcessInfo.processInfo.systemUptime + 3
         while !NSApp.isActive, ProcessInfo.processInfo.systemUptime < activationDeadline { await settle() }
         guard NSApp.isActive else { check("native activation precondition", false, "task process must have an active AppKit event loop"); return checks }
+        do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false) }
+        catch { check("fresh evidence directory", false, String(describing: error)); return checks }
         policies(check)
-        do { try gestures(check); try isolation(check); try await nativeText(check) }
+        do { try gestures(check); try isolation(check); try await nativeText(check); try await analysisEditing(folder, check) }
         catch { check("native checks completed", false, String(describing: error)) }
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
             try JSONEncoder().encode(checks).write(to: folder.appendingPathComponent("numeric-scrub-checks.json"), options: .withoutOverwriting)
         } catch { check("evidence written", false, String(describing: error)) }
         return checks

@@ -566,3 +566,159 @@ extension SpectrumFrameCoordinatorTests {
         }
     }
 }
+
+extension SpectrumFrameCoordinatorTests {
+    private func frequencyControlEdits(_ original: SpectrumItemStyle) -> [(String, SpectrumItemStyle)] {
+        var low = original; low.lowHz = 200
+        var high = original; high.highHz = 800
+        var bands = original; bands.bands = 32
+        return [("lowHz", low), ("highHz", high), ("bands", bands)]
+    }
+
+    /// Each control changes a distinct band-cache key while its source/time window
+    /// stays fixed. Returning to the original settings must use the retained cache.
+    func testFrequencyControlsSeparateBandCacheAndRetainPCM() async throws {
+        let (timeline, _, id, _) = try base()
+        let original = try XCTUnwrap(timeline.spectrum(id))
+        for (name, style) in frequencyControlEdits(original.style) {
+            let pcm = TonePCM(), c = coordinator(pcm)
+            defer { c.resetProject() }
+            c.update(timeline: timeline, media: [steady])
+            let firstOutcome = await get(c, id, 65)
+            let first = try XCTUnwrap(Self.bands(firstOutcome), name)
+            let warm = c.scheduler.statistics, decoded = pcm.decodes
+            XCTAssertGreaterThan(warm.chunkCacheBytes, 0, name)
+            XCTAssertGreaterThan(warm.bandCacheEntries, 0, name)
+
+            let edited = try timeline.settingSpectrumStyle(id, style)
+            XCTAssertNotEqual(style.analysisSettings, original.style.analysisSettings, name)
+            XCTAssertEqual(edited.audioClips, timeline.audioClips, name)
+            XCTAssertEqual(edited.spectrumPieces(edited.spectra[0]), timeline.spectrumPieces(original), name)
+            c.update(timeline: edited, media: [steady])
+            let changedOutcome = await get(c, id, 65)
+            let changed = try XCTUnwrap(Self.bands(changedOutcome), name)
+            let after = c.scheduler.statistics
+            XCTAssertEqual(changed.count, style.bands, name)
+            XCTAssertNotEqual(changed, first, "\(name): old settings cannot supply the edited result")
+            XCTAssertEqual(after.analyses, warm.analyses + 1, name)
+            XCTAssertEqual(after.bandCacheEntries, warm.bandCacheEntries + 1, name)
+            XCTAssertEqual(after.decodes, warm.decodes, "\(name): same PCM key")
+            XCTAssertEqual(pcm.decodes, decoded, name)
+            XCTAssertEqual(after.chunkCacheBytes, warm.chunkCacheBytes, name)
+            XCTAssertEqual(after.chunkCacheEntries, warm.chunkCacheEntries, name)
+
+            let repeatedOutcome = await get(c, id, 65)
+            XCTAssertEqual(Self.bands(repeatedOutcome), changed, name)
+            XCTAssertEqual(c.scheduler.statistics.analyses, after.analyses, "\(name): edited band-cache hit")
+            c.update(timeline: timeline, media: [steady])
+            let restoredOutcome = await get(c, id, 65)
+            XCTAssertEqual(Self.bands(restoredOutcome), first, "\(name): original cached settings restored")
+            XCTAssertEqual(c.scheduler.statistics.analyses, after.analyses, name)
+            XCTAssertEqual(c.scheduler.statistics.bandCacheEntries, after.bandCacheEntries, name)
+            XCTAssertEqual(c.scheduler.statistics.decodes, warm.decodes, name)
+            XCTAssertEqual(pcm.decodes, decoded, name)
+        }
+    }
+
+    /// The independent fixture contains a known 1000 Hz tone, not a measured music
+    /// peak. Both legal band-count extremes retain the frequency-range meaning.
+    func testFrequencyRangesAndBandExtremesUseKnownTone() async throws {
+        let (timeline, _, id, _) = try base()
+        let original = try XCTUnwrap(timeline.spectrum(id))
+        let pcm = TonePCM(), c = coordinator(pcm)
+        defer { c.resetProject() }
+        for count in [1, 1024] {
+            for (low, high, containsTone) in [(800, 1200, true), (20, 800, false), (1200, 2000, false)] {
+                var style = original.style
+                style.lowHz = low; style.highHz = high; style.bands = count
+                let edited = try timeline.settingSpectrumStyle(id, style)
+                c.update(timeline: edited, media: [steady])
+                let outcome = await get(c, id, 65)
+                guard case let .ready(bands, frame) = outcome else { return XCTFail(Self.name(outcome)) }
+                XCTAssertEqual(bands.count, count)
+                XCTAssertTrue(bands.allSatisfy { $0.isFinite && (0...1).contains($0) })
+                XCTAssertNotNil(frame, "valid Digital analysis, including zero-height elements")
+                if containsTone {
+                    XCTAssertGreaterThan(bands.max() ?? -1, 0.8, "1000 Hz is inside \(low)…\(high), bands \(count)")
+                } else {
+                    // The 90 ms Hann window has finite leakage. Do not require
+                    // mathematically exact silence merely for excluding the peak.
+                    XCTAssertLessThan(bands.max() ?? 1, 0.1, "1000 Hz is outside \(low)…\(high), bands \(count)")
+                }
+            }
+        }
+    }
+
+    /// Hold decoding before changing each analysis field. Check both proactive
+    /// cancellation and the completion fence when cancellation is deliberately off.
+    func testFrequencyControlEditsRejectSupersededAsyncResults() async throws {
+        let (timeline, _, id, _) = try base()
+        let original = try XCTUnwrap(timeline.spectrum(id))
+        for (name, style) in frequencyControlEdits(original.style) {
+            for proactive in [true, false] {
+                let pcm = TonePCM(gated: true), c = coordinator(pcm), log = Log()
+                defer { pcm.release(); c.resetProject() }
+                c.supersedeOnUpdate = proactive
+                c.update(timeline: timeline, media: [steady])
+                c.request(spectrum: id, frame: 65, canvasWidth: 1920, canvasHeight: 1080) { log.add("old", $0) }
+                let started = await until(5) { pcm.started > 0 }
+                guard started else { XCTFail("\(name): decode gate was not reached"); continue }
+                XCTAssertEqual(log.total, 0, name)
+                let edited = try timeline.settingSpectrumStyle(id, style)
+                c.update(timeline: edited, media: [steady])
+                // The existing synchronous diagnostics getter is a queue barrier,
+                // so no arbitrary sleep is needed to guess when update ran.
+                _ = c.diagnostics
+                if proactive {
+                    let retired = await until(5) { log.all("old").count == 1 }
+                    XCTAssertTrue(retired, "\(name): supersede before decode gate release")
+                } else {
+                    XCTAssertEqual(log.total, 0, "\(name): old work is still gated, not cancelled")
+                }
+                c.request(spectrum: id, frame: 65, canvasWidth: 1920, canvasHeight: 1080) { log.add("new", $0) }
+                _ = c.diagnostics
+                pcm.release()
+                let completed = await until(5) { log.all("old").count == 1 && log.all("new").count == 1 }
+                XCTAssertTrue(completed, name)
+                XCTAssertEqual(log.all("old").map(Self.name), ["superseded"], name)
+                let newest = try XCTUnwrap(log.all("new").first, name)
+                let expected = try await direct(edited, id, 65, TonePCM())
+                XCTAssertEqual(Self.bands(newest), expected, "\(name): only the edited settings become ready")
+                let drained = await until(5) { c.scheduler.statistics.active == 0 && c.diagnostics.waiting == 0 }
+                XCTAssertTrue(drained, name)
+                deliveries.sync {} // All previously enqueued callbacks have run.
+                XCTAssertEqual(log.total, 2, "\(name): exactly one callback per request")
+            }
+        }
+    }
+
+    /// Configuration/snapshot consistency only: no encoded internal Export or
+    /// complete Preview/Export parity is claimed by this bounded gate check.
+    func testEditedFrequencySettingsReachExportPlanAndKeepPublicGate() async throws {
+        let (timeline, _, id, _) = try base()
+        let original = try XCTUnwrap(timeline.spectrum(id))
+        var style = original.style
+        style.lowHz = 800; style.highHz = 1200; style.bands = 37
+        let edited = try timeline.settingSpectrumStyle(id, style)
+        let plan = try await CompositionPlanner.plan(edited, media: [steady.id: steady])
+        let snapshot = try XCTUnwrap(plan.spectra.first { $0.id == id })
+        XCTAssertEqual(snapshot.style, style)
+        XCTAssertEqual(snapshot.style.analysisSettings, style.analysisSettings)
+        XCTAssertEqual(snapshot.style.renderStyle, style.renderStyle)
+        var laterStyle = style; laterStyle.lowHz = 900; laterStyle.bands = 17
+        _ = try edited.settingSpectrumStyle(id, laterStyle)
+        XCTAssertEqual(plan.spectra.first?.style, style, "export plan owns the captured style, not a live UI binding")
+
+        let folder = ExportEndToEndTests.root.appendingPathComponent("fx01b-public-export-gate-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let destination = folder.appendingPathComponent("must-not-exist.mp4")
+        let temporaryDirectories = OSAllocatedUnfairLock(initialState: [URL]())
+        let outcome = await ExportService.export(plan, to: .fromSavePanel(destination), sources: [steady],
+            options: .init(onTempDirectory: { url in temporaryDirectories.withLock { $0.append(url) } })) { _ in }
+        guard case .failed(.export(let reason)) = outcome else { return XCTFail("public Spectrum export was not rejected") }
+        XCTAssertTrue(reason.contains("스펙트럼"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertTrue(temporaryDirectories.withLock { $0.isEmpty }, "public rejection occurs before temporary output allocation")
+    }
+}

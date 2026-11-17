@@ -4,7 +4,7 @@ import OnTheFrameEngine
 
 /// Inspector policy only. Stored milli precision and renderer/model ranges are unchanged.
 enum SpectrumNumericProperty: String, CaseIterable {
-    case startX, startY, endX, endY, height, thickness, reaction
+    case startX, startY, endX, endY, height, thickness, reaction, lowHz, highHz, bands
     var title: String {
         switch self {
         case .startX: "시작 X"
@@ -14,6 +14,9 @@ enum SpectrumNumericProperty: String, CaseIterable {
         case .height: "최대 높이"
         case .thickness: "두께"
         case .reaction: "반응 강도 (%)"
+        case .lowHz: "시작 주파수 (Hz)"
+        case .highHz: "끝 주파수 (Hz)"
+        case .bands: "주파수 밴드 수"
         }
     }
     var range: ClosedRange<Int> {
@@ -22,9 +25,24 @@ enum SpectrumNumericProperty: String, CaseIterable {
         case .height: 0...1080
         case .thickness: 1...64
         case .reaction: 0...200
+        case .lowHz: 1...23_999
+        case .highHz: 2...24_000
+        case .bands: 1...1024
         }
     }
-    var pointsPerStep: CGFloat { self == .thickness ? 6 : self == .reaction ? 2 : 1 }
+    /// Frequency bounds depend on the other current value; never adjust that value.
+    func effectiveRange(in style: SpectrumItemStyle) -> ClosedRange<Int>? {
+        switch self {
+        case .lowHz:
+            guard (2...24_000).contains(style.highHz) else { return nil }
+            return 1...(style.highHz - 1)
+        case .highHz:
+            guard (1...23_999).contains(style.lowHz) else { return nil }
+            return (style.lowHz + 1)...24_000
+        default: return range
+        }
+    }
+    var pointsPerStep: CGFloat { self == .thickness ? 6 : self == .reaction ? 2 : self == .bands ? 4 : 1 }
     func displayed(_ style: SpectrumItemStyle) -> Int {
         let raw: Int
         switch self {
@@ -35,11 +53,14 @@ enum SpectrumNumericProperty: String, CaseIterable {
         case .height: raw = style.maxHeightMilli
         case .thickness: raw = style.thicknessMilli
         case .reaction: return style.reactionPercent
+        case .lowHz: return style.lowHz
+        case .highHz: return style.highHz
+        case .bands: return style.bands
         }
         return SpectrumStyleDraft.wholePixels(raw)
     }
     func applying(_ value: Int, to original: SpectrumItemStyle) -> SpectrumItemStyle? {
-        guard range.contains(value) else { return nil }
+        guard let bounds = effectiveRange(in: original), bounds.contains(value) else { return nil }
         // Returning to the original displayed integer restores the exact original.
         if value == displayed(original) { return original }
         var result = original
@@ -51,6 +72,9 @@ enum SpectrumNumericProperty: String, CaseIterable {
         case .height: result.maxHeightMilli = value * 1000
         case .thickness: result.thicknessMilli = value * 1000
         case .reaction: result.reactionPercent = value
+        case .lowHz: result.lowHz = value
+        case .highHz: result.highHz = value
+        case .bands: result.bands = value
         }
         return result.isValid ? result : nil
     }

@@ -1013,7 +1013,8 @@ final class ProjectStore {
         allowed.thicknessMilli = style.thicknessMilli; allowed.sides = style.sides; allowed.mode = style.mode
         allowed.red = style.red; allowed.green = style.green; allowed.blue = style.blue
         allowed.reactionPercent = style.reactionPercent
-        guard style == allowed, style.isValid else { return "위치·높이·두께·RGB 범위를 확인해 주세요." }
+        allowed.lowHz = style.lowHz; allowed.highHz = style.highHz; allowed.bands = style.bands
+        guard style == allowed, style.isValid else { return "위치·높이·두께·RGB·주파수·밴드 수 범위를 확인해 주세요." }
         guard style != original else { return nil }
         commit({ try $0.settingSpectrumStyle(id, style) }, focus: id)
         return timeline.spectrum(id)?.style == style ? nil : (statusMessage ?? "모양을 적용하지 못했습니다.")
@@ -1086,8 +1087,10 @@ final class ProjectStore {
         guard scrub.project == projectID, scrub.session == projectSession,
               scrub.revision == spectrumSelectionRevision, selection == scrub.id,
               timeline == scrub.last else { return }
+        let analysisChanged = timeline.spectrum(scrub.id)?.style.analysisSettings !=
+            session.base.spectrum(scrub.id)?.style.analysisSettings
         history.replaceWithoutUndo(session.base)
-        publishSpectrumStylePreview()
+        publishSpectrumStylePreview(analysisChanged: analysisChanged)
     }
     var spectrumLiveSession: SpectrumLiveSession?
     private(set) var spectrumColorEventRevision = 0
@@ -1122,6 +1125,7 @@ final class ProjectStore {
         allowed.sides = style.sides; allowed.mode = style.mode
         allowed.red = style.red; allowed.green = style.green; allowed.blue = style.blue
         allowed.reactionPercent = style.reactionPercent
+        allowed.lowHz = style.lowHz; allowed.highHz = style.highHz; allowed.bands = style.bands
         guard style == allowed, style.isValid else { return false }
         if kind != "numeric-scrub" { finishSpectrumNumericScrubIfAny() }
         if let session = spectrumLiveSession, session.kind != kind { finishSpectrumLiveSession() }
@@ -1140,15 +1144,18 @@ final class ProjectStore {
                 }
             }
         }
+        let analysisChanged = timeline.spectrum(id)?.style.analysisSettings !=
+            changed.spectrum(id)?.style.analysisSettings
         history.replaceWithoutUndo(changed)
-        publishSpectrumStylePreview()
+        publishSpectrumStylePreview(analysisChanged: analysisChanged)
         if kind == "discrete" || kind == "numeric" { finishSpectrumLiveSession() }
         return true
     }
 
     /// Style-only publication keeps the current player item, seek proof and subtitles.
-    /// Retain only the current paused frame while replacement geometry is computed.
-    private func publishSpectrumStylePreview() {
+    /// Geometry-only edits retain the current paused raster. Analysis edits retire
+    /// that raster and pending batches before requesting the changed settings.
+    private func publishSpectrumStylePreview(analysisChanged: Bool) {
         guard player.currentItem != nil, appliedGeneration == generation else {
             timelineChanged(); return
         }
@@ -1164,8 +1171,16 @@ final class ProjectStore {
                 session: imageProof.session, generation: generation, accessRevision: imageProof.accessRevision)
         }
         updateWindowDocumentState()
-        if let overlay = previewHost?.spectrumOverlay { overlay.refresh(retainingStyleFrame: true) }
-        else { spectrumPreview.update(timeline: timeline, media: assets) }
+        if analysisChanged {
+            // Advance the session fence before a new request; update preserves the
+            // bounded PCM/band caches, while refresh clears obsolete paused batches.
+            spectrumPreview.update(timeline: timeline, media: assets)
+            previewHost?.spectrumOverlay.refresh()
+        } else if let overlay = previewHost?.spectrumOverlay {
+            overlay.refresh(retainingStyleFrame: true)
+        } else {
+            spectrumPreview.update(timeline: timeline, media: assets)
+        }
     }
 
     // MARK: 복사·붙여넣기(2026-10-11)

@@ -1039,3 +1039,38 @@
 - **검증과 수락의 구분:** Seek는 시험한 5개 조건, image intent·scrubbing·Digital zero는 각각 시험한 6개 조건의 owner manual acceptance다. Digital zero의 6/6은 01B 실제 Mac 보고다. 01C 기존 실행은 engine 85·실제 built-in overlay 61·zero Preview 23·playback 146·image intent 130·scrubbing 138·Draft/Store 223 각각 PASS/0 FAIL/0 SKIP, Seek 캡처 18/18·raster 비교 66/66이었다. **이번 문서 작업에서 재실행하지 않았다.** 과거 진단 복사본을 실제 내장 검사 결과로 대신하거나 합성 native 입력·내부 레이어 관측을 물리 화면 FPS로 바꾸어 쓰지 않는다.
 - **남은 한계:** Native Inspector **7 FAIL/4 SKIP**과 내부 Undo/Redo Seek 설치 지연 **53.6→116.2ms** 조사는 OPEN이다. 장시간 안정성·다른 하드웨어·전체 Preview/Export parity는 미검증이며 공개 Spectrum Export는 비활성이다. 제한된 내부 Export 프레임/래스터 비교나 소유자 6/6 수락으로 전체 parity를 완료 처리하지 않는다. 01C의 `.DS_Store` 차이와 이전 실패·중지 증거는 당시 보존 경고로 유지한다.
 - **작업·귀속 정책 확인:** 커밋을 지시받았을 때는 검증된 소유자 Git identity를 사용하고 AI co-author trailer를 추가하지 않으며 실제 저자 귀속을 꾸미지 않는다. DOC-AUDIT-01에서 default main의 게시 이력 중 Claude 공동저자 trailer가 있는 19커밋을 확인했다. 이번 문서 정렬은 그 commit·identity 설정·`.mailmap`·Git history를 변경하지 않으며 GitHub Contributors 표시 제거 효과를 주장하지 않는다. 역사 귀속 정리는 별도 범위다. 이번 작업은 문서만 정렬하며 source/build script·새 기능·빌드/제품 테스트·commit/push/merge를 하지 않는다.
+
+
+### 2026-11-17 SPECTRUM-FX-01B 주파수 범위와 밴드 수
+
+- **소유자 승인 R-FX01B:** 기존 `lowHz`, `highHz`, `bands`를 오디오 분석 Inspector에 노출한다. 정수 직접 입력과 숫자 자체의 수평 scrub, 기존 4pt 문턱, 주파수 1pt/Hz·밴드 4pt/개를 초기 감도로 사용한다. 새 slider/버튼은 추가하지 않고 기존 반응 강도·최대 높이 위치를 유지한다.
+- **편집 계약:** 현재 48kHz 스타일의 `1 <= lowHz < highHz <= 24000`, 밴드 1–1024를 원자적으로 검증한다. 반대 주파수를 자동 보정하지 않는다. 잘못된 scrub은 마지막 유효 후보를 유지하고 유효 범위로 돌아오면 갱신을 재개한다. 소수·불완전 입력·지수·overflow는 거절한다. untouched milli 정밀도와 gesture 한 Undo·순변화 0의 무기록·Escape/비활성화 취소를 유지한다.
+- **분석 publication:** 두 Store 허용 목록에 세 필드만 추가한다. 분석 설정 변경과 취소 복원은 session revision을 먼저 갱신한 뒤 기존 paused overlay refresh로 이전 요청·pending batch·raster를 정리하고 새 설정을 요청한다. geometry-only raster 유지 경로와 기존 PCM/band cache 한도, source/PTS/seek token/generation/revision/epoch·timing-nil·image playback intent 검증은 유지한다.
+- **저장·범위:** 기존 Codable·Format 10을 재사용하며 모델·FFT·renderer·schema를 바꾸지 않는다. `windowMs`/`offsetMs` UI와 의미 변경, floorDB 편집, 추가 FX·shadow·keyframe은 범위 밖이다. UX-02는 planned v1.1 deferred WIP이며 이 브랜치에 포함하거나 수락된 기능으로 승격하지 않는다.
+- **초기 01B 당시 판정(복구·수락 전):** 세 필드 소스 구현과 엔진 검증을 마쳤으나 앱 검증은 보류였다. 소유자 물리적 수동 수락은 아직 받지 않았다. 자동 실행·미실행·수락을 구분한다. 이후 복구·핵심 수락은 [CLOSE-01 정정 기록](#2026-11-18-spectrum-fx-01b-close-01-핵심-수락과-로컬-체크포인트)을 따른다. 기존 Native Inspector 7 FAIL/4 SKIP·내부 Undo/Redo Seek 지연 조사는 OPEN이며 장시간·다른 하드웨어·전체 Preview/Export parity는 미검증, 공개 Spectrum Export는 비활성이다.
+- **실제로 실행한 엔진 검증:** 관련 엔진 89 PASS/0 FAIL/0 SKIP(새 4개 포함). 속성별 band-cache 분리·PCM 재사용·원설정 복원, 알려진 1000Hz와 밴드 1/1024, 늦은 이전 설정 거절, 편집된 Export plan 설정과 public gate를 확인했다. 기존 Digital/Analog·zero dots·source mapping·Format 10·한정 internal worker/checkpoint 검사도 이 선택 suite에 포함된다.
+- **실제 미디어 엔진 검증:** Gate 17 WAV와 IMG_1749의 저장 signature·읽기 전용 원본 SHA, frame 0/118의 6설정 분석/공통 renderer, legacy milli, 혼합 Format 10 저장/재읽기, 최대 2048px 이미지 thumbnail을 검사하여 42 PASS/0 FAIL/0 SKIP였다. 음악의 특정 peak를 주장하지 않으며 실제 변화는 observations로 남겼다. 합성 그림은 engine raster와 참고 이미지의 합성이며 앱 화면 캡처·설치 layer·실제 Export 인코딩이 아니다.
+- **초기 01B 빌드 안전 중지:** 새 격리 Debug 제품 빌드 1회는 memory pressure 2에서 guard가 종료했다(exit −15, BUILD INTERRUPTED). 관측 최대 단일 725.6MiB·aggregate 1083.5MiB, 자식 잔류 0이었다. 한도 증가·자동 앱 재빌드·기존 증거 삭제는 없었다. 이후 pressure 1에서 별도로 처음 실행한 엔진 suite와 실제 미디어 도구는 정상 종료했다. 기존 서명 앱은 보존했고 당시 검증 완료된 새 FX Debug 앱은 없었다. 후속의 별도 승인 복구 성공으로 이 중지 이력을 지우지 않는다.
+- **초기 01B 당시 남은 검증:** 추가 native integer/scrub·gesture Undo/Escape/비활성화·active-save/앱 재열기 회귀 소스와 gated paused Preview 실행기를 준비했으나 당시 새 앱을 완성하지 못해 실행하지 않았다. 기존 Seek/image playback/native Inspector 회귀도 초기 01B에서 재실행하지 않았다. 당시 앱 완료나 소유자 수락을 선언하지 않았으며 후속 안전 빌드와 앱 회귀가 필요했다. 작업별 전체 로그·명령·fingerprint·결과는 app/selftest-work/spectrum-fx01b-20261117-01/에 격리 보존한다.
+
+### 2026-11-18 SPECTRUM-FX-01B-CLOSE-01 핵심 수락과 로컬 체크포인트
+
+- **현행 판정과 승인 범위:** FX-01B의 시작 주파수·끝 주파수·밴드 수 Inspector 구현은 완료됐고, 별도 승인 복구의 자동 검증과 아래 소유자 핵심 수동 수락을 기록한다. 앞 절의 앱 미완성·수락 대기는 초기 01B 당시 상태다. CLOSE-01은 기존 구현·테스트와 관련 문서의 정확히 8파일을 로컬 체크포인트 한 개로 기록하는 승인 범위이며 push·merge·FX-01C 구현은 포함하지 않는다. 이 문서 작업에서 빌드나 제품 회귀를 재실행하지 않았다.
+- **소유자 핵심 수동 수락 PASS:** 소유자는 FX-01B Debug 앱을 실제 Mac에서 조작해 다음 10개 관측을 PASS로 보고했고 앱을 종료했다고 알렸다. 이는 아래 확인한 조작의 수락이며 전체 수동 회귀 행렬 통과를 뜻하지 않는다.
+
+  1. 이미지와 WAV 재연결 성공.
+  2. 분석 컨트롤 세 개 표시.
+  3. 시작 주파수와 끝 주파수 편집 동작.
+  4. 밴드 수 1과 1024 입력 허용.
+  5. 잘못된 주파수 순서 거절.
+  6. 반대 주파수 자동 변경 없음.
+  7. 숫자 자체의 수평 scrubbing 동작.
+  8. 완료한 scrub을 Undo 한 번으로 복원.
+  9. Redo로 편집값 복원.
+  10. 저장 후 다시 열어 편집한 설정 유지.
+
+- **이번 소유자 수락에 포함하지 않은 조건:** Escape 취소, 창·앱 비활성화 취소, 모든 focus/keyboard 경계, 빠른 반복 scrubbing, 성능·화면 FPS, 전체 Preview/Export parity, 장시간 재생과 다른 하드웨어는 이번 수동 확인으로 수락하지 않았다. 관련 자동 검사가 있더라도 소유자 물리 입력 확인으로 바꾸어 쓰지 않는다.
+- **이전에 실행한 복구 자동 검증:** `SPECTRUM-FX-01B-RECOVERY`는 **763 PASS/0 FAIL/0 SKIP**를 보고했다. 구성은 numeric/native 284, 실제 SwiftUI Inspector의 합성 native 이벤트 43, 설치 Preview/shared-renderer 비교 87, playback 146, image intent 130, 실제 built-in overlay 61, cached `--skip-build` SubtitlePreviewEditTests 10, 제한된 internal Export 관련 검사 2다. 별도로 Seek 오디오·이미지 각 9개, 총 **18/18 캡처**와 authoritative style raster **66/66 일치**, 잘린 관측 행 없음이었다. 이 수치는 이전 실행 증거이며 CLOSE-01에서 새로 실행한 결과가 아니다. 초기 엔진 89 PASS와 실제 미디어 엔진 42 PASS는 별도 과거 증거를 재사용했고 763에 다시 합산하지 않는다. 합성 native 입력·설치 레이어와 raster 바이트 비교는 물리 화면 표시/FPS 또는 전체 Export 검증이 아니다.
+- **중지와 복구 이력:** 초기 pressure 2 중지 증거를 보존한 뒤, 별도 승인된 RECOVERY에서 제품 빌드를 한 번 새로 실행해 원래 exit 0·BUILD SUCCEEDED를 확인했다. 모든 기존 자원 guard를 유지했고 단일 compiler, 관측 최대 단일 약 1223.8MiB·aggregate 약 1781.1MiB·pressure 1이었다. 별도 출력의 ad-hoc 서명 Debug 앱과 입력 fingerprint 152개를 검증했다. 초기 불완전 산출물·기존 서명 앱·로그는 삭제하거나 덮어쓰지 않았으며 중지된 빌드를 자동 재시도한 것으로 기록하지 않는다. 복구 증거는 app/selftest-work/spectrum-fx01b-recovery-20261117-01/에 보존한다.
+- **이미지 fixture 접근 문제와 이번 수동 확인:** 제공 fixture의 원본 경로·저장 metadata는 유효했지만 standalone helper의 저장·재열기 성공이 수신 sandbox 앱의 미디어 접근 권한을 보장하지 않았다. 이미지 기능은 custom Debug 조건과 명시적 `-OTFEnableImageImport` 실행 인자를 모두 요구한다. gate가 꺼지면 이미지 재연결 행과 진입이 막히는 안내/UI 제약을 확인했고, 별도 진단 identity의 읽기 거절을 실제 owner 프로세스의 오류 코드로 단정하지 않았다. 이후 소유자가 이미지·WAV 재연결과 저장·재열기 성공을 보고하여 이번 fixture의 수동 검증 blocker는 해소됐다. gate-off 안내/UI 제약과 일반적인 권한·장기 bookmark 복원의 보장은 여전히 별도 문제다. 조사 증거는 app/selftest-work/spectrum-fx01b-owner-media01-20261117-01/에 보존한다.
+- **보존 계약과 다음 단계:** 정수 UI·기존 숫자 scrub 구조·Store 허용 목록·분석 revision과 stale 결과 거절·PCM/band cache 한도·기존 오디오 시간 의미를 유지한다. 기존 Format 10 persistence를 재사용하며 schema 변경과 공개 Spectrum Export 활성화는 없다. 기존 Native Inspector **7 FAIL/4 SKIP**과 내부 Undo/Redo Seek 지연 조사는 OPEN이며 장시간·다른 하드웨어·전체 Preview/Export parity는 미검증이다. UX-02는 **planned v1.1 deferred WIP**로 유지하며 이 FX 체크포인트에 포함하지 않는다. **FX-01C는 다음 계획 slice로 미구현이며 별도 작업 승인이 필요하다.**

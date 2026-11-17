@@ -932,6 +932,7 @@ struct AdjustmentsView: View {
 struct SpectrumStyleDraft {
     var startX: String, startY: String, endX: String, endY: String, height: String
     var reaction: String
+    var lowHz: String, highHz: String, bands: String
     var red: String, green: String, blue: String
     var thickness: String
     var sides: SpectrumItemStyle.Sides
@@ -949,6 +950,7 @@ struct SpectrumStyleDraft {
         height = pixels(style.maxHeightMilli)
         thickness = pixels(style.thicknessMilli); sides = style.sides; mode = style.mode
         reaction = String(style.reactionPercent)
+        lowHz = String(style.lowHz); highHz = String(style.highHz); bands = String(style.bands)
         red = String(style.red); green = String(style.green); blue = String(style.blue)
     }
     struct Invalid: LocalizedError {
@@ -980,13 +982,32 @@ struct SpectrumStyleDraft {
             }
             return value
         }
+        func analysisInteger(_ text: String, _ label: String, range: ClosedRange<Int>, unit: String = "") throws -> Int {
+            let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard text.count <= 20,
+                  text.range(of: #"^[+-]?[0-9]+$"#, options: .regularExpression) != nil,
+                  let value = Int(text) else {
+                throw Invalid(message: "\(label): 소수점 없이 정수를 입력하세요.")
+            }
+            guard range.contains(value) else {
+                throw Invalid(message: "\(label): \(range.lowerBound)–\(range.upperBound)\(unit) 범위의 정수를 입력하세요.")
+            }
+            return value
+        }
         let reactionText = reaction.trimmingCharacters(in: .whitespacesAndNewlines)
         guard reactionText.range(of: #"^[0-9]{1,3}$"#, options: .regularExpression) != nil,
               let percent = Int(reactionText), (0...200).contains(percent) else {
             throw Invalid(message: "반응 강도: 0–200 사이 정수 %를 입력하세요.")
         }
+        let low = try analysisInteger(lowHz, "시작 주파수", range: 1...23_999, unit: " Hz")
+        let high = try analysisInteger(highHz, "끝 주파수", range: 2...24_000, unit: " Hz")
+        guard low < high else {
+            throw Invalid(message: "시작 주파수는 끝 주파수보다 작아야 합니다. 반대쪽 주파수는 자동으로 바꾸지 않습니다.")
+        }
+        let bandCount = try analysisInteger(bands, "주파수 밴드 수", range: 1...1024)
         var result = base
         result.reactionPercent = percent
+        result.lowHz = low; result.highHz = high; result.bands = bandCount
         result.startXMilli = try milli(startX, "시작 X", original: base.startXMilli, range: -10_000_000...10_000_000)
         result.startYMilli = try milli(startY, "시작 Y", original: base.startYMilli, range: -10_000_000...10_000_000)
         result.endXMilli = try milli(endX, "끝 X", original: base.endXMilli, range: -10_000_000...10_000_000)
@@ -1242,6 +1263,9 @@ struct SpectrumStyleAdjust: View {
             }
             .disclosureGroupStyle(SpectrumDisclosureStyle())
             AdjustSection(title: "오디오 분석", horizontalInset: 2) {
+                field(.lowHz)
+                field(.highHz)
+                field(.bands)
                 field(.reaction)
                 Slider(value: Binding(get: {
                     Double(store.timeline.spectrum(item.id)?.style.reactionPercent ?? item.style.reactionPercent)
@@ -1309,6 +1333,9 @@ struct SpectrumStyleAdjust: View {
         case .height: $draft.height
         case .thickness: $draft.thickness
         case .reaction: $draft.reaction
+        case .lowHz: $draft.lowHz
+        case .highHz: $draft.highHz
+        case .bands: $draft.bands
         }
     }
     private func syncNumericDraft() {
@@ -1339,7 +1366,16 @@ struct SpectrumStyleAdjust: View {
             }, update: { token, value in
                 let result = store.updateSpectrumNumericScrub(token, value: value)
                 if result == .accepted { syncNumericDraft(); feedback = nil }
-                if result == .rejected { feedback = "현재 좌표·범위에서는 이 값을 적용할 수 없습니다. 시작점과 끝점의 거리는 1 px 이상이어야 합니다." }
+                if result == .rejected {
+                    switch number {
+                    case .lowHz, .highHz:
+                        feedback = "주파수는 1 ≤ 시작 < 끝 ≤ 24000 Hz여야 합니다. 반대쪽 주파수는 바꾸지 않았습니다."
+                    case .bands:
+                        feedback = "주파수 밴드 수는 1–1024 범위의 정수여야 합니다."
+                    default:
+                        feedback = "현재 좌표·범위에서는 이 값을 적용할 수 없습니다. 시작점과 끝점의 거리는 1 px 이상이어야 합니다."
+                    }
+                }
                 return result
             }, finish: { token in
                 store.finishSpectrumNumericScrub(token)
