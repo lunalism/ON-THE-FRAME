@@ -312,6 +312,7 @@ extension StillImageProjectCodecTests {
             XCTAssertEqual(old.version, 10)
             XCTAssertEqual(migrated.insideRGB, .init(red: 12, green: 34, blue: 56))
             XCTAssertEqual(migrated.resolvedOutsideRGB, migrated.insideRGB)
+            XCTAssertEqual(migrated.hueInterpolationDegrees, 0)
             XCTAssertEqual(migrated.alpha, 173)
             XCTAssertEqual(migrated.reactionPercent, 150, "Format 11 support must not reset existing Format 10 strength")
             XCTAssertEqual(migrated.windowMs, 300); XCTAssertEqual(migrated.offsetMs, -500)
@@ -324,12 +325,39 @@ extension StillImageProjectCodecTests {
         }
     }
 
+    func testAppearanceV2RoundTripPreservesColorsTimingAndLineage() async throws {
+        for image in [false, true] {
+            var project = try await reactionProject(image: image)
+            var style = project.spectra![0].style
+            style.red = 12; style.green = 34; style.blue = 56; style.alpha = 173
+            style.outsideRGB = .init(red: 17, green: 31, blue: 47)
+            style.reactionPercent = 150; style.windowMs = 300; style.offsetMs = -500
+            for degrees in [0, 180, 360] {
+                style.hueInterpolationDegrees = degrees
+                project.spectra![0] = project.spectra![0].with(style: style)
+                let raw = try json(project)
+                let spectra = try XCTUnwrap(raw["spectra"] as? [[String: Any]])
+                let fields = try XCTUnwrap(spectra.first?["style"] as? [String: Any])
+                let appearance = try XCTUnwrap(fields["appearance"] as? [String: Any])
+                XCTAssertEqual(Set(appearance.keys), ["contractVersion", "outsideRGB", "hueInterpolationDegrees"])
+                XCTAssertEqual(appearance["contractVersion"] as? Int, 2)
+                XCTAssertEqual(appearance["hueInterpolationDegrees"] as? Int, degrees)
+                let bytes = try data(raw)
+                XCTAssertEqual(try C.decode(bytes), project)
+                let restored = try OperationalProjectAdapter.restore(project).timeline
+                XCTAssertEqual(try ProjectPersistence.decode(bytes).timeline, restored)
+                if !image { XCTAssertEqual(try ProjectFile.decode(bytes).timeline, restored) }
+            }
+        }
+    }
+
     func testAppearanceV1RejectsMalformedAndUnsupportedNestedData() async throws {
         func color(_ red: Any, _ green: Any, _ blue: Any) -> [String:Any] { ["red": red, "green": green, "blue": blue] }
         func envelope(_ version: Any, _ outside: Any) -> [String:Any] { ["contractVersion": version, "outsideRGB": outside] }
         let rgb = color(17, 31, 47)
         var alpha = color(0, 0, 0); alpha["alpha"] = 255
         var hue = envelope(1, rgb); hue["hueSweepDegrees"] = 0
+        var v1WithV2Hue = envelope(1, rgb); v1WithV2Hue["hueInterpolationDegrees"] = 0
         var softness = envelope(1, rgb); softness["softnessPercent"] = 0
         var inside = envelope(1, rgb); inside["insideRGB"] = rgb
         let invalid: [Any?] = [
@@ -338,7 +366,10 @@ extension StillImageProjectCodecTests {
             ["contractVersion": 1], ["outsideRGB": rgb],
             envelope(1, NSNull()), envelope(1, color(-1, 0, 0)), envelope(1, color(256, 0, 0)),
             envelope(1, color(0.5, 0, 0)), envelope(1, color(true, 0, 0)),
-            envelope(1, alpha), hue, softness, inside
+            envelope(1, alpha), hue, v1WithV2Hue, softness, inside,
+            ["contractVersion": 2, "outsideRGB": rgb, "hueInterpolationDegrees": 180, "extra": 0],
+            ["contractVersion": 3, "outsideRGB": rgb, "hueInterpolationDegrees": 180],
+            ["contractVersion": 2, "hueInterpolationDegrees": 180]
         ]
         for image in [false, true] {
             let project = try await reactionProject(image: image)
@@ -369,8 +400,8 @@ extension StillImageProjectCodecTests {
             XCTAssertNotEqual(changed, text)
             XCTAssertThrowsError(try C.decode(Data(changed.utf8)))
         }
-        for replacement in ["\"contractVersion\" : 1.0", "\"contractVersion\" : 1, \"contractVersion\" : 1"] {
-            let changed = text.replacingOccurrences(of: "\"contractVersion\" : 1", with: replacement)
+        for replacement in ["\"contractVersion\" : 2.0", "\"contractVersion\" : 2, \"contractVersion\" : 2"] {
+            let changed = text.replacingOccurrences(of: "\"contractVersion\" : 2", with: replacement)
             XCTAssertNotEqual(changed, text)
             XCTAssertThrowsError(try C.decode(Data(changed.utf8)))
         }
@@ -511,6 +542,7 @@ extension StillImageProjectCodecTests {
                     XCTAssertEqual(style.insideRGB, .init(red: 12, green: 34, blue: 56), label)
                     XCTAssertEqual(style.resolvedOutsideRGB, version == 11 ? .init(red: 17, green: 31, blue: 47) : style.insideRGB, label)
                     XCTAssertEqual(style.alpha, 173, label)
+                    XCTAssertEqual(style.hueInterpolationDegrees, 0, label)
                     XCTAssertEqual(style.thicknessMilli, 3125, label)
                     XCTAssertEqual(style.startXMilli, 320123, label)
                     XCTAssertEqual(style.reactionPercent, version >= 10 ? 150 : 100, label)
@@ -530,7 +562,10 @@ extension StillImageProjectCodecTests {
 
     func testForbiddenAndMalformedSpectrumFieldsAcrossJSONEncodings() throws {
         let reaction = #""reactionPercent":150"#
-        let badAppearance = [
+        let v2HuePrefix = #""appearance":{"contractVersion":2,"outsideRGB":{"red":17,"green":31,"blue":47},"hueInterpolationDegrees":"#
+        let badHueTokens = ["-1", "-0", "361", "180.0", "1.8e2", "true", "\"180\"", "null",
+                            #"180,"hueInterpolationDegr\u0065es":180"#]
+        let badAppearance = badHueTokens.map { v2HuePrefix + $0 + "}" } + [
             appearanceField.replacingOccurrences(of: #""contractVersion":1"#, with: #""contractVersion":2"#),
             appearanceField.replacingOccurrences(of: #""red":17"#, with: #""red":17,"extra":0"#),
             appearanceField.replacingOccurrences(of: #""red":17"#, with: #""red":17,"\u0072ed":17"#),

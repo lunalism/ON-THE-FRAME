@@ -1013,10 +1013,11 @@ final class ProjectStore {
         allowed.thicknessMilli = style.thicknessMilli; allowed.sides = style.sides; allowed.mode = style.mode
         allowed.red = style.red; allowed.green = style.green; allowed.blue = style.blue
         allowed.outsideRGB = style.outsideRGB
+        allowed.hueInterpolationDegrees = style.hueInterpolationDegrees
         allowed.reactionPercent = style.reactionPercent
         allowed.lowHz = style.lowHz; allowed.highHz = style.highHz; allowed.bands = style.bands
         allowed.windowMs = style.windowMs; allowed.offsetMs = style.offsetMs
-        guard style == allowed, style.isValid else { return "위치·높이·두께·RGB·주파수·밴드 수 범위를 확인해 주세요." }
+        guard style == allowed, style.isValid else { return "스펙트럼의 위치·모양·색상·오디오 분석 값의 범위를 확인해 주세요." }
         guard style != original else { return nil }
         commit({ try $0.settingSpectrumStyle(id, style) }, focus: id)
         return timeline.spectrum(id)?.style == style ? nil : (statusMessage ?? "모양을 적용하지 못했습니다.")
@@ -1162,6 +1163,7 @@ final class ProjectStore {
         allowed.sides = style.sides; allowed.mode = style.mode
         allowed.red = style.red; allowed.green = style.green; allowed.blue = style.blue
         allowed.outsideRGB = style.outsideRGB
+        allowed.hueInterpolationDegrees = style.hueInterpolationDegrees
         allowed.reactionPercent = style.reactionPercent
         allowed.lowHz = style.lowHz; allowed.highHz = style.highHz; allowed.bands = style.bands
         allowed.windowMs = style.windowMs; allowed.offsetMs = style.offsetMs

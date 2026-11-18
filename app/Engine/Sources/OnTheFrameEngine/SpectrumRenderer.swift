@@ -1,10 +1,11 @@
+import Accelerate
 import CoreGraphics
 import Foundation
 import os
 
 // 스펙트럼 그리기(2026-10-25, docs/SPECTRUM-DESIGN.md §13) — 엔진 안(package) API. 앱 프리뷰·내보내기·정보 패널·저장에 연결하지 않았다.
 // 시제품 ProtoSpectrumRenderer(시험 대상)의 기하·그리기 명령을 그대로 옮겼다(같은 입력 → 같은 바이트, 시험으로 확인).
-// FX-02B: 두 색은 기준선→Maximum Height의 선형광 RGB 공간 gradient. Hue·Softness는 구현하지 않는다.
+// 두 색은 주파수축에서 정적으로 Hue를 회전한 뒤 기준선→Maximum Height 방향으로 선형광 RGB 보간한다.
 // 그리기는 다시 쓰는 전체 캔버스 문맥에 하고(프레임마다 0으로 비움), 기하로 계산한 범위의 행만 자막과 같은 tightCrop으로 자른다.
 // 범위만 그린 작은 문맥은 전체 캔버스 그림과 바이트가 달라(§12, 가장자리 최대 1/255) 쓰지 않는다.
 
@@ -18,18 +19,26 @@ package struct SpectrumStyle: Sendable, Equatable {
     /// Inside와 공통 alpha(sRGB 0~1, 미리 곱하지 않음). nil Outside는 현재 Inside를 따른다.
     package var red: Double, green: Double, blue: Double, alpha: Double
     package var outsideRed: Double?, outsideGreen: Double?, outsideBlue: Double?
+    package var hueInterpolationDegrees: Int
     package var resolvedOutsideRed: Double { outsideRed ?? red }
     package var resolvedOutsideGreen: Double { outsideGreen ?? green }
     package var resolvedOutsideBlue: Double { outsideBlue ?? blue }
     package var hasColorGradient: Bool {
         red != resolvedOutsideRed || green != resolvedOutsideGreen || blue != resolvedOutsideBlue
     }
+    fileprivate func hasHueSweep(bands: Int) -> Bool {
+        let chromatic = red != green || green != blue ||
+            resolvedOutsideRed != resolvedOutsideGreen || resolvedOutsideGreen != resolvedOutsideBlue
+        return hueInterpolationDegrees != 0 && bands > 1 && chromatic
+    }
     package init(start: CGPoint, end: CGPoint, maxHeight: Double, thickness: Double, mode: Mode, sides: Sides,
                  red: Double = 1, green: Double = 1, blue: Double = 1, alpha: Double = 1,
-                 outsideRed: Double? = nil, outsideGreen: Double? = nil, outsideBlue: Double? = nil) {
+                 outsideRed: Double? = nil, outsideGreen: Double? = nil, outsideBlue: Double? = nil,
+                 hueInterpolationDegrees: Int = 0) {
         self.start = start; self.end = end; self.maxHeight = maxHeight; self.thickness = thickness; self.mode = mode; self.sides = sides
         self.red = red; self.green = green; self.blue = blue; self.alpha = alpha
         self.outsideRed = outsideRed; self.outsideGreen = outsideGreen; self.outsideBlue = outsideBlue
+        self.hueInterpolationDegrees = hueInterpolationDegrees
     }
     /// 쓸 수 있는지(유한한 좌표 ±10000, 시작 ≠ 끝, 높이 0~1080, 두께 0.5~64, 색 0~1)
     package func validationError() -> String? {
@@ -40,6 +49,7 @@ package struct SpectrumStyle: Sendable, Equatable {
         guard thickness.isFinite, (0.5...64).contains(thickness) else { return "thickness \(thickness)" }
         guard [red, green, blue, alpha, resolvedOutsideRed, resolvedOutsideGreen, resolvedOutsideBlue]
             .allSatisfy({ $0.isFinite && (0...1).contains($0) }) else { return "color" }
+        guard SpectrumItemStyle.hueInterpolationRange.contains(hueInterpolationDegrees) else { return "hueInterpolationDegrees" }
         return nil
     }
 }
@@ -109,6 +119,8 @@ package enum SpectrumGeometry {
 /// Recolor existing coverage in place; the field is independent of each band's height.
 /// Common alpha is already present in the white mask and is not applied a second time.
 private enum SpectrumColorField {
+    typealias RGB = (Double, Double, Double)
+
     static func linear(_ s: Double) -> Double {
         s <= 0.04045 ? s / 12.92 : pow((s + 0.055) / 1.055, 2.4)
     }
@@ -116,33 +128,169 @@ private enum SpectrumColorField {
         let v = min(1, max(0, value))
         return v <= 0.0031308 ? 12.92 * v : 1.055 * pow(v, 1 / 2.4) - 0.055
     }
-    static func apply(style s: SpectrumStyle, canvas: CGSize, bounds: CGRect, into ctx: CGContext) {
+    /// HSV is evaluated in encoded sRGB. A hue rotation preserves the maximum and
+    /// minimum components (value and chroma), so only the middle component varies.
+    private struct HueSource {
+        let sector: Double, low: Double, chroma: Double, linearLow: Double, linearHigh: Double
+
+        init(_ red: Double, _ green: Double, _ blue: Double) {
+            let high = max(red, green, blue)
+            low = min(red, green, blue)
+            chroma = high - low
+            linearLow = linear(low)
+            linearHigh = linear(high)
+            if chroma == 0 { sector = 0 }
+            else if high == red {
+                let hue = (green - blue) / chroma
+                sector = hue < 0 ? hue + 6 : hue
+            } else if high == green { sector = (blue - red) / chroma + 2 }
+            else { sector = (red - green) / chroma + 4 }
+        }
+
+        func rotatedLinear(by sectors: Double) -> RGB {
+            guard chroma > 0 else { return (linearLow, linearLow, linearLow) }
+            let position = (sector + sectors).truncatingRemainder(dividingBy: 6)
+            let index = Int(position)
+            let fraction = position - Double(index)
+            let middle = linear(low + chroma * (index.isMultiple(of: 2) ? fraction : 1 - fraction))
+            switch index {
+            case 0: return (linearHigh, middle, linearLow)
+            case 1: return (middle, linearHigh, linearLow)
+            case 2: return (linearLow, linearHigh, middle)
+            case 3: return (linearLow, middle, linearHigh)
+            case 4: return (middle, linearLow, linearHigh)
+            default: return (linearHigh, linearLow, middle)
+            }
+        }
+    }
+
+    private struct Gradient {
+        let inside: RGB, outside: RGB
+
+        func color(at t: Double) -> RGB {
+            (sRGB(inside.0 + (outside.0 - inside.0) * t),
+             sRGB(inside.1 + (outside.1 - inside.1) * t),
+             sRGB(inside.2 + (outside.2 - inside.2) * t))
+        }
+    }
+
+    static func apply(style s: SpectrumStyle, bands: Int, canvas: CGSize, bounds: CGRect, into ctx: CGContext) {
         let g = SpectrumGeometry.points(s, bands: 1, canvas: canvas)
         let a = CGPoint(x: s.start.x * canvas.width / 1920, y: s.start.y * canvas.height / 1080)
         let height = CGFloat(s.maxHeight) * g.scaleY
-        let inside = (linear(s.red), linear(s.green), linear(s.blue))
-        let outside = (linear(s.resolvedOutsideRed), linear(s.resolvedOutsideGreen), linear(s.resolvedOutsideBlue))
-        func color(_ distance: CGFloat) -> (Double, Double, Double) {
-            let t = height > 0 ? Double(min(1, max(0, abs(distance) / height))) : 0
-            return (sRGB(inside.0 + (outside.0 - inside.0) * t),
-                    sRGB(inside.1 + (outside.1 - inside.1) * t),
-                    sRGB(inside.2 + (outside.2 - inside.2) * t))
+        let original = Gradient(inside: (linear(s.red), linear(s.green), linear(s.blue)),
+                                outside: (linear(s.resolvedOutsideRed), linear(s.resolvedOutsideGreen), linear(s.resolvedOutsideBlue)))
+        let horizontal = g.up.dx == 0
+        let sweeps = s.hasHueSweep(bands: bands)
+        if horizontal && !sweeps {
+            applyHorizontal(gradient: original, baselineY: a.y, height: height, bounds: bounds, into: ctx)
+            return
+        }
+        let inside = HueSource(s.red, s.green, s.blue)
+        let outside = HueSource(s.resolvedOutsideRed, s.resolvedOutsideGreen, s.resolvedOutsideBlue)
+        let dx = (s.end.x - s.start.x) * canvas.width / 1920
+        let dy = (s.end.y - s.start.y) * canvas.height / 1080
+        let bandsPerPoint = Double(bands) / hypot(dx, dy)
+        let lastBand = Double(bands - 1)
+        // This is called only for a positive sweep spanning at least two centres.
+        func rotatedGradient(bandPosition: Double) -> Gradient {
+            let rotation = Double(s.hueInterpolationDegrees) / 60 * (min(lastBand, max(0, bandPosition)) / lastBand)
+            if rotation == 0 || rotation == 6 { return original }
+            return Gradient(inside: inside.rotatedLinear(by: rotation), outside: outside.rotatedLinear(by: rotation))
+        }
+        func heightFraction(_ distance: CGFloat) -> Double {
+            height > 0 ? Double(min(1, abs(distance) / height)) : 0
         }
         let x0 = Int(bounds.minX), x1 = Int(bounds.maxX)
-        let pixels = ctx.data!.assumingMemoryBound(to: UInt8.self)
-        for y in Int(bounds.minY)..<Int(bounds.maxY) {
-            let row = pixels + y * ctx.bytesPerRow
+        // A Digital cell has one frequency. Analog varies continuously from
+        // the first to the last band centre, including between just two bands.
+        let digital = sweeps && s.mode == .digital ? (0..<bands).map { rotatedGradient(bandPosition: Double($0)) } : []
+        let columns = sweeps && s.mode == .analog && horizontal ? (x0..<x1).map { x in
+            rotatedGradient(bandPosition: -(CGFloat(x) + 0.5 - a.x) * g.up.dy * bandsPerPoint - 0.5)
+        } : []
+        // The cleared, premultiplied Quartz mask is already transparent black
+        // outside its coverage. Visit only covered positions of this frame.
+        coveredRows(in: bounds, context: ctx) { y, row, offsets in
             let distance = (CGFloat(x0) + 0.5 - a.x) * g.up.dx + (CGFloat(y) + 0.5 - a.y) * g.up.dy
-            // Horizontal baselines share a color across a row; avoid per-pixel powers.
-            let rowColor = g.up.dx == 0 ? color(distance) : nil
-            for x in x0..<x1 {
+            let along = -(CGFloat(x0) + 0.5 - a.x) * g.up.dy + (CGFloat(y) + 0.5 - a.y) * g.up.dx
+            var previousBand = -1, previousColor: RGB = (0, 0, 0)
+            var next = offsets
+            while next.pointee < Float(x1 - x0) {
+                let x = Int(next.pointee), offset = CGFloat(x)
+                next += 1
                 let pixel = row + x * 4, alpha = pixel[3]
-                guard alpha != 0 else { pixel[0] = 0; pixel[1] = 0; pixel[2] = 0; continue }
-                let c = rowColor ?? color(distance + CGFloat(x - x0) * g.up.dx)
-                func premultiplied(_ value: Double) -> UInt8 {
-                    UInt8(min(Int(alpha), max(0, Int((value * Double(alpha)).rounded()))))
+                let c: RGB
+                if !sweeps {
+                    c = original.color(at: heightFraction(distance + offset * g.up.dx))
+                } else if !columns.isEmpty {
+                    c = columns[x].color(at: heightFraction(distance))
+                } else {
+                    let cell = (along - offset * g.up.dy) * bandsPerPoint
+                    if digital.isEmpty {
+                        c = rotatedGradient(bandPosition: cell - 0.5).color(at: heightFraction(distance + offset * g.up.dx))
+                    } else {
+                        let band = Int(min(lastBand, max(0, floor(cell))))
+                        if !horizontal || previousBand != band {
+                            previousBand = band
+                            previousColor = digital[band].color(at: heightFraction(distance + offset * g.up.dx))
+                        }
+                        c = previousColor
+                    }
                 }
-                pixel[0] = premultiplied(c.2); pixel[1] = premultiplied(c.1); pixel[2] = premultiplied(c.0)
+                // Encoded sRGB is in 0...1. Coverage is precisely the original byte.
+                let coverage = Double(alpha)
+                pixel[0] = UInt8((c.2 * coverage).rounded())
+                pixel[1] = UInt8((c.1 * coverage).rounded())
+                pixel[2] = UInt8((c.0 * coverage).rounded())
+            }
+        }
+    }
+
+    private static func coveredRows(in bounds: CGRect, context: CGContext,
+                                    _ visit: (Int, UnsafeMutablePointer<UInt8>, UnsafePointer<Float>) -> Void) {
+        let width = Int(bounds.width), stride = width + 1
+        let pixels = context.data!.assumingMemoryBound(to: UInt8.self) + Int(bounds.minX) * 4
+        withUnsafeTemporaryAllocation(of: Float.self, capacity: 3 * stride) { scratch in
+            let offsets = scratch.baseAddress!, alpha = offsets + stride, covered = alpha + stride
+            var start: Float = 0, step: Float = 1
+            vDSP_vramp(&start, &step, offsets, 1, vDSP_Length(stride))
+            // vcmprs preserves order. Include width as an end marker even on an empty row.
+            alpha[width] = 1
+            for y in Int(bounds.minY)..<Int(bounds.maxY) {
+                let row = pixels + y * context.bytesPerRow
+                vDSP_vfltu8(row + 3, 4, alpha, 1, vDSP_Length(width))
+                vDSP_vcmprs(offsets, 1, alpha, 1, covered, 1, vDSP_Length(stride))
+                visit(y, row, UnsafePointer(covered))
+            }
+        }
+    }
+
+    // A flat frequency-axis field has one RGB per row. Use the actual mask alpha,
+    // including antialiased edges and overlapping paths. Scratch is two scanlines.
+    private static func applyHorizontal(gradient: Gradient, baselineY: CGFloat, height: CGFloat,
+                                        bounds: CGRect, into ctx: CGContext) {
+        let width = Int(bounds.width), count = vDSP_Length(width)
+        let pixels = ctx.data!.assumingMemoryBound(to: UInt8.self) + Int(bounds.minX) * 4
+        withUnsafeTemporaryAllocation(of: Double.self, capacity: 2 * width) { scratch in
+            let alpha = scratch.baseAddress!, channel = alpha + width
+            func write(_ component: Double, to dst: UnsafeMutablePointer<UInt8>) {
+                var scale = component, half = 0.5
+                vDSP_vsmulD(alpha, 1, &scale, channel, 1, count)
+                // The scalar contract is nearest, ties away from zero. For these
+                // nonnegative products use truncate(x + 0.5). Zero x < 0.5 first
+                // so even 0.5.nextDown cannot round up during the addition.
+                vDSP_vthresD(channel, 1, &half, channel, 1, count)
+                vDSP_vsaddD(channel, 1, &half, channel, 1, count)
+                vDSP_vfixu8D(channel, 1, dst, 4, count)
+            }
+            for y in Int(bounds.minY)..<Int(bounds.maxY) {
+                let row = pixels + y * ctx.bytesPerRow
+                let distance = abs(CGFloat(y) + 0.5 - baselineY)
+                let c = gradient.color(at: height > 0 ? min(1, distance / height) : 0)
+                vDSP_vfltu8D(row + 3, 4, alpha, 1, count)
+                write(c.2, to: row)
+                write(c.1, to: row + 1)
+                write(c.0, to: row + 2)
             }
         }
     }
@@ -188,10 +336,10 @@ package final class SpectrumCanvas {
         let canvas = CGSize(width: width, height: height)
         let b = SpectrumGeometry.bounds(v, style: s, canvas: canvas)
         guard !b.isNull, b.height > 0, b.width > 0 else { return nil }
-        if s.hasColorGradient {
+        if s.hasColorGradient || s.hasHueSweep(bands: v.count) {
             var mask = s; mask.red = 1; mask.green = 1; mask.blue = 1
             SpectrumGeometry.draw(v, style: mask, canvas: canvas, into: ctx)
-            SpectrumColorField.apply(style: s, canvas: canvas, bounds: b, into: ctx)
+            SpectrumColorField.apply(style: s, bands: v.count, canvas: canvas, bounds: b, into: ctx)
         } else {
             // Exact legacy path, including AA, overlapping primitives and common alpha.
             SpectrumGeometry.draw(v, style: s, canvas: canvas, into: ctx)

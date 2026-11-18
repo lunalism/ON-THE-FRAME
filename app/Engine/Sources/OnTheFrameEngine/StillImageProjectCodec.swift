@@ -176,7 +176,7 @@ enum StillImageProjectCodec {
                 .union(version >= ProjectFile.appearanceVersion ? ["appearance"] : [])
             try keys(spectrum["style"], allowed)
             if let style = spectrum["style"] as? [String:Any], let appearance = style["appearance"] {
-                try keys(appearance, ["contractVersion", "outsideRGB"])
+                try keys(appearance, ["contractVersion", "outsideRGB", "hueInterpolationDegrees"])
                 if let object = appearance as? [String:Any] { try keys(object["outsideRGB"], ["red", "green", "blue"]) }
             }
         }

@@ -5,6 +5,7 @@ import OnTheFrameEngine
 /// Inspector policy only. Stored milli precision and renderer/model ranges are unchanged.
 enum SpectrumNumericProperty: String, CaseIterable {
     case startX, startY, endX, endY, height, thickness, reaction, lowHz, highHz, bands, windowMs, offsetMs
+    case hueInterpolationDegrees
     var title: String {
         switch self {
         case .startX: "시작 X"
@@ -19,6 +20,7 @@ enum SpectrumNumericProperty: String, CaseIterable {
         case .bands: "주파수 밴드 수"
         case .windowMs: "분석 창 길이 (ms)"
         case .offsetMs: "오디오 오프셋 (ms)"
+        case .hueInterpolationDegrees: "색조 보간 (°)"
         }
     }
     var range: ClosedRange<Int> {
@@ -32,6 +34,7 @@ enum SpectrumNumericProperty: String, CaseIterable {
         case .bands: 1...1024
         case .windowMs: 1...1000
         case .offsetMs: -10_000...10_000
+        case .hueInterpolationDegrees: 0...360
         }
     }
     /// Frequency bounds depend on the other current value; never adjust that value.
@@ -69,6 +72,7 @@ enum SpectrumNumericProperty: String, CaseIterable {
         case .bands: return style.bands
         case .windowMs: return style.windowMs
         case .offsetMs: return style.offsetMs
+        case .hueInterpolationDegrees: return style.hueInterpolationDegrees
         }
         return SpectrumStyleDraft.wholePixels(raw)
     }
@@ -90,6 +94,7 @@ enum SpectrumNumericProperty: String, CaseIterable {
         case .bands: result.bands = value
         case .windowMs: result.windowMs = value
         case .offsetMs: result.offsetMs = value
+        case .hueInterpolationDegrees: result.hueInterpolationDegrees = value
         }
         return result.isValid ? result : nil
     }

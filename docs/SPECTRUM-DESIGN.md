@@ -1,6 +1,8 @@
 # 오디오 스펙트럼 — 첫 구현 설계와 기술 타당성 검사(2026-10-24, 제품 구현 전)
 
-**2026-11-18 SPECTRUM-FX-02B-CLOSE-02.** 안쪽은 기준선의 색이며 바깥쪽은 Maximum Height의 색이다. 기준선에서 수직 거리만큼 선형광 RGB로 보간한다. 기존 Digital 막대·점과 Analog 연결선에 같은 색장을 적용하고 한 항목의 공통 alpha를 보존한다. 높이 0은 안쪽 색이며 짧은 막대는 바깥쪽 색에 도달하지 않을 수 있다. 두 색이 같으면 기존 단색 경로를 사용한다. 실제 Spectrum 저장은 Format 11 appearance v1이며 지원 레거시 파일의 기존 RGB는 양쪽 색으로 복원한다. 이전 빌드와 단색 raster 6/6, 내부 Export worker와 Preview의 제한된 두 색 raster 비교 20/20이 일치했다.
+**2026-11-18 SPECTRUM-FX-02C.** 색조 보간은 주파수 방향과 높이 방향의 두 단계로 계산한다. 첫 밴드 중심을 0, 마지막 중심을 1로 두고 선택한 두 sRGB 색의 HSV 색조를 각각 `설정 각도 × 주파수 위치`만큼 회전한다. Digital은 셀마다 한 위치를 사용하고 Analog는 투영된 위치를 연속으로 사용한다. 밴드 하나는 위치 0을 쓴다. 이후 기준선에서 Maximum Height까지의 수직 거리로 두 색을 선형광 RGB 보간한다. 유효한 무음의 Digital 점에도 같은 색장을 적용한다. 무채색, 공통 alpha, Hue 0의 기존 그리기와 선택한 원본 RGB를 보존한다. 저장 형식과 물리 검증 범위는 [FX-02C 결정](DECISIONS.md#2026-11-18-spectrum-fx-02c-정적-색조-보간)을 따른다.
+
+**2026-11-18 SPECTRUM-FX-02B-CLOSE-02 당시 기록.** 안쪽은 기준선의 색이며 바깥쪽은 Maximum Height의 색이다. 기준선에서 수직 거리만큼 선형광 RGB로 보간한다. 기존 Digital 막대·점과 Analog 연결선에 같은 색장을 적용하고 한 항목의 공통 alpha를 보존한다. 높이 0은 안쪽 색이며 짧은 막대는 바깥쪽 색에 도달하지 않을 수 있다. 두 색이 같으면 기존 단색 경로를 사용한다. 실제 Spectrum 저장은 Format 11 appearance v1이며 지원 레거시 파일의 기존 RGB는 양쪽 색으로 복원한다. 이전 빌드와 단색 raster 6/6, 내부 Export worker와 Preview의 제한된 두 색 raster 비교 20/20이 일치했다.
 
 소유자는 기존 서명 Debug 앱에서 두 색의 독립 편집, 기준선에서 높이 방향으로 이어지는 그라데이션, 두 색의 Undo/Redo, Format 11 재열기 후 색과 그라데이션 유지를 수락했다(6/6 PASS). 이후 COMPAT-01에서 Format 8 단색 파일과 금지된 색상 필드를 UTF-8·UTF-16에서 일관되게 구분하도록 디코더를 정정했다. 정정본은 코덱·엔진 자동 검증 범위다. 공개 Spectrum Export는 비활성이며 UX-02는 v1.1로 유보한다. 다음 제안은 FX-02C Hue Interpolation이며 이후 FX-02D Softness를 검토한다. 아래 FX-01C-CLOSE-01과 D-S6 제안은 작성 당시 이력이다. [수락 및 호환성 정정 기록](DECISIONS.md#2026-11-18-spectrum-fx-02b-close-02-핵심-수락과-호환성-정정)
 
@@ -32,7 +34,7 @@ ON THE FRAME의 오디오 스펙트럼(R-10~R-12) 설계다. 표시:
 - **가용성·시간 경계:** missing·unavailable·pending·실패·stale 결과를 유효한 무음으로 바꾸지 않고, Spectrum의 활성 구간 밖에서는 표시하지 않는다. 정확 PTS·seek token·player item·source identity·generation/revision/epoch 검증과 원래 오디오 시간 매핑을 유지한다. 이전 프레임을 현재 프레임으로 승인하지 않는다.
 - **공유 그리기와 Export 범위:** Preview와 내부 Export는 같은 분석·`SpectrumFrameRenderer` 계약을 사용한다. 실제 내부 worker와 Preview의 일부 프레임 bands·전체 raster, 120프레임 checkpoint 인코딩/디코딩 검증은 한정 증거다. **전체 Preview/Export parity는 미검증이고 공개 Spectrum Export는 계속 비활성**이다. 내부 Debug slice의 통과를 일반 Export 지원으로 표시하지 않는다.
 - **열린 제한:** Native Inspector **7 FAIL/4 SKIP**을 유지한다. 내부 Undo/Redo Seek 설치 지연 **53.6→116.2ms median** 조사는 OPEN이며 화면 FPS 측정이 아니다. 장시간 성능·다른 하드웨어·전체 Preview/Export parity는 미검증이다. 이전 소유자 수락은 시험한 시나리오 밖으로 확대하지 않는다.
-- **후속 계획 — 이력과 현행 구분:** DOC-ALIGN-01 당시 순서는 **SPECTRUM-UX-02 → SPECTRUM-FX-01 → SPECTRUM-FX-02 → SPECTRUM-SHADOW-01**이었다. 후속 소유자 지시로 UX-02는 planned v1.1 deferred WIP·미수락으로 분리하고 FX-01B 세 분석 필드와 FX-01C 창/오프셋의 구현·핵심 수락을 마쳤다. 후속 승인된 FX-02 범위는 두 색, Hue Interpolation, Softness이며 이번 B 단계는 두 색과 appearance v1이다. Hue Interpolation과 Softness는 후속 구현 승인이 필요하다. 다른 FX·Shadow도 별도 승인이 필요하고 과거 CLOSE-01이 후속 구현을 승인했던 것으로 소급하지 않는다.
+- **후속 계획 — 이력과 현행 구분:** DOC-ALIGN-01 당시 순서는 **SPECTRUM-UX-02 → SPECTRUM-FX-01 → SPECTRUM-FX-02 → SPECTRUM-SHADOW-01**이었다. 후속 소유자 지시로 UX-02는 planned v1.1 deferred WIP·미수락으로 분리하고 FX-01B 세 분석 필드와 FX-01C 창/오프셋의 구현·핵심 수락을 마쳤다. 후속 승인된 FX-02 범위는 두 색, Hue Interpolation, Softness다. FX-02B에서 두 색과 appearance v1을 구현했고, 이번 FX-02C에서 색조 보간과 appearance v2를 추가했다. 소유자는 FX-02C의 180° 입력, 두 원색 유지, 360° 스크러빙·Undo/Redo와 Format 11 저장·재열기를 확인했다(PASS). FX-02D Softness 구현에는 별도 승인이 필요하다. 다른 FX·Shadow도 별도 승인이 필요하고 과거 CLOSE-01이 후속 구현을 승인했던 것으로 소급하지 않는다.
 
 ### FX-01C 핵심 수락과 다음 제안
 

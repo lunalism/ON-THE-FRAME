@@ -2,7 +2,7 @@ import Foundation
 
 // 스펙트럼 클립 모델(2026-10-25, SP-1A 1단계 — docs/SPECTRUM-DESIGN.md §1·§15): 스펙트럼 레인의 독립 항목, 소스 오디오 계보 참조, 상태 판정.
 // 이 단계는 엔진 모델·편집·저장(형식 8)·판정까지다. 앱 UI·프리뷰·내보내기 그리기는 다음 단계(§15)다.
-// 기본값은 잠정(D-S5). FX-02B는 Format 11 appearance v1의 두 RGB를 추가한다. Hue/Softness는 별도 후속 범위다.
+// 기본값은 잠정(D-S5). Format 11 appearance v1은 두 RGB를 기록하고, v2는 정적 색상 회전 각도도 기록한다.
 
 /// 스펙트럼 모양·분석 값(저장 단위: 정수 — 위치·높이·두께는 1920×1080 기준 화소의 1/1000, 색 0–255, 주파수 Hz, 시간 ms).
 public struct SpectrumItemStyle: Sendable, Equatable, Codable {
@@ -32,22 +32,42 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
         init?(stringValue: String) { self.init(stringValue) }
         init?(intValue: Int) { return nil }
     }
-    /// Contract v1 adds Outside RGB; the existing outer RGB fields remain Inside.
-    /// Higher appearance contracts are rejected, not decoded with missing effects.
+    /// Inside RGB stays in the original style fields. Each appearance version
+    /// requires its exact set of keys so unsupported effects cannot silently disappear.
     private struct Appearance: Codable {
         let outsideRGB: RGB
-        init(_ outside: RGB) { outsideRGB = outside }
+        let hueInterpolationDegrees: Int
+        init(outsideRGB: RGB, hueInterpolationDegrees: Int) {
+            self.outsideRGB = outsideRGB
+            self.hueInterpolationDegrees = hueInterpolationDegrees
+        }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: WireKey.self)
-            guard Set(c.allKeys.map(\.stringValue)) == ["contractVersion", "outsideRGB"],
-                  try c.decode(Int.self, forKey: WireKey("contractVersion")) == 1 else {
+            let version = try c.decode(Int.self, forKey: WireKey("contractVersion"))
+            let keys = Set(c.allKeys.map(\.stringValue))
+            switch version {
+            case 1 where keys == ["contractVersion", "outsideRGB"]:
+                hueInterpolationDegrees = 0
+            case 2 where keys == ["contractVersion", "outsideRGB", "hueInterpolationDegrees"]:
+                hueInterpolationDegrees = try c.decode(Int.self, forKey: WireKey("hueInterpolationDegrees"))
+                guard SpectrumItemStyle.hueInterpolationRange.contains(hueInterpolationDegrees) else {
+                    throw DecodingError.dataCorruptedError(forKey: WireKey("hueInterpolationDegrees"), in: c,
+                                                           debugDescription: "Hue outside 0...360 degrees")
+                }
+            default:
                 throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "unsupported or malformed Spectrum appearance contract"))
             }
             outsideRGB = try c.decode(RGB.self, forKey: WireKey("outsideRGB"))
         }
         func encode(to encoder: Encoder) throws {
+            guard SpectrumItemStyle.hueInterpolationRange.contains(hueInterpolationDegrees) else {
+                throw EncodingError.invalidValue(hueInterpolationDegrees, .init(codingPath: encoder.codingPath,
+                                                                                 debugDescription: "Hue outside 0...360 degrees"))
+            }
             var c = encoder.container(keyedBy: WireKey.self)
-            try c.encode(1, forKey: WireKey("contractVersion")); try c.encode(outsideRGB, forKey: WireKey("outsideRGB"))
+            try c.encode(2, forKey: WireKey("contractVersion"))
+            try c.encode(outsideRGB, forKey: WireKey("outsideRGB"))
+            try c.encode(hueInterpolationDegrees, forKey: WireKey("hueInterpolationDegrees"))
         }
     }
     public var mode: Mode
@@ -61,15 +81,18 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
     public var outsideRGB: RGB?
     public var insideRGB: RGB { RGB(red: red, green: green, blue: blue) }
     public var resolvedOutsideRGB: RGB { outsideRGB ?? insideRGB }
+    public static let hueInterpolationRange = 0...360
+    public var hueInterpolationDegrees: Int
     public var reactionPercent: Int
     public var bands: Int, lowHz: Int, highHz: Int, windowMs: Int, offsetMs: Int, floorDB: Int
     public init(mode: Mode, sides: Sides, startXMilli: Int, startYMilli: Int, endXMilli: Int, endYMilli: Int, maxHeightMilli: Int, thicknessMilli: Int,
-                red: Int, green: Int, blue: Int, alpha: Int, bands: Int, lowHz: Int, highHz: Int, windowMs: Int, offsetMs: Int, floorDB: Int, reactionPercent: Int = 100, outsideRGB: RGB? = nil) {
+                red: Int, green: Int, blue: Int, alpha: Int, bands: Int, lowHz: Int, highHz: Int, windowMs: Int, offsetMs: Int, floorDB: Int, reactionPercent: Int = 100, outsideRGB: RGB? = nil, hueInterpolationDegrees: Int = 0) {
         self.mode = mode; self.sides = sides; self.reactionPercent = reactionPercent
         self.startXMilli = startXMilli; self.startYMilli = startYMilli; self.endXMilli = endXMilli; self.endYMilli = endYMilli
         self.maxHeightMilli = maxHeightMilli; self.thicknessMilli = thicknessMilli
         self.red = red; self.green = green; self.blue = blue; self.alpha = alpha
         self.outsideRGB = outsideRGB
+        self.hueInterpolationDegrees = hueInterpolationDegrees
         self.bands = bands; self.lowHz = lowHz; self.highHz = highHz; self.windowMs = windowMs; self.offsetMs = offsetMs; self.floorDB = floorDB
     }
     private enum CodingKeys: String, CodingKey {
@@ -87,9 +110,14 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
         bands = try c.decode(Int.self, forKey: .bands); lowHz = try c.decode(Int.self, forKey: .lowHz); highHz = try c.decode(Int.self, forKey: .highHz)
         windowMs = try c.decode(Int.self, forKey: .windowMs); offsetMs = try c.decode(Int.self, forKey: .offsetMs); floorDB = try c.decode(Int.self, forKey: .floorDB)
         if c.contains(.appearance) {
-            let outside = try c.decode(Appearance.self, forKey: .appearance).outsideRGB
+            let appearance = try c.decode(Appearance.self, forKey: .appearance)
+            let outside = appearance.outsideRGB
             outsideRGB = outside == RGB(red: red, green: green, blue: blue) ? nil : outside
-        } else { outsideRGB = nil }
+            hueInterpolationDegrees = appearance.hueInterpolationDegrees
+        } else {
+            outsideRGB = nil
+            hueInterpolationDegrees = 0
+        }
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -101,7 +129,7 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
         try c.encode(reactionPercent, forKey: .reactionPercent); try c.encode(bands, forKey: .bands)
         try c.encode(lowHz, forKey: .lowHz); try c.encode(highHz, forKey: .highHz)
         try c.encode(windowMs, forKey: .windowMs); try c.encode(offsetMs, forKey: .offsetMs); try c.encode(floorDB, forKey: .floorDB)
-        try c.encode(Appearance(resolvedOutsideRGB), forKey: .appearance)
+        try c.encode(Appearance(outsideRGB: resolvedOutsideRGB, hueInterpolationDegrees: hueInterpolationDegrees), forKey: .appearance)
     }
     public static func == (lhs: Self, rhs: Self) -> Bool {
         guard lhs.mode == rhs.mode, lhs.sides == rhs.sides, lhs.startXMilli == rhs.startXMilli, lhs.startYMilli == rhs.startYMilli,
@@ -109,7 +137,7 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
               lhs.thicknessMilli == rhs.thicknessMilli, lhs.red == rhs.red, lhs.green == rhs.green, lhs.blue == rhs.blue,
               lhs.alpha == rhs.alpha, lhs.reactionPercent == rhs.reactionPercent, lhs.bands == rhs.bands,
               lhs.lowHz == rhs.lowHz, lhs.highHz == rhs.highHz, lhs.windowMs == rhs.windowMs, lhs.offsetMs == rhs.offsetMs,
-              lhs.floorDB == rhs.floorDB else { return false }
+              lhs.floorDB == rhs.floorDB, lhs.hueInterpolationDegrees == rhs.hueInterpolationDegrees else { return false }
         return lhs.resolvedOutsideRGB == rhs.resolvedOutsideRGB
     }
     /// 잠정 기본값(D-S5 미확정, 참고 그림 값 중 한 색 단계에 쓰는 것): 시작/끝 (192,540)/(1728,540), 최대 높이 480, 두께 3, 디지털, 위아래 대칭,
@@ -132,7 +160,7 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
                       mode: mode == .digital ? .digital : .analog, sides: sides == .above ? .above : (sides == .mirrored ? .mirrored : .below),
                       red: Double(red) / 255, green: Double(green) / 255, blue: Double(blue) / 255, alpha: Double(alpha) / 255,
                       outsideRed: Double(resolvedOutsideRGB.red) / 255, outsideGreen: Double(resolvedOutsideRGB.green) / 255,
-                      outsideBlue: Double(resolvedOutsideRGB.blue) / 255)
+                      outsideBlue: Double(resolvedOutsideRGB.blue) / 255, hueInterpolationDegrees: hueInterpolationDegrees)
     }
     /// 분석 설정(엔진 SpectrumAnalysis)
     public var analysisSettings: SpectrumAnalysisSettings {

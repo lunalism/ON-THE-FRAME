@@ -552,7 +552,9 @@ extension SpectrumFrameCoordinatorTests {
         let baseline = c.scheduler.statistics, original = timeline.spectra[0].style
         var outside = original; outside.outsideRGB = .init(red: 0, green: 32, blue: 255)
         var inside = outside; inside.red = 255; inside.green = 16; inside.blue = 0
-        for style in [outside, inside, original] {
+        var hue = inside; hue.hueInterpolationDegrees = 360
+        var beforeHue: [UInt8] = []
+        for style in [outside, inside, hue, inside, original] {
             let edited = try timeline.settingSpectrumStyle(id, style)
             XCTAssertEqual(style.analysisSettings, original.analysisSettings)
             XCTAssertEqual(edited.audioClips, timeline.audioClips)
@@ -567,6 +569,14 @@ extension SpectrumFrameCoordinatorTests {
             XCTAssertEqual(c.scheduler.statistics.analyses, baseline.analyses)
             XCTAssertEqual(c.scheduler.statistics.decodes, baseline.decodes)
             XCTAssertEqual(c.scheduler.statistics.bandCacheEntries, baseline.bandCacheEntries)
+            if style == inside {
+                let pixels = SpectrumFrameRendererTests.bytes(actual.image)
+                if beforeHue.isEmpty { beforeHue = pixels }
+                else { XCTAssertEqual(pixels, beforeHue, "restoring Hue 0 restores the two-color frame") }
+            }
+            if style == hue {
+                XCTAssertNotEqual(SpectrumFrameRendererTests.bytes(actual.image), beforeHue, "Hue alone updates the visible raster")
+            }
             if style == original {
                 XCTAssertEqual(SpectrumFrameRendererTests.bytes(actual.image), SpectrumFrameRendererTests.bytes(originalFrame.image))
             } else {
@@ -579,15 +589,16 @@ extension SpectrumFrameCoordinatorTests {
         let (timeline, _, id, _) = try base()
         var style = timeline.spectra[0].style; style.outsideRGB = .init(red: 0, green: 0, blue: 255)
         let edited = try timeline.settingSpectrumStyle(id, style)
-        for proactive in [true, false] {
+        var hue = style; hue.hueInterpolationDegrees = 180
+        for (before, after) in [(timeline, style), (edited, hue)] { for proactive in [true, false] {
             let pcm = TonePCM(gated: true), c = coordinator(pcm), log = Log()
             defer { pcm.release(); c.resetProject() }
             c.supersedeOnUpdate = proactive
-            c.update(timeline: timeline, media: [steady])
+            c.update(timeline: before, media: [steady])
             c.request(spectrum: id, frame: 65, canvasWidth: 1920, canvasHeight: 1080) { log.add("old", $0) }
             let started = await until(5) { pcm.started > 0 }
             guard started else { XCTFail("appearance decode gate not reached"); continue }
-            c.update(timeline: edited, media: [steady])
+            c.update(timeline: try before.settingSpectrumStyle(id, after), media: [steady])
             c.request(spectrum: id, frame: 65, canvasWidth: 1920, canvasHeight: 1080) { log.add("current", $0) }
             _ = c.diagnostics
             if !proactive { XCTAssertEqual(log.total, 0) }
@@ -596,12 +607,12 @@ extension SpectrumFrameCoordinatorTests {
             XCTAssertEqual(log.all("old").map(Self.name), ["superseded"])
             let result = try XCTUnwrap(log.all("current").first)
             guard case let .ready(bands, actual?) = result else { XCTFail(Self.name(result)); continue }
-            let expected = try XCTUnwrap(SpectrumFrameRenderer(width: 1920, height: 1080).render(bands: bands, style: style))
+            let expected = try XCTUnwrap(SpectrumFrameRenderer(width: 1920, height: 1080).render(bands: bands, style: after))
             XCTAssertEqual(actual.drawRect, expected.drawRect)
             XCTAssertEqual(SpectrumFrameRendererTests.bytes(actual.image), SpectrumFrameRendererTests.bytes(expected.image))
             let drained = await until(5) { c.scheduler.statistics.active == 0 && c.diagnostics.waiting == 0 }
             XCTAssertTrue(drained); deliveries.sync {}; XCTAssertEqual(log.total, 2)
-        }
+        } }
     }
 
     func testReactionOnlyEditsReuseAnalysisAndPCM() async throws {

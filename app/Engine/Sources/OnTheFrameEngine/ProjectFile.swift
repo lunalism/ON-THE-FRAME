@@ -28,7 +28,7 @@ public enum ProjectFile {
     /// 그 값들은 형식 8에만 둔다). 이전 파일의 조각 사이 계보는 추측해 만들지 않는다(소유자 결정 2026-10-25).
     /// Format 10: actual Spectrum items persist an explicit reactionPercent.
     /// Empty Spectrum lanes / lineage retain format 8; images use the image-aware codec.
-    /// Format 11: actual Spectrum items also require appearance contract v1.
+    /// Format 11: Spectrum items read appearance v1/v2 and save v2.
     public static let currentVersion = 11
     public static let appearanceVersion = 11
     public static let reactionVersion = 10
@@ -281,19 +281,17 @@ extension ProjectFile {
                     end += 1
                 } while end < tokens.count && depth > 0
                 guard depth == 0 else { throw LoadError.invalid("appearance object") }
-                var keys: [String: Int] = [:]
+                // Codable checks the exact versioned object shape and ranges.
+                // Check the source spelling here before Foundation merges duplicate
+                // keys or accepts integral floats as Int.
+                var keys = Set<String>()
                 for j in (i + 3)..<end where tokens[j].hasPrefix("\"") && j + 2 < end && tokens[j + 1] == ":" {
-                    guard let name = try? JSONDecoder().decode(String.self, from: Data(tokens[j].utf8)) else { continue }
-                    keys[name, default: 0] += 1
+                    let name = try JSONDecoder().decode(String.self, from: Data(tokens[j].utf8))
+                    guard keys.insert(name).inserted else { throw LoadError.invalid("duplicate appearance field") }
                     guard name != "outsideRGB" else { continue }
-                    let token = tokens[j + 2]
-                    guard token.range(of: #"^(0|[1-9][0-9]*)$"#, options: .regularExpression) != nil,
-                          let value = Int(token), (name == "contractVersion" ? value == 1 : (0...255).contains(value)) else {
+                    guard tokens[j + 2].range(of: #"^(0|[1-9][0-9]*)$"#, options: .regularExpression) != nil else {
                         throw LoadError.invalid("appearance values must be valid integer tokens")
                     }
-                }
-                guard keys == ["contractVersion": 1, "outsideRGB": 1, "red": 1, "green": 1, "blue": 1] else {
-                    throw LoadError.invalid("unknown, duplicate or missing appearance fields")
                 }
                 appearanceCount += 1
             }

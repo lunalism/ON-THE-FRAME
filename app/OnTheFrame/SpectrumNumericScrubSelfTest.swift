@@ -8,7 +8,7 @@ import OnTheFrameEngine
 @MainActor enum SpectrumNumericScrubSelfTest {
     typealias Check = LaneSelfTest.Check
     private struct Failure: Error { let message: String }
-    private static let analysisProperties: [SpectrumNumericProperty] = [.lowHz, .highHz, .bands, .windowMs, .offsetMs]
+    private static let fxProperties: [SpectrumNumericProperty] = [.lowHz, .highHz, .bands, .windowMs, .offsetMs, .hueInterpolationDegrees]
     private static func settle() async { for _ in 0..<5 { await Task.yield() }; try? await Task.sleep(nanoseconds: 20_000_000) }
     private static func fixture(_ style: SpectrumItemStyle) throws -> Timeline {
         let lane = UUID()
@@ -77,6 +77,7 @@ import OnTheFrameEngine
             case .bands: draft.bands = text
             case .windowMs: draft.windowMs = text
             case .offsetMs: draft.offsetMs = text
+            case .hueInterpolationDegrees: draft.hueInterpolationDegrees = text
             }
             guard let value = try? draft.style(from: style) else { return }
             _ = store.updateSpectrumLiveStyle(id, style: value, project: store.projectSession,
@@ -102,6 +103,7 @@ import OnTheFrameEngine
     private static func policies(_ check: (String, Bool, String) -> Void) {
         var legacy = SpectrumItemStyle.provisionalDefault
         legacy.thicknessMilli = 3125; legacy.startXMilli = -1500; legacy.maxHeightMilli = 400125; legacy.alpha = 192
+        legacy.hueInterpolationDegrees = 180
         for property in SpectrumNumericProperty.allCases {
             let start = property.displayed(legacy), sensitivity = property.pointsPerStep
             check(property.rawValue + ".threshold", property.candidate(start: start, displacement: 4) == start, "")
@@ -124,7 +126,7 @@ import OnTheFrameEngine
             var draft = SpectrumStyleDraft(legacy); draft.thickness = value
             check("invalid text " + value, (try? draft.style(from: legacy)) == nil, "")
         }
-        for property in analysisProperties {
+        for property in fxProperties {
             for value in ["1.5", "20.0", "1e2", "", "-", "+", String(Int.max), String(Int.min), String(Int.max) + "0"] {
                 var draft = SpectrumStyleDraft(legacy)
                 switch property {
@@ -132,6 +134,7 @@ import OnTheFrameEngine
                 case .highHz: draft.highHz = value
                 case .windowMs: draft.windowMs = value
                 case .offsetMs: draft.offsetMs = value
+                case .hueInterpolationDegrees: draft.hueInterpolationDegrees = value
                 default: draft.bands = value
                 }
                 check(property.rawValue + ".invalid text " + value, (try? draft.style(from: legacy)) == nil, "")
@@ -151,6 +154,21 @@ import OnTheFrameEngine
         for value in [-10000, 0, 10000] {
             check("offset boundary \(value)", SpectrumNumericProperty.offsetMs.applying(value, to: legacy)?.offsetMs == value, "")
         }
+        let hue = SpectrumNumericProperty.hueInterpolationDegrees
+        check("hue default and sensitivity", hue.displayed(.provisionalDefault) == 0 && hue.pointsPerStep == 1, "")
+        for value in [0, 180, 360] {
+            var expected = legacy
+            expected.hueInterpolationDegrees = value
+            var draft = SpectrumStyleDraft(legacy)
+            draft.hueInterpolationDegrees = String(value)
+            check("hue \(value) preserves source style", hue.applying(value, to: legacy) == expected &&
+                (try? draft.style(from: legacy)) == expected && expected.analysisSettings == legacy.analysisSettings, "")
+        }
+        for value in [-1, 361] {
+            var draft = SpectrumStyleDraft(legacy)
+            draft.hueInterpolationDegrees = String(value)
+            check("hue rejects \(value)", hue.applying(value, to: legacy) == nil && (try? draft.style(from: legacy)) == nil, "")
+        }
         var invalidStyle = legacy; invalidStyle.offsetMs = Int.min
         check("unchanged field rejects invalid offset style", SpectrumNumericProperty.bands.applying(legacy.bands, to: invalidStyle) == nil, "")
         invalidStyle = legacy; invalidStyle.windowMs = 0
@@ -168,6 +186,7 @@ import OnTheFrameEngine
 
     private static func gestures(_ check: (String, Bool, String) -> Void) throws {
         var legacy = SpectrumItemStyle.provisionalDefault; legacy.thicknessMilli = 3125; legacy.alpha = 192
+        legacy.hueInterpolationDegrees = 180
         for property in SpectrumNumericProperty.allCases {
             let x = try Context(property, legacy); defer { x.close() }
             let before = x.initial, generation = x.store.generation, value = property.displayed(legacy)
@@ -191,7 +210,7 @@ import OnTheFrameEngine
             x.store.redo()
             check(property.rawValue + ".redo exact", x.store.timeline == final, "")
         }
-        for property in [SpectrumNumericProperty.thickness] + analysisProperties {
+        for property in [SpectrumNumericProperty.thickness] + fxProperties {
           for mode in ["net-zero", "escape", "deactivate", "window", "remove", "vertical"] {
             let x = try Context(property, legacy); defer { x.close() }
             x.mouse(.leftMouseDown)
@@ -349,11 +368,11 @@ import OnTheFrameEngine
         }
     }
 
-    private static func analysisOwnership(_ check: (String, Bool, String) -> Void) throws {
-        for property in analysisProperties {
+    private static func fxOwnership(_ check: (String, Bool, String) -> Void) throws {
+        for property in fxProperties {
             let x = try Context(property, .provisionalDefault); defer { x.close() }
             x.mouse(.leftMouseDown); x.mouse(.leftMouseDragged, 4 + 2 * property.pointsPerStep)
-            guard let old = x.store.spectrumNumericScrubToken else { throw Failure(message: "analysis ownership initial token") }
+            guard let old = x.store.spectrumNumericScrubToken else { throw Failure(message: "FX ownership initial token") }
             x.store.select(nil); let selected = x.store.timeline, depth = x.store.history.undoDepth
             x.control.cancelTracking(); x.store.cancelSpectrumNumericScrub(old); x.mouse(.leftMouseUp, 600)
             check(property.rawValue + ".selection retires ownership", x.store.timeline == selected &&
@@ -363,7 +382,7 @@ import OnTheFrameEngine
             guard x.store.beginSpectrumNumericScrub(newer, id: x.id, property: property, project: x.store.projectSession,
                 revision: x.store.spectrumSelectionRevision, expectedGeneration: x.store.generation),
                 x.store.updateSpectrumNumericScrub(newer, value: property.displayed(x.style) + 1) == .accepted else {
-                throw Failure(message: "analysis ownership replacement token")
+                throw Failure(message: "FX ownership replacement token")
             }
             let current = x.store.timeline
             x.store.finishSpectrumNumericScrub(old); x.store.cancelSpectrumNumericScrub(old)
@@ -377,11 +396,48 @@ import OnTheFrameEngine
         }
     }
 
-    private static func analysisEditing(_ folder: URL, _ check: (String, Bool, String) -> Void) async throws {
+    private static func hueColorOwnership(_ check: (String, Bool, String) -> Void) throws {
+        let context = try Context(.hueInterpolationDegrees, .provisionalDefault)
+        defer { context.close() }
+        let store = context.store
+        let inside = SpectrumItemStyle.RGB(red: 122, green: 34, blue: 56)
+        let outside = SpectrumItemStyle.RGB(red: 65, green: 43, blue: 21)
+        let insideToken = UUID()
+        guard store.beginSpectrumColorEdit(insideToken, target: .inside, id: context.id, project: store.projectSession,
+            revision: store.spectrumSelectionRevision, expectedGeneration: store.generation),
+              store.updateSpectrumColorEdit(insideToken, target: .inside, rgb: inside) else {
+            throw Failure(message: "open Inside color session before Hue")
+        }
+        let beforeHue = context.style
+        context.mouse(.leftMouseDown); context.mouse(.leftMouseDragged, 184)
+        guard let hueToken = store.spectrumNumericScrubToken else { throw Failure(message: "begin Hue after Inside") }
+        let staleUpdate = store.updateSpectrumColorEdit(insideToken, target: .inside, rgb: outside)
+        let staleCancel = store.cancelSpectrumColorEdit(insideToken)
+        store.finishSpectrumColorEdit(insideToken)
+        var expected = beforeHue
+        expected.hueInterpolationDegrees = 180
+        check("old Inside callbacks preserve Hue and source colors", !staleUpdate && !staleCancel &&
+            context.style == expected && store.spectrumNumericScrubToken == hueToken, "")
+        let outsideToken = UUID()
+        guard store.beginSpectrumColorEdit(outsideToken, target: .outside, id: context.id, project: store.projectSession,
+            revision: store.spectrumSelectionRevision, expectedGeneration: store.generation),
+              store.updateSpectrumColorEdit(outsideToken, target: .outside, rgb: outside) else {
+            throw Failure(message: "open Outside color session after Hue")
+        }
+        store.cancelSpectrumNumericScrub(hueToken); store.finishSpectrumNumericScrub(hueToken)
+        check("old Hue callbacks preserve active Outside color", store.spectrumColorEditToken == outsideToken &&
+            context.style.insideRGB == inside && context.style.resolvedOutsideRGB == outside &&
+            context.style.hueInterpolationDegrees == 180, "")
+        check("Outside cancellation restores exact accepted Hue", store.cancelSpectrumColorEdit(outsideToken) &&
+            context.style == expected, "")
+    }
+
+    private static func fxEditing(_ folder: URL, _ check: (String, Bool, String) -> Void) async throws {
         var legacy = SpectrumItemStyle.provisionalDefault
         legacy.startXMilli = 192125; legacy.maxHeightMilli = 480250; legacy.thicknessMilli = 3125
-        legacy.offsetMs = -125
-        for property in analysisProperties {
+        legacy.offsetMs = -125; legacy.hueInterpolationDegrees = 358
+        legacy.outsideRGB = .init(red: 19, green: 87, blue: 141)
+        for property in fxProperties {
             let x = try Context(property, legacy); defer { x.close() }
             let start = property.displayed(legacy), value = start + 2
             x.mouse(.leftMouseDown, dispatch: true); x.mouse(.leftMouseUp, dispatch: true)
@@ -416,11 +472,15 @@ import OnTheFrameEngine
                 check(property.rawValue + ".restricted " + restricted, explicit != nil && !live &&
                     x.store.timeline == before && x.store.history.undoDepth == depth, "both allowlists")
             }
-            if property == .windowMs || property == .offsetMs {
+            if property == .windowMs || property == .offsetMs || property == .hueInterpolationDegrees {
                 let invalidValues = [property.range.lowerBound - 1, property.range.upperBound + 1, Int.min, Int.max]
                 for value in invalidValues {
                     var denied = legacy
-                    if property == .windowMs { denied.windowMs = value } else { denied.offsetMs = value }
+                    switch property {
+                    case .windowMs: denied.windowMs = value
+                    case .offsetMs: denied.offsetMs = value
+                    default: denied.hueInterpolationDegrees = value
+                    }
                     let before = x.store.timeline, depth = x.store.history.undoDepth
                     let explicit = x.store.setSpectrumStyle(x.id, style: denied, from: legacy, project: x.store.projectSession,
                         selectionRevision: x.store.spectrumSelectionRevision, generation: x.store.generation)
@@ -463,7 +523,7 @@ import OnTheFrameEngine
                 spectra[0]["style"] = style; json["spectra"] = spectra
                 let corrupt = try JSONSerialization.data(withJSONObject: json)
                 check(property.rawValue + ".malformed project rejected", (try? ProjectPersistence.decode(corrupt)) == nil, "")
-                if property == .windowMs || property == .offsetMs {
+                if property == .windowMs || property == .offsetMs || property == .hueInterpolationDegrees {
                     for value in [property.range.lowerBound - 1, property.range.upperBound + 1, Int.min, Int.max] {
                         var invalid = originalStyle; invalid[property.rawValue] = value
                         spectra[0]["style"] = invalid; json["spectra"] = spectra
@@ -508,8 +568,8 @@ import OnTheFrameEngine
         catch { check("fresh evidence directory", false, String(describing: error)); return checks }
         policies(check)
         do {
-            try gestures(check); try isolation(check); try analysisOwnership(check)
-            try await nativeText(check); try await timingNativeText(check); try await analysisEditing(folder, check)
+            try gestures(check); try isolation(check); try fxOwnership(check); try hueColorOwnership(check)
+            try await nativeText(check); try await timingNativeText(check); try await fxEditing(folder, check)
         }
         catch { check("native checks completed", false, String(describing: error)) }
         do {

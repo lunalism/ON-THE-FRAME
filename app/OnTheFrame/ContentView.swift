@@ -934,6 +934,7 @@ struct SpectrumStyleDraft {
     var reaction: String
     var lowHz: String, highHz: String, bands: String
     var windowMs: String, offsetMs: String
+    var hueInterpolationDegrees: String
     var red: String, green: String, blue: String
     var outsideRed: String, outsideGreen: String, outsideBlue: String
     var thickness: String
@@ -954,6 +955,7 @@ struct SpectrumStyleDraft {
         reaction = String(style.reactionPercent)
         lowHz = String(style.lowHz); highHz = String(style.highHz); bands = String(style.bands)
         windowMs = String(style.windowMs); offsetMs = String(style.offsetMs)
+        hueInterpolationDegrees = String(style.hueInterpolationDegrees)
         red = String(style.red); green = String(style.green); blue = String(style.blue)
         let outside = style.resolvedOutsideRGB
         outsideRed = String(outside.red); outsideGreen = String(outside.green); outsideBlue = String(outside.blue)
@@ -987,7 +989,7 @@ struct SpectrumStyleDraft {
             }
             return value
         }
-        func analysisInteger(_ text: String, _ label: String, range: ClosedRange<Int>, unit: String = "") throws -> Int {
+        func integer(_ text: String, _ label: String, range: ClosedRange<Int>, unit: String = "") throws -> Int {
             let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard text.count <= 20,
                   text.range(of: #"^[+-]?[0-9]+$"#, options: .regularExpression) != nil,
@@ -1004,16 +1006,18 @@ struct SpectrumStyleDraft {
               let percent = Int(reactionText), (0...200).contains(percent) else {
             throw Invalid(message: "반응 강도: 0–200 사이 정수 %를 입력하세요.")
         }
-        let low = try analysisInteger(lowHz, "시작 주파수", range: 1...23_999, unit: " Hz")
-        let high = try analysisInteger(highHz, "끝 주파수", range: 2...24_000, unit: " Hz")
+        let low = try integer(lowHz, "시작 주파수", range: 1...23_999, unit: " Hz")
+        let high = try integer(highHz, "끝 주파수", range: 2...24_000, unit: " Hz")
         guard low < high else {
             throw Invalid(message: "시작 주파수는 끝 주파수보다 작아야 합니다. 반대쪽 주파수는 자동으로 바꾸지 않습니다.")
         }
-        let bandCount = try analysisInteger(bands, "주파수 밴드 수", range: 1...1024)
+        let bandCount = try integer(bands, "주파수 밴드 수", range: 1...1024)
         // Reject unbounded timing drafts before any style reaches source-overlap helpers.
-        let window = try analysisInteger(windowMs, "분석 창 길이", range: 1...1000, unit: " ms")
-        let offset = try analysisInteger(offsetMs, "오디오 오프셋", range: -10_000...10_000, unit: " ms")
+        let window = try integer(windowMs, "분석 창 길이", range: 1...1000, unit: " ms")
+        let offset = try integer(offsetMs, "오디오 오프셋", range: -10_000...10_000, unit: " ms")
         var result = base
+        result.hueInterpolationDegrees = try integer(hueInterpolationDegrees, "색조 보간",
+            range: SpectrumNumericProperty.hueInterpolationDegrees.range, unit: "°")
         result.reactionPercent = percent
         result.lowHz = low; result.highHz = high; result.bands = bandCount
         result.windowMs = window; result.offsetMs = offset
@@ -1265,6 +1269,7 @@ struct SpectrumStyleAdjust: View {
                             .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         property("안쪽 색상 (Inside)") { colorControl(.inside) }
                         property("바깥 색상 (Outside)") { colorControl(.outside) }
+                        field(.hueInterpolationDegrees)
                         if SpectrumPickerRGB.channels(draft) == nil || SpectrumPickerRGB.channels(draft, outside: true) == nil {
                             Text("RGB 입력을 0–255 정수로 완성하면 색상 선택기를 사용할 수 있습니다.")
                                 .font(.caption2).foregroundStyle(.secondary)
@@ -1354,6 +1359,7 @@ struct SpectrumStyleAdjust: View {
         case .bands: $draft.bands
         case .windowMs: $draft.windowMs
         case .offsetMs: $draft.offsetMs
+        case .hueInterpolationDegrees: $draft.hueInterpolationDegrees
         }
     }
     private func syncNumericDraft() {
@@ -1394,6 +1400,8 @@ struct SpectrumStyleAdjust: View {
                         feedback = "분석 창 길이는 1–1000 ms 범위의 정수여야 합니다."
                     case .offsetMs:
                         feedback = "오디오 오프셋은 −10000–10000 ms 범위의 정수여야 합니다."
+                    case .hueInterpolationDegrees:
+                        feedback = "색조 보간은 0–360° 범위의 정수여야 합니다."
                     default:
                         feedback = "현재 좌표·범위에서는 이 값을 적용할 수 없습니다. 시작점과 끝점의 거리는 1 px 이상이어야 합니다."
                     }

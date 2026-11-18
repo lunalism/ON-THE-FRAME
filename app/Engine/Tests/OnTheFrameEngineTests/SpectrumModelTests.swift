@@ -746,4 +746,28 @@ extension SpectrumModelTests {
         XCTAssertEqual(reopened.timeline, edited)
         XCTAssertEqual(reopened.timeline.spectra[0].style.resolvedOutsideRGB, style.resolvedOutsideRGB)
     }
+
+    func testHueChangesParticipateInHistoryWithoutChangingAudioAnalysis() throws {
+        let (base, audio, _) = try base(), (laned, lane) = try spectrumLane(base)
+        let timeline = try laned.addingSpectrum(lane: lane, at: 0, length: 100, sourceKey: audio)
+        let item = try XCTUnwrap(timeline.spectra.first)
+        XCTAssertEqual(item.style.hueInterpolationDegrees, 0)
+        var history = EditHistory(timeline)
+        var style = item.style
+        style.hueInterpolationDegrees = 360
+        let edited = try timeline.settingSpectrumStyle(item.id, style)
+        history.apply(edited, focus: item.id)
+        XCTAssertEqual(history.undoDepth, 1)
+        XCTAssertEqual(edited.spectra[0].style.hueInterpolationDegrees, 360)
+        XCTAssertEqual(style.analysisSettings, item.style.analysisSettings)
+        XCTAssertEqual(edited.spectrumPieces(edited.spectra[0]), timeline.spectrumPieces(item))
+        history.undo(); XCTAssertEqual(history.timeline, timeline)
+        history.redo(); XCTAssertEqual(history.timeline, edited)
+        for degrees in [-1, 361] {
+            style.hueInterpolationDegrees = degrees
+            XCTAssertFalse(style.isValid)
+            XCTAssertThrowsError(try timeline.settingSpectrumStyle(item.id, style))
+            XCTAssertThrowsError(try JSONEncoder().encode(style))
+        }
+    }
 }

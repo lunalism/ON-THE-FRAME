@@ -342,6 +342,124 @@ extension SpectrumFrameRendererTests {
         XCTAssertEqual(invalidPremultiplication, 0)
     }
 
+    func testDigitalHueSweepRotatesBothColorsBeforeHeightInterpolation() throws {
+        let renderer = try SpectrumFrameRenderer(width: 960, height: 540)
+        // Canvas pixel centres of these three bands are x=100.5, 200.5, 300.5.
+        var s = style(.digital, .mirrored, bands: 3, start: (101_000, 541_000), end: (701_000, 541_000),
+                      maxHeight: 200_000, thickness: 24_000, rgba: (255, 0, 0, 128))
+        s.outsideRGB = .init(red: 0, green: 0, blue: 255)
+        let inside = s.insideRGB, outside = s.resolvedOutsideRGB
+        for hue in [0, 180, 360] {
+            s.hueInterpolationDegrees = hue
+            let f = try XCTUnwrap(renderer.render(bands: [1, 1, 0], style: s))
+            let bytes = Self.bytes(f.image)
+            func pixel(_ x: Int, _ y: Int) -> [UInt8] { appearancePixel(f, x, y, bytes: bytes) }
+            XCTAssertEqual(pixel(100, 270), [0, 0, 128, 128], "first band starts with the selected red")
+            let centre: [UInt8] = hue == 0 ? [0, 0, 128, 128] : hue == 180 ? [0, 128, 64, 128] : [128, 128, 0, 128]
+            XCTAssertEqual(pixel(200, 270), centre)
+            XCTAssertEqual(pixel(202, 270), centre, "all of a Digital cell uses its band's frequency")
+            let last: [UInt8] = hue == 180 ? [128, 128, 0, 128] : [0, 0, 128, 128]
+            XCTAssertEqual(pixel(300, 270), last, "valid silent dot uses the last band's rotated Inside")
+            if hue == 360 {
+                // Cyan Inside and yellow Outside mixed 50% in linear light; mirrored distance and shared alpha.
+                XCTAssertEqual(pixel(200, 220), [94, 128, 94, 128])
+                XCTAssertEqual(pixel(200, 320), [94, 128, 94, 128])
+            }
+            XCTAssertEqual(s.insideRGB, inside)
+            XCTAssertEqual(s.resolvedOutsideRGB, outside)
+            let repeated = try XCTUnwrap(renderer.render(bands: [1, 1, 0], style: s))
+            XCTAssertEqual(Self.bytes(repeated.image), bytes)
+        }
+        for invalid in [-1, 361] {
+            s.hueInterpolationDegrees = invalid
+            XCTAssertThrowsError(try renderer.render(bands: [1, 1, 0], style: s))
+        }
+    }
+
+    func testHorizontalGradientMatchesScalarPremultiplicationForEveryCoveredPixel() throws {
+        let width = 384, height = 216
+        let renderer = try SpectrumFrameRenderer(width: width, height: height)
+        let values: [Float] = [0, 0.2, 0.9, 0, 0.6, 0.1, 1]
+        func linear(_ byte: Int) -> Double {
+            let x = Double(byte) / 255
+            return x <= 0.04045 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4)
+        }
+        func encoded(_ linear: Double) -> Double {
+            let x = min(1, max(0, linear))
+            return x <= 0.0031308 ? 12.92 * x : 1.055 * pow(x, 1 / 2.4) - 0.055
+        }
+        for mode in Self.modes {
+            for alpha in [1, 127, 255] {
+                var s = style(mode, .mirrored, bands: values.count, start: (1_970_250, 525_125),
+                              end: (-73_125, 525_125), maxHeight: 420_125, thickness: 19_375,
+                              rgba: (255, 43, 2, alpha))
+                s.outsideRGB = .init(red: 0, green: 128, blue: 249)
+                var white = s
+                white.outsideRGB = nil
+                white.red = 255; white.green = 255; white.blue = 255
+                let mask = try XCTUnwrap(renderer.render(bands: values, style: white))
+                let result = try XCTUnwrap(renderer.render(bands: values, style: s))
+                XCTAssertEqual(mask.drawRect, result.drawRect)
+                let inside = [s.blue, s.green, s.red].map(linear)
+                let outside = [249, 128, 0].map(linear)
+                let style = s.renderStyle
+                let baseline = style.start.y * CGFloat(height) / 1080
+                let maxHeight = style.maxHeight * (Double(height) / 1080)
+                var expected = Self.bytes(mask.image)
+                for y in 0..<mask.image.height {
+                    let t = min(1, abs(Double(y) + mask.drawRect.minY + 0.5 - baseline) / maxHeight)
+                    let rgb = zip(inside, outside).map { a, b in encoded(a + (b - a) * t) }
+                    for x in 0..<mask.image.width {
+                        let offset = y * mask.image.bytesPerRow + x * 4
+                        let coverage = Double(expected[offset + 3])
+                        for c in rgb.indices { expected[offset + c] = UInt8((rgb[c] * coverage).rounded()) }
+                    }
+                }
+                XCTAssertTrue(Self.bytes(result.image) == expected, "BGRA differs for \(mode), alpha \(alpha)")
+            }
+        }
+    }
+
+    func testAnalogHueSweepIsContinuousBetweenDiagonalBandCentres() throws {
+        let renderer = try SpectrumFrameRenderer(width: 960, height: 540)
+        for reversed in [false, true] {
+            let start = reversed ? 901_000 : 101_000, end = reversed ? 101_000 : 901_000
+            var s = style(.analog, .mirrored, bands: 2, start: (start, start), end: (end, end),
+                          thickness: 20_000, rgba: (192, 96, 64, 255))
+            s.hueInterpolationDegrees = 360
+            let f = try XCTUnwrap(renderer.render(bands: [0, 0], style: s))
+            let bytes = Self.bytes(f.image)
+            // The two centres span (150.5,150.5)…(350.5,350.5). Even with
+            // just two bands a full turn goes through the complementary hue.
+            XCTAssertEqual(appearancePixel(f, 150, 150, bytes: bytes), [64, 96, 192, 255])
+            XCTAssertEqual(appearancePixel(f, 250, 250, bytes: bytes), [192, 160, 64, 255])
+            XCTAssertEqual(appearancePixel(f, 350, 350, bytes: bytes), [64, 96, 192, 255])
+            let quarter = reversed ? 300 : 200
+            XCTAssertEqual(appearancePixel(f, quarter, quarter, bytes: bytes), [64, 192, 96, 255],
+                           "positive rotation follows low to high frequency in either baseline direction")
+        }
+    }
+
+    func testGrayAndOneBandRetainZeroHueRaster() throws {
+        let renderer = try SpectrumFrameRenderer(width: 480, height: 270)
+        for mode in Self.modes {
+            for count in [1, 8] {
+                var s = style(mode, .mirrored, bands: count, start: (70_000, 730_000), end: (1_700_000, 300_000),
+                              rgba: (83, 83, 83, 157))
+                s.outsideRGB = .init(red: 205, green: 205, blue: 205)
+                if count == 1 { s.red = 224 }
+                let bands = [Float](repeating: 0.8, count: count)
+                let unchanged = try XCTUnwrap(renderer.render(bands: bands, style: s))
+                for hue in [180, 360] {
+                    s.hueInterpolationDegrees = hue
+                    let actual = try XCTUnwrap(renderer.render(bands: bands, style: s))
+                    XCTAssertEqual(actual.drawRect, unchanged.drawRect)
+                    XCTAssertEqual(Self.bytes(actual.image), Self.bytes(unchanged.image))
+                }
+            }
+        }
+    }
+
     func testGradientSpatialOracleForAnalogMirroredAndDiagonal() throws {
         func linear(_ x: Double) -> Double { x <= 0.04045 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4) }
         func encoded(_ x: Double) -> Double { x <= 0.0031308 ? 12.92 * x : 1.055 * pow(x, 1 / 2.4) - 0.055 }

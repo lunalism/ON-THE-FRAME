@@ -98,8 +98,8 @@ final class SpectrumInternalZeroTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
     }
 
-    /// Four bounded appearance configurations: 124 sequential prepared frames,
-    /// 20 Preview/internal-worker checkpoints. No encoded Export or full-parity claim.
+    /// Six bounded appearance configurations, five Preview/internal-worker
+    /// raster checkpoints per configuration, including initial silence.
     func testTwoColorAppearanceMatchesActualInternalWorker() async throws {
         let folder = ExportEndToEndTests.root.appendingPathComponent("spectrum-color-internal-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -107,17 +107,19 @@ final class SpectrumInternalZeroTests: XCTestCase {
         let spectrumLane = UUID(), subtitleLane = UUID(), id = UUID()
         let clip = Clip(mediaID: audio.id, start: 0, sourceIn: 0, length: 360, lane: Lane.audioID)
         let subtitles = (0..<3).map { SubtitleItem(lane: subtitleLane, start: $0 * 120, length: 120, text: "Color \($0)") }
-        let cases: [(SpectrumItemStyle.Mode, SpectrumItemStyle.Sides, Bool, Int)] = [
-            (.digital, .above, false, 400_000), (.digital, .mirrored, true, 400_000),
-            (.analog, .mirrored, true, 400_000), (.digital, .below, false, 0)
+        let cases: [(SpectrumItemStyle.Mode, SpectrumItemStyle.Sides, Bool, Int, Int)] = [
+            (.digital, .above, false, 400_000, 0), (.digital, .mirrored, true, 400_000, 0),
+            (.analog, .mirrored, true, 400_000, 0), (.digital, .below, false, 0, 0),
+            (.digital, .mirrored, false, 400_000, 180), (.analog, .mirrored, true, 400_000, 360)
         ]
         let probes: Set<Int> = [0, 1, 15, 29, 30]
-        for (mode, sides, diagonal, height) in cases {
+        for (mode, sides, diagonal, height, hue) in cases {
             var style = SpectrumItemStyle.provisionalDefault
             style.mode = mode; style.sides = sides; style.bands = 8; style.thicknessMilli = 6_000
             style.startYMilli = 800_500; style.endYMilli = diagonal ? 300_500 : 800_500
             style.maxHeightMilli = height; style.red = 255; style.green = 0; style.blue = 0; style.alpha = 160
             style.outsideRGB = .init(red: 0, green: 32, blue: 255)
+            style.hueInterpolationDegrees = hue
             let spectrum = SpectrumItem(id: id, lane: spectrumLane, start: 0, length: 360, sourceKey: clip.lineageKey, style: style)
             let timeline = Timeline(clips: [Clip(mediaID: video.id, start: 0, sourceIn: 0, length: 360, lane: Lane.videoID)],
                 audioClips: [clip], subtitles: subtitles, spectra: [spectrum],

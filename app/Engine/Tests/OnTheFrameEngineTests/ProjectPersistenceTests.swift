@@ -132,6 +132,7 @@ final class ProjectPersistenceTests: XCTestCase {
         let item = timeline.spectra[0]
         var style = item.style; style.red = 12; style.green = 34; style.blue = 56; style.alpha = 173
         style.outsideRGB = .init(red: 17, green: 31, blue: 47)
+        style.hueInterpolationDegrees = 360
         style.reactionPercent = 150; style.windowMs = 300; style.offsetMs = -500
         timeline = try timeline.settingSpectrumStyle(item.id, style)
         let bookmarks = Dictionary(uniqueKeysWithValues: model.media.compactMap { e in e.bookmark.map { (e.ref.id, $0) } })
@@ -143,6 +144,7 @@ final class ProjectPersistenceTests: XCTestCase {
         let bytes = try Data(contentsOf: destination), loaded = try ProjectPersistence.decode(bytes)
         XCTAssertEqual(loaded.timeline, timeline)
         XCTAssertEqual(loaded.timeline.spectra[0].style, style)
+        XCTAssertEqual(loaded.timeline.spectra[0].style.hueInterpolationDegrees, 360)
         XCTAssertEqual(Dictionary(uniqueKeysWithValues: loaded.media.compactMap { r in r.bookmark.map { (r.id, $0) } }), bookmarks)
         XCTAssertThrowsError(try ProjectPersistence.write(project, to: destination, beforeCommit: { throw CocoaError(.fileWriteUnknown) }))
         XCTAssertEqual(try Data(contentsOf: destination), bytes)

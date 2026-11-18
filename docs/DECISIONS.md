@@ -1136,3 +1136,20 @@ CLOSE-01에서 이전 디코더가 동일한 Format 8 프로젝트의 금지된 
 **COMPAT-01 자동 검증**의 최초 코덱 실행은 17 PASS / 1 FAIL이었다. 테스트는 BOM이 붙은 UTF-32LE 입력을 허용한다고 가정했으나 이 Mac의 Foundation과 이전 빌드는 헤더에서 거절했다. 이 조합을 Foundation의 실제 판정과 대조하도록 기대값을 정정했다. 최종 코덱 실행은 **19 PASS / 0 FAIL / 0 SKIP**, 별도로 실행한 관련 엔진 회귀는 **11 PASS / 0 FAIL / 0 SKIP**이었다. 지원 인코딩 조합 9개에서 정상 입력 54건을 열기·저장·재열기 했고, 금지 필드·중복·알 수 없는 키·잘못된 값 등을 포함한 입력 198건을 거절했다. 원본 로그는 `app/selftest-work/spectrum-fx02b-compat01-20261118-01/`에 있다. 앞 절의 FX-02B 자동 검사와 이 호환성 검사는 별도 실행이며 CLOSE-02에서는 기존 결과와 소스 지문을 대조했다.
 
 코덱 정정본은 엔진에서 검증했다. 이 정정본의 소유자 물리 시험, 색상 패널의 모든 Escape·포커스 전환, 모든 실제 레거시 프로젝트와 Digital·Analog 배치, 장시간·다른 하드웨어·화면 FPS·전체 Preview/Export 일치는 미검증이다. 공개 Spectrum Export는 비활성이며 UX-02는 계획된 v1.1로 유보한다. 다음 구현 제안은 FX-02C Hue Interpolation이고 이후 제안은 FX-02D Softness다. 에이전트 작업 절차 문서 점검과 정리는 별도 작업으로 계획한다.
+
+### 2026-11-18 SPECTRUM-FX-02C 정적 색조 보간
+
+소유자가 승인한 FX-02C는 Audio Spectrum의 주파수축을 따라 색조를 회전한다. Inspector의 **색조 보간 (°)** 에 0–360 정수를 입력하거나 4 pt 문턱을 넘어 1 pt당 1°씩 수평으로 끈다. Preview에는 드래그 중에도 반영한다. 마우스를 놓으면 한 번의 Undo로 되돌릴 수 있고 Escape는 해당 편집을 취소한다.
+
+- 첫 밴드 중심에서 회전은 0°이고 마지막 중심에서 설정 각도에 도달한다. Digital은 해당 주파수 셀의 회전을 쓰고 Analog는 중심 사이에서도 연속으로 회전한다. 밴드가 하나면 회전은 0°다. 360°는 내부 대역에서 한 바퀴의 색 변화를 만든다.
+- 선택한 Inside·Outside 각각에 인코딩된 sRGB의 HSV 회전을 적용한다. 채도·명도와 무채색을 보존하며 원본 RGB는 그대로 저장한다. 회전 후에 두 색을 선형광 RGB에서 보간한다. 기준선에 Inside, 수직 거리가 Maximum Height에 도달한 곳에 Outside가 온다. 공통 alpha, 기존 도형의 커버리지, 유효한 무음의 Digital 점을 유지한다.
+- Spectrum 항목을 저장하면 프로젝트 Format 11 안에 appearance v2를 쓴다. 기존 Inside RGB 필드와 공통 alpha의 뜻은 그대로다. appearance 객체에는 `contractVersion` 2, `outsideRGB`, `hueInterpolationDegrees`를 기록한다. Hue가 0이어도 v2로 저장하며, 저장값 360과 0을 구별한다. Format 10의 단색과 Format 11 v1의 두 색은 Hue 0으로 읽는다. 미지원 버전·알 수 없는 키·중복 키·잘못된 값은 거절한다. 기존 v1 전용 앱에서는 v2 프로젝트를 열 수 없다.
+- Hue는 외관 값이다. 같은 프레임과 분석 설정에서 기존 밴드와 PCM을 재사용한다. 공개 Spectrum Export는 비활성이고 전체 Preview/Export 일치와 장시간·다른 하드웨어의 성능은 미검증이다.
+
+소유자 실기 **PASS**. 서명 Debug 앱에서 180° 직접 입력과 주파수 방향의 색 변화, Inside·Outside 원본 RGB 유지, 360° 스크러빙과 한 번의 Undo/Redo, Format 11 프로젝트 저장·재열기 후 360°와 두 색의 복원을 확인했다.
+
+FX-02C 구현 당시 자동 검증에서 엔진 XCTest 165개, 숫자 편집 검사 506개, 실제 Inspector 컨트롤 검사 69개, 설치된 Preview 레이어 검사 220개가 각각 통과했다. 네 그룹 모두 실패와 생략은 0개였다. 이전 FX-02B 바이너리와 Hue 0 래스터 36개가 그리기 영역·바이트 지문까지 일치했고, 이전 reader가 v2를 거절했다. 새 reader에서는 두 색의 v1과 v2 Hue 0 래스터 18개가 일치했다. 내부 Export worker 6설정·186프레임 중 30개 비교 지점에서 Preview의 분석값·그리기 영역·픽셀 바이트가 일치했다.
+
+PLAYBACK-FIX-01의 공유 렌더러 최적화 전후 자동 비교에서는 FHD 래스터 149/149개의 그리기 영역과 픽셀 바이트가 일치했다. 소유자 시험과 같은 스타일로 측정한 렌더러 내부 시간 중앙값은 83.392ms에서 3.987ms로 줄었다.
+
+첫 Debug 빌드는 컴파일러 임시 파일이 사라진 순간 디스크 관측에 실패해 중지됐다. 소유자가 복구 1회를 승인한 뒤 새 출력 경로에서 동일 자원 한도로 빌드했다. 복구 빌드와 서명·App Sandbox 검증이 통과했고 소스 지문 155개가 일치했다. 기존 Native Inspector 7 FAIL / 4 SKIP과 내부 Undo/Redo Seek 지연 조사는 열려 있다.
