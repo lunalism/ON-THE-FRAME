@@ -4,8 +4,9 @@ import AVFoundation
 import CoreImage
 import ImageIO
 import OnTheFrameEngine
+import os
 
-/// Numeric-only bounded Debug trace. No formatting, file I/O or locks in record().
+/// Numeric-only bounded Debug trace. Owner worker and main-thread events share one ordered buffer.
 @MainActor enum SpectrumContinuityTrace {
     // Row = monotonic microseconds, kind, a...h (unused fields are zero).
     // 10 lease(id,start,deadline,serial,accessRevision,session,generation,applied)
@@ -27,28 +28,116 @@ import OnTheFrameEngine
     // 60 play / 61 pause / 62 seek(frame,session,generation); 63 end(frame,isPlaying)
     // Outcome: 1 ready image, 2 ready empty, 3 cancelled, 4 superseded, 5 dropped, 6 other.
     // Raw object identifiers are process-local numeric correlation only, never dereferenced.
-    struct Event {
+    struct Event: Sendable {
         let time, kind, a, b, c, d, e, f, g, h: Int64
         var row: [Int64] { [time, kind, a, b, c, d, e, f, g, h] }
     }
-    static let limit = 8192, byteLimit = 2 * 1024 * 1024
+    nonisolated static let limit = 8192, byteLimit = 2 * 1024 * 1024
     private static var events: [Event] = []
     private(set) static var active = false
     private(set) static var truncated = false
     private static var sequence: Int64 = 0
     static var tick: Int64 = 0
     static var lease: Int64 = 0
+    static let ownerEnabled = ProcessInfo.processInfo.arguments.contains("-OTFOwnerSpectrumPlaybackTrace")
+    private static var ownerRunID: UUID?
+    static var ownerCaptureID: UUID? { active ? ownerRunID : nil }
+    static var ownerCapturing: Bool { ownerCaptureID != nil }
+    private static var ownerSnapshots: [String: [String: Any]] = [:]
+    private static var collectedURL: URL?
+    private struct OwnerBuffer: Sendable {
+        var runID: UUID?
+        var rows: [Event] = []
+        var truncated = false
+    }
+    private nonisolated static let ownerBuffer = OSAllocatedUnfairLock(initialState: OwnerBuffer())
+
+    /// Called from the normal editor. In-flight workers from an earlier Play cannot append to this run.
+    static func startOwnerCapture() {
+        guard ownerEnabled, !active || ownerRunID != nil else { return }
+        let run = UUID()
+        ownerBuffer.withLock { buffer in
+            buffer.runID = run
+            buffer.rows.removeAll(keepingCapacity: true)
+            buffer.rows.reserveCapacity(limit)
+            buffer.truncated = false
+        }
+        ownerRunID = run
+        ownerSnapshots.removeAll()
+        collectedURL = nil
+        // Keep numeric request IDs unique across repeated Play attempts in this process.
+        firstOwnerSequence = sequence + 1
+        tick = 0
+        lease = 0
+        truncated = false
+        active = true
+    }
+    private static var firstOwnerSequence: Int64 = 1
+
+    static func ownerProjectWillChange(_ store: ProjectStore) {
+        guard ownerCapturing else { return }
+        ownerSnapshot("projectReplacement", store: store)
+        active = false
+        ownerBuffer.withLock { $0.runID = nil }
+    }
+
+    nonisolated static func recordOwner(_ runID: UUID, _ kind: Int64, _ a: Int64 = 0, _ b: Int64 = 0,
+                                        _ c: Int64 = 0, _ d: Int64 = 0, _ e: Int64 = 0, _ f: Int64 = 0,
+                                        _ g: Int64 = 0, _ h: Int64 = 0) {
+        ownerBuffer.withLock { buffer in
+            guard buffer.runID == runID else { return }
+            guard buffer.rows.count < limit else { buffer.truncated = true; return }
+            buffer.rows.append(Event(time: Int64(ProcessInfo.processInfo.systemUptime * 1_000_000),
+                                     kind: kind, a: a, b: b, c: c, d: d, e: e, f: f, g: g, h: h))
+        }
+    }
+
+    /// Fixed-name transition snapshots survive event overflow. Layer contents are installation evidence.
+    static func ownerSnapshot(_ phase: String, store: ProjectStore) {
+        guard ownerEnabled, ownerRunID != nil, collectedURL == nil else { return }
+        let host = store.previewHost, overlay = host?.spectrumOverlay
+        let spectra = store.timeline.spectra
+        var visible = [[String: Any]](), visibleCount = 0
+        for item in spectra where item.visible(atFrame: store.playhead) {
+            visibleCount += 1
+            guard visible.count < 8 else { continue }
+            let style = item.style, outside = style.resolvedOutsideRGB
+            visible.append(["spectrum": Int64(item.id.hashValue), "source": item.sourceKey.map { Int64($0.hashValue) } ?? 0,
+                            "range": [item.start, item.end], "mode": style.mode.rawValue, "bands": style.bands,
+                            "hue": style.hueInterpolationDegrees, "alpha": style.alpha,
+                            "inside": [style.red, style.green, style.blue], "outside": [outside.red, outside.green, outside.blue],
+                            "installedImage": id(overlay?.layers[item.id]?.contents as AnyObject?)])
+        }
+        let player = store.player, session = store.spectrumPreview
+        let lease = store.imagePlaybackLeaseForTest
+        ownerSnapshots[phase] = ["uptimeUS": Int64(ProcessInfo.processInfo.systemUptime * 1_000_000),
+            "playing": store.isPlaying, "timeControlStatus": player.timeControlStatus.rawValue,
+            "session": store.projectSession, "generation": store.generation, "appliedGeneration": store.appliedGeneration,
+            "seekToken": store.seekToken, "epoch": session.epoch, "revision": session.revision, "item": id(player.currentItem),
+            "windowAttached": host?.window != nil, "playhead": store.playhead,
+            "controllerFrame": session.playback.currentFrame ?? -1, "pausedFrame": overlay?.confirmedFrame ?? -1,
+            "imageLease": ["state": store.imagePlaybackAccessStateForTest, "pending": lease.pending,
+                           "untilUS": Int64(lease.until * 1_000_000), "retryUS": Int64(lease.retry * 1_000_000)],
+            "layerCount": host?.spectrumCanvas.sublayers?.count ?? 0,
+            "visibleItemCount": visibleCount, "visibleItems": visible]
+    }
     static func id(_ object: AnyObject?) -> Int64 {
         object.map { Int64(bitPattern: UInt64(UInt(bitPattern: ObjectIdentifier($0)))) } ?? 0
     }
     static func next() -> Int64 { guard active else { return 0 }; sequence += 1; return sequence }
     static func begin() {
+        if ownerRunID != nil { ownerBuffer.withLock { $0.runID = nil } }
+        ownerRunID = nil
         active = false; events.removeAll(keepingCapacity: true); events.reserveCapacity(limit)
         sequence = 0; tick = 0; lease = 0; truncated = false; active = true
     }
     static func record(_ kind: Int64, _ a: Int64 = 0, _ b: Int64 = 0, _ c: Int64 = 0,
                        _ d: Int64 = 0, _ e: Int64 = 0, _ f: Int64 = 0, _ g: Int64 = 0, _ h: Int64 = 0) {
         guard active else { return }
+        if let ownerRunID {
+            recordOwner(ownerRunID, kind, a, b, c, d, e, f, g, h)
+            return
+        }
         guard events.count < limit else { truncated = true; active = false; return }
         events.append(Event(time: Int64(ProcessInfo.processInfo.systemUptime * 1_000_000),
                             kind: kind, a: a, b: b, c: c, d: d, e: e, f: f, g: g, h: h))
@@ -87,6 +176,81 @@ import OnTheFrameEngine
         guard data.count <= byteLimit else { throw CocoaError(.fileWriteOutOfSpace) }
         return data
     }
+
+    /// The menu and isolated verification use the same collector. Collection without Play records that absence.
+    static func collectOwnerPlayback(_ store: ProjectStore, directory: URL? = nil) throws -> URL {
+        guard ownerEnabled else { throw CocoaError(.featureUnsupported) }
+        if let collectedURL { return collectedURL }
+        if ownerRunID == nil { startOwnerCapture() }
+        guard let run = ownerRunID else { throw CocoaError(.featureUnsupported) }
+        if ownerSnapshots["collection"] == nil { ownerSnapshot("collection", store: store) }
+        active = false
+        let (rows, overflow) = ownerBuffer.withLock { buffer in
+            buffer.runID = nil
+            return (buffer.rows, buffer.truncated)
+        }
+        let fm = FileManager.default
+        let folder = try directory ?? fm.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                             appropriateFor: nil, create: true)
+            .appendingPathComponent("SpectrumPlaybackDiagnostics", isDirectory: true)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent("spectrum-playback-\(run.uuidString).json")
+        var counts = [String: Int]()
+        for row in rows { counts[String(row.kind), default: 0] += 1 }
+        let payload: [String: Any] = [
+            "version": 2, "path": "normal-editor", "runID": run.uuidString, "pid": ProcessInfo.processInfo.processIdentifier,
+            "capacity": limit, "byteLimit": byteLimit, "truncated": overflow, "eventCount": rows.count,
+            "firstAllocatedID": firstOwnerSequence, "lastAllocatedID": sequence,
+            "identity": "Request, tick and lease IDs are process-local. IDs below firstAllocatedID originated before this capture. Zero denotes no recorded ID. Item and image IDs identify objects only during their lifetimes.",
+            "rowLayout": ["uptimeUS", "kind", "a", "b", "c", "d", "e", "f", "g", "h"],
+            "clock": "Monotonic uptime in microseconds. Media PTS fields are item-relative microseconds.",
+            "events": rows.map(\.row), "snapshots": ownerSnapshots,
+            "eventKinds": ownerEventKinds, "eventCounts": counts,
+            "coarseOutcome": "1 image, 2 empty, 3 cancelled, 4 superseded, 5 dropped, 6 other (see detailed outcome at 156–158)",
+            "status": ["not requested": "An explicit skip or guard was observed.",
+                       "pending": "An admission, request or validation was explicitly observed pending. A missing terminal event alone means not observed.",
+                       "rejected": "An eligibility, timing, identity or revision guard explicitly rejected the result.",
+                       "failed": "Validation, analysis or rendering reported failure.",
+                       "installed": "A layer received an image. Screen presentation is unmeasured.",
+                       "not observed": "Missing events, including before capture or after overflow, establish no outcome."]]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        guard data.count <= byteLimit else { throw CocoaError(.fileWriteOutOfSpace) }
+        try data.write(to: url, options: .withoutOverwriting)
+        collectedURL = url
+        return url
+    }
+
+    private static let ownerEventKinds = [
+        "10": "access lease: id,startUS,deadlineUS,serial,accessRevision,session,generation,applied",
+        "11": "access query: lease,state(1 blocked/2 expired/3 valid pending/4 early due),deadlineUS",
+        "12": "access worker return: lease,valid,cancelled", "13": "access published: lease,deadlineUS",
+        "14": "access rejected: lease", "15": "lease identity: lease,item,composition", "16": "lease invalidated: lease,serial,accessRevision,session,generation",
+        "20": "display tick: id,targetHostUS,playhead", "21": "tick guard: tick,reason(1 player/2 access),context",
+        "22": "selected: tick,frame,lease", "23": "video timing: tick,requestedUS,displayUS,requestedFrame,selectedFrame,reason(1 invalid/uncovered/2 no buffer/3 copy failed/4 select completed),lastFrame,displayFrame",
+        "24": "fallback: tick,itemUS,itemFrame,selectedFrame,timeControlStatus,covered",
+        "30": "clear: oldFrame,serial,tick", "31": "set: frame,serial,tick", "32": "request: id,frame,serial,epoch,revision,spectrum",
+        "33": "delivery: id,frame,serial,outcome", "34": "accepted: id,frame,serial,outcome,image,spectrum",
+        "35": "cancel: id,frame,serial,spectrum", "36/37": "session arrival/accepted: spectrum,frame,epoch,revision,outcome",
+        "38": "session superseded: spectrum,frame,epoch,revision", "39": "timing suspended: serial,pending,retained",
+        "40": "layer: tick,frame,oldImage,newImage,count,lease,visibleItemCount", "41": "retention pressure: frame,serial,bytes,suspended",
+        "42": "retained source validation: frame,lifetime,valid", "60/61/62": "play/pause/seek: frame,session,generation",
+        "63": "end: frame,isPlaying", "64": "playing state changed: isPlaying,frame,session,generation,item,status",
+        "100": "timing unavailable: tick,hostTimeFinite,output,item",
+        "101": "controller rejected: request,reason(1 no pending key/2 pending serial/3 no session/4 cancelled/5 controller serial/6 epoch/7 revision/8 no longer desired),frame,requestSerial,currentSerial",
+        "102": "missing layer: tick,frame,spectrum,serial,reason(1 frame mismatch/2 session epoch or revision/3 retained source validation pending/4 budget failure/5 empty or failed/6 awaiting cancel delivery/7 request pending/8 outside desired set/9 terminal result without image/10 eviction or retry/11 awaiting admission),pendingRequest,outcome,pendingCount",
+        "103": "transport guard: tick,reason(1 paused/2 zero rate/3 no host/4 no window/5 gesture/6 still shown/7 generation/8 pending seek/9 no item),seekToken,session,currentItem,timingItem",
+        "104": "layer observation: tick,frame,spectrum,image,flags(1 child/2 canvas attached/4 layer and canvas shown/8 intersects canvas/16 view and window visible/32 canvas intersects view),layer,canvasLayerCount,playing",
+        "105": "display link: mode(1 start/2 stop/3 callback rejected/4 guard declined while playing),link,view,x(session or activeLink or windowAttached),y(seekToken or storeHost or spectrumCount)",
+        "150": "source: request,frame,1 open started/2 waiting for open", "151": "analysis scheduled: request,frame,priority",
+        "152": "analysis finished: request,frame,result(0 success/1 cancelled/2 dropped/3 invalidated/4 overlap/5 invalid settings/6 invalid request/7 channels/8 no audio/9 decode failed),bandCount",
+        "153": "discard: request,frame,reason(1 retired/2 epoch/3 plan)", "154": "raster started: request,frame,width,height",
+        "155": "raster finished: request,frame,result(1 image/2 empty/3 invalid style/4 invalid values/5 invalid canvas/6 exception),image",
+        "156/157": "engine terminal/session delivery: request,frame,outcome(1 image/2 empty/3 cancelled/4 superseded/5 dropped/6 hidden/7 item missing/8 unset/9 source missing/10 overlap/11 media unavailable/12 source failure/13 analysis failure/14 render failure)",
+        "158": "session decision: request,frame,1 accepted/2 epoch mismatch/3 revision mismatch,outcome",
+        "160": "access ineligible: lease,reason(1 absent/2 pending/3 invalidated/4 cancelled/5 failed/6 missing proof),item",
+        "161": "worker return on worker thread: lease,valid,workerBodyUS (12 marks main-thread receipt)",
+        "162": "access publication: lease,decision(1 granted/2 validation failed/3 deadline expired/4 stale),startToPublishUS,deadlineUptimeUS,staleMask(bit 0 cancelled/1 serial/2 item/3 session/4 generation/5 access revision/6 composition/7 eligibility)"
+    ]
 
     static func save(_ folder: URL, validated: Bool) {
         do {

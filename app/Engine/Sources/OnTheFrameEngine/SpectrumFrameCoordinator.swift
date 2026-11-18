@@ -42,6 +42,52 @@ public enum SpectrumFrameFailure: Error, Equatable, Sendable {
 
 public struct SpectrumFrameTicket: Hashable, Sendable { let raw: UInt64 }
 
+#if DEBUG
+/// Normal-editor diagnostics, emitted synchronously on the coordinator queue.
+/// The observer receives numbers only; it does not retain PCM, bands or images.
+public enum SpectrumPlaybackStage: Int64, Sendable {
+    case sourcePending = 150, analysisRequested, analysisReturned, analysisDiscarded
+    case rasterStarted, rasterReturned, coordinatorFinished
+}
+
+extension SpectrumAnalysisError {
+    fileprivate var playbackTraceCode: Int64 {
+        switch self {
+        case .cancelled: return 1
+        case .dropped: return 2
+        case .invalidated: return 3
+        case .overlappingPieces: return 4
+        case .invalidSettings: return 5
+        case .invalidRequest: return 6
+        case .unsupportedChannelCount: return 7
+        case .noAudioTrack: return 8
+        case .decodeFailed: return 9
+        }
+    }
+}
+
+extension SpectrumFrameOutcome {
+    public var playbackTraceCode: Int64 {
+        switch self {
+        case .ready(_, .some): return 1
+        case .ready(_, .none): return 2
+        case .cancelled: return 3
+        case .superseded: return 4
+        case .dropped: return 5
+        case .notVisible: return 6
+        case .itemMissing: return 7
+        case .unsetSource: return 8
+        case .missingSource: return 9
+        case .overlap: return 10
+        case .mediaUnavailable: return 11
+        case .failed(.source): return 12
+        case .failed(.analysis): return 13
+        case .failed(.render): return 14
+        }
+    }
+}
+#endif
+
 public final class SpectrumFrameCoordinator: @unchecked Sendable {   // 가변 상태는 모두 queue 안에서만(아래 주석)
     public typealias SourceOpener = @Sendable (MediaAsset) async throws -> any SpectrumPCMProvider
     public typealias Completion = @Sendable (SpectrumFrameOutcome) -> Void
@@ -81,6 +127,9 @@ public final class SpectrumFrameCoordinator: @unchecked Sendable {   // 가변 �
         let completion: Completion
         var plan: Plan?
         var schedulerID: SpectrumRequestID?
+        #if DEBUG
+        var playbackObserver: PlaybackObserver?
+        #endif
     }
 
     // MARK: queue 안에서만
@@ -135,9 +184,22 @@ public final class SpectrumFrameCoordinator: @unchecked Sendable {   // 가변 �
     @discardableResult
     public func request(spectrum id: UUID, frame n: Int, canvasWidth: Int, canvasHeight: Int, priority: Int = 0,
                         completion: @escaping Completion) -> SpectrumFrameTicket {
+        enqueue(Waiting(item: id, frame: n, width: canvasWidth, height: canvasHeight, priority: priority, completion: completion))
+    }
+    #if DEBUG
+    public typealias PlaybackObserver = @Sendable (SpectrumPlaybackStage, Int64, Int64) -> Void
+
+    public func request(spectrum id: UUID, frame n: Int, canvasWidth: Int, canvasHeight: Int, priority: Int,
+                        playbackObserver: @escaping PlaybackObserver, completion: @escaping Completion) -> SpectrumFrameTicket {
+        var w = Waiting(item: id, frame: n, width: canvasWidth, height: canvasHeight, priority: priority, completion: completion)
+        w.playbackObserver = playbackObserver
+        return enqueue(w)
+    }
+    #endif
+    private func enqueue(_ w: Waiting) -> SpectrumFrameTicket {
         let raw = nextTicket.withLock { $0 += 1; return $0 }
         queue.async { [self] in
-            waiting[raw] = Waiting(item: id, frame: n, width: canvasWidth, height: canvasHeight, priority: priority, completion: completion)
+            waiting[raw] = w
             start(raw)
         }
         return SpectrumFrameTicket(raw: raw)
@@ -179,10 +241,17 @@ public final class SpectrumFrameCoordinator: @unchecked Sendable {   // 가변 �
         switch sources[p.source] {
         case let .ready(provider)?: schedule(raw, p, provider)
         case let .failed(e)?: finish(raw, .failed(.source(e)))
-        case .opening?: break   // opened가 이어 받는다
+        case .opening?:
+            #if DEBUG
+            w.playbackObserver?(.sourcePending, 2, 0)
+            #endif
+            break   // opened가 이어 받는다
         case nil:
             guard let a = media[p.source.mediaID] else { return finish(raw, .mediaUnavailable(p.source.mediaID)) }
             sources[p.source] = .opening
+            #if DEBUG
+            w.playbackObserver?(.sourcePending, 1, 0)
+            #endif
             let open = opener, e = epoch, key = p.source
             Task.detached(priority: .userInitiated) { [weak self] in
                 let r: Result<any SpectrumPCMProvider, SpectrumAnalysisError>
@@ -209,20 +278,62 @@ public final class SpectrumFrameCoordinator: @unchecked Sendable {   // 가변 �
         guard let w = waiting[raw] else { return }
         let r = SpectrumFrameRequest(frame: p.frame, fps: fps, settings: p.style.analysisSettings, pieces: p.pieces)
         // 완료는 이 큐에서 비동기로 온다(일정의 deliver) — 아래에서 schedulerID를 넣은 뒤에 처리된다
-        let id = scheduler.request(r, from: provider, priority: w.priority) { [weak self] res in self?.analyzed(raw, p, res) }
+        #if DEBUG
+        let observer = w.playbackObserver
+        observer?(.analysisRequested, Int64(w.priority), 0)
+        #endif
+        let id = scheduler.request(r, from: provider, priority: w.priority) { [weak self] res in
+            #if DEBUG
+            if let observer {
+                switch res {
+                case let .success(bands): observer(.analysisReturned, 0, Int64(bands.count))
+                case let .failure(error): observer(.analysisReturned, error.playbackTraceCode, 0)
+                }
+                if self?.waiting[raw] == nil { observer(.analysisDiscarded, 1, 0) }
+            }
+            #endif
+            self?.analyzed(raw, p, res)
+        }
         waiting[raw]?.schedulerID = id
     }
     private func analyzed(_ raw: UInt64, _ p: Plan, _ r: Result<[Float], SpectrumAnalysisError>) {
         dispatchPrecondition(condition: .onQueue(queue))
         guard let w = waiting[raw] else { return }   // 이미 끝남(취소·교체)
-        guard p.epoch == epoch, resolve(w.item, w.frame) == .plan(p) else { return finish(raw, .superseded) }
+        guard p.epoch == epoch, resolve(w.item, w.frame) == .plan(p) else {
+            #if DEBUG
+            w.playbackObserver?(.analysisDiscarded, p.epoch != epoch ? 2 : 3, 0)
+            #endif
+            return finish(raw, .superseded)
+        }
         switch r {
         case let .success(bands):
             do {
+                #if DEBUG
+                w.playbackObserver?(.rasterStarted, Int64(w.width), Int64(w.height))
+                #endif
                 if renderer?.width != w.width || renderer?.height != w.height { renderer = nil; renderer = try SpectrumFrameRenderer(width: w.width, height: w.height) }
                 let f = try renderer!.render(bands: bands, style: p.style)
+                #if DEBUG
+                w.playbackObserver?(.rasterReturned, f == nil ? 2 : 1, f.map { Int64(Int(bitPattern: ObjectIdentifier($0.image))) } ?? 0)
+                #endif
                 finish(raw, .ready(bands: bands, frame: f))
-            } catch let e as SpectrumRenderError { finish(raw, .failed(.render(e))) } catch { finish(raw, .failed(.render(.invalidCanvas("\(error)")))) }
+            } catch let e as SpectrumRenderError {
+                #if DEBUG
+                if let observer = w.playbackObserver {
+                    switch e {
+                    case .invalidStyle: observer(.rasterReturned, 3, 0)
+                    case .invalidValues: observer(.rasterReturned, 4, 0)
+                    case .invalidCanvas: observer(.rasterReturned, 5, 0)
+                    }
+                }
+                #endif
+                finish(raw, .failed(.render(e)))
+            } catch {
+                #if DEBUG
+                w.playbackObserver?(.rasterReturned, 6, 0)
+                #endif
+                finish(raw, .failed(.render(.invalidCanvas("\(error)"))))
+            }
         case .failure(.overlappingPieces): finish(raw, .overlap)
         case .failure(.dropped): finish(raw, .dropped)
         case .failure(.cancelled), .failure(.invalidated): finish(raw, .superseded)
@@ -232,6 +343,9 @@ public final class SpectrumFrameCoordinator: @unchecked Sendable {   // 가변 �
     /// 정확히 한 번: 기다림에서 빼고 deliveryQueue에서 알린다
     private func finish(_ raw: UInt64, _ o: SpectrumFrameOutcome) {
         guard let w = waiting.removeValue(forKey: raw) else { return }
+        #if DEBUG
+        w.playbackObserver?(.coordinatorFinished, o.playbackTraceCode, 0)
+        #endif
         deliveryQueue.async { w.completion(o) }
     }
     static func outcome(_ k: Resolution.Kind) -> SpectrumFrameOutcome {

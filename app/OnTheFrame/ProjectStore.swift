@@ -1977,8 +1977,24 @@ final class ProjectStore {
     /// MainActor-only, no disk work. Renewal retains only the original unexpired lease.
     /// The caller separately enforces playing, pending-seek and visual coverage rules.
     func imagePlaybackAccessIsCurrent(for item: AVPlayerItem, allowProactiveRenewal: Bool = false) -> Bool {
-        guard imagePreviewEligibility(for: item, session: projectSession, generation: generation) == .validatedAtInstallation,
-              let proof = appliedImagePreview else { return false }
+        let eligibility = imagePreviewEligibility(for: item, session: projectSession, generation: generation)
+        guard eligibility == .validatedAtInstallation, let proof = appliedImagePreview else {
+            #if DEBUG
+            if let capture = SpectrumContinuityTrace.ownerCaptureID {
+                let reason: Int64
+                switch eligibility {
+                case .absent: reason = 1
+                case .pending: reason = 2
+                case .invalidated: reason = 3
+                case .cancelled: reason = 4
+                case .failed: reason = 5
+                case .validatedAtInstallation: reason = 6
+                }
+                SpectrumContinuityTrace.recordOwner(capture, 160, SpectrumContinuityTrace.lease, reason, SpectrumContinuityTrace.id(item))
+            }
+            #endif
+            return false
+        }
         let now = imagePlaybackAccessNow
         let authorized = now < imagePlaybackAccessUntil
         if imagePlaybackAccessTask != nil {
@@ -2000,6 +2016,7 @@ final class ProjectStore {
         let serial = imagePlaybackAccessSerial, snapshot = timeline, id = projectID
         let urls = imageSourceURLs, settings = settings
         #if DEBUG
+        let traceCapture = SpectrumContinuityTrace.ownerCaptureID
         let traceLease = SpectrumContinuityTrace.next()
         SpectrumContinuityTrace.lease = traceLease
         SpectrumContinuityTrace.record(10, traceLease, Int64(now * 1_000_000), Int64((now + 1) * 1_000_000),
@@ -2012,6 +2029,16 @@ final class ProjectStore {
         #endif
         imagePlaybackAccessTask = Task { @MainActor [weak self] in
             let worker = Task.detached(priority: .userInitiated) { () -> Bool in
+                #if DEBUG
+                let workerStart = traceCapture == nil ? 0 : ProcessInfo.processInfo.systemUptime
+                var workerValid = false
+                defer {
+                    if let traceCapture {
+                        let elapsed = ProcessInfo.processInfo.systemUptime - workerStart
+                        SpectrumContinuityTrace.recordOwner(traceCapture, 161, traceLease, workerValid ? 1 : 0, Int64(elapsed * 1_000_000))
+                    }
+                }
+                #endif
                 do {
                     let project = try ProjectPersistence.make(timeline: snapshot, projectID: id, settings: settings)
                     let references = ProjectPersistence.references(snapshot).filter { $0.kind == .stillImage }
@@ -2027,13 +2054,18 @@ final class ProjectStore {
                         try await ProjectPersistence.validateImageReference(project, mediaID: reference.id, at: url)
                     }
                     try Task.checkCancellation()
+                    #if DEBUG
+                    workerValid = true
+                    #endif
                     return true
                 } catch { return false }
             }
             let valid = await withTaskCancellationHandler(operation: { await worker.value }, onCancel: { worker.cancel() })
             guard let self else { return }
             #if DEBUG
-            SpectrumContinuityTrace.record(12, traceLease, valid ? 1 : 0, Task.isCancelled ? 1 : 0)
+            if traceCapture == SpectrumContinuityTrace.ownerCaptureID {
+                SpectrumContinuityTrace.record(12, traceLease, valid ? 1 : 0, Task.isCancelled ? 1 : 0)
+            }
             #endif
             defer { self.imagePlaybackAccessTask = nil }
             #if DEBUG
@@ -2050,10 +2082,31 @@ final class ProjectStore {
                   self.imagePreviewEligibility(for: item, session: proof.session, generation: proof.generation) == .validatedAtInstallation else {
                 #if DEBUG
                 self.imagePlaybackAccessStaleForTest += 1
-                SpectrumContinuityTrace.record(14, traceLease)
+                if traceCapture == SpectrumContinuityTrace.ownerCaptureID {
+                    SpectrumContinuityTrace.record(14, traceLease)
+                }
+                if let traceCapture {
+                    var mask: Int64 = 0
+                    if Task.isCancelled { mask |= 1 }
+                    if serial != self.imagePlaybackAccessSerial { mask |= 2 }
+                    if self.player.currentItem !== item { mask |= 4 }
+                    if self.projectSession != proof.session { mask |= 8 }
+                    if self.generation != proof.generation { mask |= 16 }
+                    if self.imageAccessRevision != proof.accessRevision { mask |= 32 }
+                    if self.currentPlan?.composition !== proof.composition { mask |= 64 }
+                    if self.imagePreviewEligibility(for: item, session: proof.session, generation: proof.generation) != .validatedAtInstallation { mask |= 128 }
+                    SpectrumContinuityTrace.recordOwner(traceCapture, 162, traceLease, 4,
+                        Int64((publishedAt - now) * 1_000_000), Int64((now + 1) * 1_000_000), mask)
+                }
                 #endif
                 return
             }
+            #if DEBUG
+            if let traceCapture {
+                SpectrumContinuityTrace.recordOwner(traceCapture, 162, traceLease, valid ? (publishedAt < now + 1 ? 1 : 3) : 2,
+                    Int64((publishedAt - now) * 1_000_000), Int64((now + 1) * 1_000_000))
+            }
+            #endif
             if valid && publishedAt < now + 1 {
                 self.imagePlaybackAccessUntil = now + 1
             } else {
@@ -2061,7 +2114,9 @@ final class ProjectStore {
                 self.clearImagePlaybackSpectrum()
             }
             #if DEBUG
-            SpectrumContinuityTrace.record(13, traceLease, Int64(self.imagePlaybackAccessUntil * 1_000_000))
+            if traceCapture == SpectrumContinuityTrace.ownerCaptureID {
+                SpectrumContinuityTrace.record(13, traceLease, Int64(self.imagePlaybackAccessUntil * 1_000_000))
+            }
             #endif
         }
         return authorized
@@ -2398,6 +2453,10 @@ final class ProjectStore {
     func togglePlay() { playbackRequested ? pause() : play() }
     func play() {
         #if DEBUG
+        if SpectrumContinuityTrace.ownerEnabled, !playbackRequested {
+            SpectrumContinuityTrace.startOwnerCapture()
+            SpectrumContinuityTrace.ownerSnapshot("beforePlay", store: self)
+        }
         SpectrumContinuityTrace.record(60, Int64(playhead), Int64(projectSession), Int64(generation))
         #endif
         commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
@@ -2474,6 +2533,13 @@ final class ProjectStore {
         if p || isPlaying { previewHost?.spectrumOverlay.invalidate(forgetFrame: true) }
         isPlaying = p
         previewHost?.spectrumOverlay.updatePlaybackLink()
+        #if DEBUG
+        if SpectrumContinuityTrace.ownerCapturing {
+            SpectrumContinuityTrace.record(64, p ? 1 : 0, Int64(playhead), Int64(projectSession), Int64(generation),
+                                           SpectrumContinuityTrace.id(player.currentItem), Int64(player.timeControlStatus.rawValue))
+            SpectrumContinuityTrace.ownerSnapshot(p ? "playing" : "paused", store: self)
+        }
+        #endif
         if p, sleepAssertion == 0 {
             IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn),
                                         "ON THE FRAME playback" as CFString, &sleepAssertion)
@@ -2942,6 +3008,9 @@ extension ProjectStore {
         replaceProject(timeline: Timeline(), url: nil, id: UUID(), cache: [:], bookmarks: [:], missing: [:])
     }
     private func replaceProject(timeline t: Timeline, url: URL?, id: UUID, cache: [String: MediaAsset], bookmarks bm: [UUID: Data], missing: [UUID: String], relativePaths: [UUID: String] = [:], imageURLs: [UUID: URL] = [:]) {
+        #if DEBUG
+        SpectrumContinuityTrace.ownerProjectWillChange(self)
+        #endif
         cancelImageImport()
         pauseForEdit()
         interruptGesture(reason: "replaceProject", clearViewDrags: true)   // 끌기 중이면 취소하고 보기의 끌기 상태(옮기기 누름 대기 포함)도 지운다(D-031)

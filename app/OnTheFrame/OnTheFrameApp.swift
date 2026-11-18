@@ -40,6 +40,18 @@ struct OnTheFrameApp: App {
                 Button("내보내기…") { store.presentExportPanel() }.keyboardShortcut("e")
                     .disabled(!store.fileCommandsAvailable || (!store.canExport && store.exportBlockReason == nil))
                 Button("미디어 재연결…") { store.relinkFirstMissing() }.disabled(!store.fileCommandsAvailable || store.missingMedia.isEmpty)
+                #if DEBUG
+                if SpectrumContinuityTrace.ownerEnabled {
+                    Button("Spectrum 재생 진단 수집") {
+                        do {
+                            let url = try SpectrumContinuityTrace.collectOwnerPlayback(store)
+                            NSWorkspace.shared.activateFileViewerSelecting([url])
+                        } catch {
+                            NSApp.presentError(error)
+                        }
+                    }.disabled(!store.fileCommandsAvailable)
+                }
+                #endif
             }
             CommandGroup(replacing: .saveItem) {
                 Button("프로젝트 저장") { store.saveProject() }.keyboardShortcut("s").disabled(!store.fileCommandsAvailable)

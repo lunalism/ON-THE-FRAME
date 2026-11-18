@@ -42,14 +42,20 @@ final class SpectrumPreviewSession {
     }
 
     @discardableResult
-    func request(spectrum: UUID, frame: Int, priority: Int = 0, checkPlaybackMedia: Bool = false,
+    func request(spectrum: UUID, frame: Int, priority: Int = 0, checkPlaybackMedia: Bool = false, traceRequestID: Int64 = 0,
                  completion: @escaping @MainActor @Sendable (SpectrumFrameOutcome) -> Void) -> SpectrumFrameTicket {
         let requestedEpoch = epoch, requestedRevision = revision
-        return coordinator.request(spectrum: spectrum, frame: frame, canvasWidth: 1920, canvasHeight: 1080, priority: priority) { [weak self] outcome in
+        #if DEBUG
+        let capture = checkPlaybackMedia && traceRequestID > 0 ? SpectrumContinuityTrace.ownerCaptureID : nil
+        #endif
+        let receive: SpectrumFrameCoordinator.Completion = { [weak self] outcome in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 #if DEBUG
-                SpectrumContinuityTrace.record(36, Int64(spectrum.hashValue), Int64(frame), Int64(requestedEpoch), Int64(requestedRevision), SpectrumContinuityTrace.outcome(outcome))
+                if let capture { SpectrumContinuityTrace.recordOwner(capture, 157, traceRequestID, Int64(frame), outcome.playbackTraceCode) }
+                if capture == SpectrumContinuityTrace.ownerCaptureID {
+                    SpectrumContinuityTrace.record(36, Int64(spectrum.hashValue), Int64(frame), Int64(requestedEpoch), Int64(requestedRevision), SpectrumContinuityTrace.outcome(outcome))
+                }
                 #endif
                 var accepted = outcome
                 if checkPlaybackMedia, case .ready(_, .some) = outcome {
@@ -69,17 +75,31 @@ final class SpectrumPreviewSession {
                 #endif
                 guard self.epoch == requestedEpoch, self.revision == requestedRevision else {
                     #if DEBUG
-                    SpectrumContinuityTrace.record(38, Int64(spectrum.hashValue), Int64(frame), Int64(requestedEpoch), Int64(requestedRevision))
+                    if let capture { SpectrumContinuityTrace.recordOwner(capture, 158, traceRequestID, Int64(frame), self.epoch != requestedEpoch ? 2 : 3, SpectrumFrameOutcome.superseded.playbackTraceCode) }
+                    if capture == SpectrumContinuityTrace.ownerCaptureID {
+                        SpectrumContinuityTrace.record(38, Int64(spectrum.hashValue), Int64(frame), Int64(requestedEpoch), Int64(requestedRevision))
+                    }
                     #endif
                     completion(.superseded)
                     return
                 }
                 #if DEBUG
-                SpectrumContinuityTrace.record(37, Int64(spectrum.hashValue), Int64(frame), Int64(requestedEpoch), Int64(requestedRevision), SpectrumContinuityTrace.outcome(accepted))
+                if let capture { SpectrumContinuityTrace.recordOwner(capture, 158, traceRequestID, Int64(frame), 1, accepted.playbackTraceCode) }
+                if capture == SpectrumContinuityTrace.ownerCaptureID {
+                    SpectrumContinuityTrace.record(37, Int64(spectrum.hashValue), Int64(frame), Int64(requestedEpoch), Int64(requestedRevision), SpectrumContinuityTrace.outcome(accepted))
+                }
                 #endif
                 completion(accepted)
             }
         }
+        #if DEBUG
+        if let capture {
+            return coordinator.request(spectrum: spectrum, frame: frame, canvasWidth: 1920, canvasHeight: 1080, priority: priority, playbackObserver: { stage, detail, value in
+                SpectrumContinuityTrace.recordOwner(capture, stage.rawValue, traceRequestID, Int64(frame), detail, value)
+            }, completion: receive)
+        }
+        #endif
+        return coordinator.request(spectrum: spectrum, frame: frame, canvasWidth: 1920, canvasHeight: 1080, priority: priority, completion: receive)
     }
 
     func cancel(_ ticket: SpectrumFrameTicket) { coordinator.cancel(ticket) }

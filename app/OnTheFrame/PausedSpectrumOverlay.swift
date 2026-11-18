@@ -38,24 +38,52 @@ final class PausedSpectrumOverlay {
 
     func updatePlaybackLink() {
         guard let store, let view, view.window != nil, store.isPlaying,
-              !store.timeline.spectra.isEmpty else { stopPlaybackLink(); return }
+              !store.timeline.spectra.isEmpty else {
+            #if DEBUG
+            if SpectrumContinuityTrace.ownerCapturing, store?.isPlaying == true {
+                SpectrumContinuityTrace.record(105, 4, SpectrumContinuityTrace.id(playbackLink), SpectrumContinuityTrace.id(view),
+                    view?.window == nil ? 0 : 1, Int64(store?.timeline.spectra.count ?? 0))
+            }
+            #endif
+            stopPlaybackLink(); return
+        }
         guard playbackLink == nil else { return }
         let link = view.displayLink(target: self, selector: #selector(playbackTick(_:)))
         playbackLink = link
         link.add(to: .main, forMode: .common)
+        #if DEBUG
+        if SpectrumContinuityTrace.ownerCapturing {
+            SpectrumContinuityTrace.record(105, 1, SpectrumContinuityTrace.id(link), SpectrumContinuityTrace.id(view),
+                Int64(store.projectSession), Int64(store.seekToken))
+        }
+        #endif
     }
 
     func stopPlaybackLink() {
+        #if DEBUG
+        if SpectrumContinuityTrace.ownerCapturing, let playbackLink {
+            SpectrumContinuityTrace.record(105, 2, SpectrumContinuityTrace.id(playbackLink), SpectrumContinuityTrace.id(view))
+        }
+        #endif
         playbackLink?.invalidate()
         playbackLink = nil
     }
 
     @objc private func playbackTick(_ link: CADisplayLink) {
-        guard link === playbackLink, let store, let view, store.previewHost === view else { return }
+        guard link === playbackLink, let store, let view, store.previewHost === view else {
+            #if DEBUG
+            if SpectrumContinuityTrace.ownerCapturing {
+                SpectrumContinuityTrace.record(105, 3, SpectrumContinuityTrace.id(link), SpectrumContinuityTrace.id(view),
+                    SpectrumContinuityTrace.id(playbackLink), SpectrumContinuityTrace.id(store?.previewHost))
+            }
+            #endif
+            return
+        }
         #if DEBUG
         SpectrumContinuityTrace.tick = SpectrumContinuityTrace.next()
         SpectrumContinuityTrace.record(20, SpectrumContinuityTrace.tick, Int64(link.targetTimestamp * 1_000_000), Int64(store.playhead))
         let traceOld = layers.values.first.flatMap { $0.contents as AnyObject? }
+        var visibleSpectra: Int64 = 0
         #endif
         store.sampleSpectrumPlayback(hostTime: link.targetTimestamp)
         let controller = store.spectrumPreview.playback
@@ -66,7 +94,16 @@ final class PausedSpectrumOverlay {
         var ordered: [CALayer] = []
         if let frame {
             for entry in store.timeline.spectra.reversed() where entry.visible(atFrame: frame) {
-                guard case let .ready(_, rendered?) = controller.currentOutcome(spectrum: entry.id, frame: frame) else { continue }
+                let outcome = controller.currentOutcome(spectrum: entry.id, frame: frame)
+                #if DEBUG
+                if SpectrumContinuityTrace.ownerCapturing { visibleSpectra += 1 }
+                #endif
+                guard case let .ready(_, rendered?) = outcome else {
+                    #if DEBUG
+                    controller.traceMissingLayer(spectrum: entry.id, frame: frame, outcome: outcome)
+                    #endif
+                    continue
+                }
                 let layer = layers[entry.id] ?? CALayer()
                 layer.actions = PlayerNSView.noActions
                 layer.contents = rendered.image
@@ -80,7 +117,10 @@ final class PausedSpectrumOverlay {
         #if DEBUG
         SpectrumContinuityTrace.record(40, SpectrumContinuityTrace.tick, Int64(frame ?? -1),
             SpectrumContinuityTrace.id(traceOld), SpectrumContinuityTrace.id(ordered.first?.contents as AnyObject?),
-            Int64(ordered.count), SpectrumContinuityTrace.lease)
+            Int64(ordered.count), SpectrumContinuityTrace.lease, visibleSpectra)
+        if SpectrumContinuityTrace.ownerCapturing, let frame {
+            for (id, layer) in layers { traceLayer(layer, spectrum: id, frame: frame, playing: true, view: view) }
+        }
         playbackObservationForTest?.observe()
         #endif
     }
@@ -217,6 +257,9 @@ final class PausedSpectrumOverlay {
                     }
                     CATransaction.commit()
                     #if DEBUG
+                    if SpectrumContinuityTrace.ownerCapturing {
+                        self.traceLayer(layer, spectrum: entry.id, frame: frame, playing: false, view: view)
+                    }
                     self.publicationForParityTest?.receive(frame, token, entry.id, accepted)
                     self.assignments += 1
                     self.latencies.append(updateStart - start)
@@ -239,6 +282,23 @@ final class PausedSpectrumOverlay {
             refresh(retainingStyleFrame: true)
         }
     }
+
+    #if DEBUG
+    /// Model-layer evidence only. Capture the identity actually assigned under the canvas.
+    private func traceLayer(_ layer: CALayer, spectrum: UUID, frame: Int, playing: Bool, view: PlayerNSView) {
+        let canvas = view.spectrumCanvas
+        var flags: Int64 = 0
+        if layer.superlayer === canvas { flags |= 1 }
+        if view.layer != nil, canvas.superlayer === view.layer { flags |= 2 }
+        if !layer.isHidden, layer.opacity > 0, !canvas.isHidden, canvas.opacity > 0 { flags |= 4 }
+        if !layer.frame.isEmpty, layer.frame.intersects(canvas.bounds) { flags |= 8 }
+        if !view.isHiddenOrHasHiddenAncestor, view.window?.isVisible == true { flags |= 16 }
+        if !canvas.frame.isEmpty, canvas.frame.intersects(view.bounds) { flags |= 32 }
+        SpectrumContinuityTrace.record(104, SpectrumContinuityTrace.tick, Int64(frame), Int64(spectrum.hashValue),
+            SpectrumContinuityTrace.id(layer.contents as AnyObject?), flags, SpectrumContinuityTrace.id(layer),
+            Int64(canvas.sublayers?.count ?? 0), playing ? 1 : 0)
+    }
+    #endif
 
     /// Cropped image remains cropped. The image's top row is CA contents' top row.
     static func layerRect(_ rect: CGRect) -> CGRect {

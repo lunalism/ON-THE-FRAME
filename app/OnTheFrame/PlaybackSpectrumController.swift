@@ -77,7 +77,15 @@ final class SpectrumPlaybackTiming {
     #endif
 
     func sample(hostTime: CFTimeInterval, timeline: Timeline) -> Int? {
-        guard hostTime.isFinite, let output, item != nil else { return nil }
+        guard hostTime.isFinite, let output, item != nil else {
+            #if DEBUG
+            if SpectrumContinuityTrace.ownerCapturing {
+                SpectrumContinuityTrace.record(100, SpectrumContinuityTrace.tick, hostTime.isFinite ? 1 : 0,
+                    SpectrumContinuityTrace.id(output), SpectrumContinuityTrace.id(item))
+            }
+            #endif
+            return nil
+        }
         let requested = output.itemTime(forHostTime: hostTime)
         return sample(requested: requested, timeline: timeline, hasNewBuffer: output.hasNewPixelBuffer(forItemTime: requested)) { display in
             output.copyPixelBuffer(forItemTime: requested, itemTimeForDisplay: &display) != nil
@@ -89,12 +97,13 @@ final class SpectrumPlaybackTiming {
         #if DEBUG
         var traceDisplay = CMTime.invalid, traceReason: Int64 = 1, traceSelected: Int? = nil
         defer {
-            if SpectrumContinuityTrace.active, Self.traceBoundary(Self.frame(requested, duration: timeline.durationFrames)) {
+            if SpectrumContinuityTrace.active, SpectrumContinuityTrace.ownerCapturing || Self.traceBoundary(Self.frame(requested, duration: timeline.durationFrames)) {
                 SpectrumContinuityTrace.record(23, SpectrumContinuityTrace.tick,
                     requested.isNumeric ? Int64(requested.seconds * 1_000_000) : -1,
                     traceDisplay.isNumeric ? Int64(traceDisplay.seconds * 1_000_000) : -1,
                     Int64(Self.frame(requested, duration: timeline.durationFrames) ?? -1),
-                    Int64(traceSelected ?? -1), traceReason, Int64(lastFrame ?? -1))
+                    Int64(traceSelected ?? -1), traceReason, Int64(lastFrame ?? -1),
+                    SpectrumContinuityTrace.ownerCapturing ? Int64(Self.frame(traceDisplay, duration: timeline.durationFrames) ?? -1) : 0)
             }
         }
         #endif
@@ -134,6 +143,7 @@ final class PlaybackSpectrumController {
         let ticket: SpectrumFrameTicket; let serial: Int; let start: Double; var cancelled = false
         #if DEBUG
         var traceRequest: Int64 = 0
+        var traceCaptureID: UUID?
         #endif
     }
     struct Stored { let outcome: SpectrumFrameOutcome; let bytes: Int }
@@ -194,7 +204,9 @@ final class PlaybackSpectrumController {
             guard var p = pending[key], !p.cancelled, !desired.contains(key) else { continue }
             p.cancelled = true; pending[key] = p; metrics.cancelled += 1
             #if DEBUG
-            SpectrumContinuityTrace.record(35, p.traceRequest, Int64(key.frame), Int64(p.serial), Int64(key.spectrum.hashValue))
+            if p.traceCaptureID == SpectrumContinuityTrace.ownerCaptureID {
+                SpectrumContinuityTrace.record(35, p.traceRequest, Int64(key.frame), Int64(p.serial), Int64(key.spectrum.hashValue))
+            }
             #endif
             session?.cancel(p.ticket)
         }
@@ -268,33 +280,62 @@ final class PlaybackSpectrumController {
             let requestSerial = serial, start = ProcessInfo.processInfo.systemUptime
             #if DEBUG
             let traceRequest = SpectrumContinuityTrace.next()
+            let captureID = SpectrumContinuityTrace.ownerCaptureID
             SpectrumContinuityTrace.record(32, traceRequest, Int64(key.frame), Int64(requestSerial), Int64(epoch), Int64(revision), Int64(key.spectrum.hashValue))
+            #else
+            let traceRequest: Int64 = 0
+            let captureID: UUID? = nil
             #endif
             let ticket = session.request(spectrum: key.spectrum, frame: key.frame,
-                                         priority: key.frame == currentFrame ? 0 : 1, checkPlaybackMedia: true) { [weak self] outcome in
+                                         priority: key.frame == currentFrame ? 0 : 1, checkPlaybackMedia: true,
+                                         traceRequestID: traceRequest) { [weak self] outcome in
                 #if DEBUG
-                SpectrumContinuityTrace.record(33, traceRequest, Int64(key.frame), Int64(requestSerial), SpectrumContinuityTrace.outcome(outcome))
+                if captureID == SpectrumContinuityTrace.ownerCaptureID {
+                    SpectrumContinuityTrace.record(33, traceRequest, Int64(key.frame), Int64(requestSerial), SpectrumContinuityTrace.outcome(outcome))
+                }
                 #endif
-                self?.finish(key, serial: requestSerial, outcome: outcome)
+                self?.finish(key, serial: requestSerial, outcome: outcome, traceRequest: traceRequest, captureID: captureID)
             }
             pending[key] = Pending(ticket: ticket, serial: requestSerial, start: start)
             #if DEBUG
             pending[key]?.traceRequest = traceRequest
+            pending[key]?.traceCaptureID = captureID
             #endif
             metrics.requested += 1; metrics.peakPending = max(metrics.peakPending, pending.count)
         }
     }
-    private func finish(_ key: Key, serial requestSerial: Int, outcome: SpectrumFrameOutcome) {
-        guard let p = pending[key], p.serial == requestSerial else { metrics.stale += 1; return }
+    private func finish(_ key: Key, serial requestSerial: Int, outcome: SpectrumFrameOutcome, traceRequest: Int64, captureID: UUID?) {
+        guard let p = pending[key], p.serial == requestSerial else {
+            #if DEBUG
+            if SpectrumContinuityTrace.ownerCapturing, SpectrumContinuityTrace.ownerCaptureID == captureID {
+                SpectrumContinuityTrace.record(101, traceRequest, pending[key] == nil ? 1 : 2, Int64(key.frame), Int64(requestSerial), Int64(serial))
+            }
+            #endif
+            metrics.stale += 1; return
+        }
         pending[key] = nil
         guard let session, !p.cancelled, serial == requestSerial, epoch == session.epoch,
               revision == session.revision, desired.contains(key) else {
+            #if DEBUG
+            if SpectrumContinuityTrace.ownerCapturing, SpectrumContinuityTrace.ownerCaptureID == captureID {
+                let reason: Int64
+                if session == nil { reason = 3 }
+                else if p.cancelled { reason = 4 }
+                else if serial != requestSerial { reason = 5 }
+                else if epoch != session?.epoch { reason = 6 }
+                else if revision != session?.revision { reason = 7 }
+                else { reason = 8 } // no longer desired
+                SpectrumContinuityTrace.record(101, traceRequest, reason, Int64(key.frame), Int64(requestSerial), Int64(serial))
+            }
+            #endif
             metrics.stale += 1; pump(); return
         }
         #if DEBUG
-        let traceImage: Int64
-        if case let .ready(_, rendered) = outcome { traceImage = SpectrumContinuityTrace.id(rendered?.image) } else { traceImage = 0 }
-        SpectrumContinuityTrace.record(34, p.traceRequest, Int64(key.frame), Int64(requestSerial), SpectrumContinuityTrace.outcome(outcome), traceImage, Int64(key.spectrum.hashValue))
+        if captureID == SpectrumContinuityTrace.ownerCaptureID {
+            let traceImage: Int64
+            if case let .ready(_, rendered) = outcome { traceImage = SpectrumContinuityTrace.id(rendered?.image) } else { traceImage = 0 }
+            SpectrumContinuityTrace.record(34, p.traceRequest, Int64(key.frame), Int64(requestSerial), SpectrumContinuityTrace.outcome(outcome), traceImage, Int64(key.spectrum.hashValue))
+        }
         #endif
         completed[key] = .settled
         let latency = ProcessInfo.processInfo.systemUptime - p.start
@@ -390,6 +431,30 @@ final class PlaybackSpectrumController {
         }
         return retained[key]?.outcome
     }
+
+    #if DEBUG
+    /// Explain a missing layer using the state actually seen at this publication.
+    /// Ready-empty and terminal errors have a delivery; a queued request has none yet.
+    func traceMissingLayer(spectrum: UUID, frame: Int, outcome: SpectrumFrameOutcome?) {
+        guard SpectrumContinuityTrace.ownerCapturing else { return }
+        let key = Key(spectrum: spectrum, frame: frame)
+        let reason: Int64
+        if frame != currentFrame { reason = 1 }
+        else if epoch != session?.epoch || revision != session?.revision { reason = 2 }
+        else if needsSourceValidation.contains(key), case .ready(_, .some)? = retained[key]?.outcome { reason = 3 }
+        else if completed[key] == .budgetFailure { reason = 4 }
+        else if outcome != nil { reason = 5 }
+        else if let p = pending[key] { reason = p.cancelled ? 6 : 7 }
+        else if !desired.contains(key) { reason = 8 }
+        else if completed[key] == .settled { reason = 9 }
+        else if completed[key] == .needsCurrentImage { reason = 10 }
+        else { reason = 11 } // desired, awaiting admission
+        let p = pending[key]
+        SpectrumContinuityTrace.record(102, SpectrumContinuityTrace.tick, Int64(frame), Int64(spectrum.hashValue),
+            Int64(serial), reason, p?.traceCaptureID == SpectrumContinuityTrace.ownerCaptureID ? (p?.traceRequest ?? 0) : 0,
+            outcome.map(SpectrumContinuityTrace.outcome) ?? 0, Int64(pending.count))
+    }
+    #endif
 }
 
 extension ProjectStore {
@@ -402,6 +467,20 @@ extension ProjectStore {
               !view.hasPendingSpectrumSeek, let item = player.currentItem else {
             #if DEBUG
             SpectrumContinuityTrace.record(21, SpectrumContinuityTrace.tick, 1, isPlaying ? 1 : 0, Int64(generation), Int64(appliedGeneration))
+            if SpectrumContinuityTrace.ownerCapturing {
+                let reason: Int64
+                if !isPlaying { reason = 1 }
+                else if player.rate == 0 { reason = 2 }
+                else if previewHost == nil { reason = 3 }
+                else if previewHost?.window == nil { reason = 4 }
+                else if gestureBase != nil { reason = 5 }
+                else if previewHost?.isShowingStill == true { reason = 6 }
+                else if appliedGeneration != generation { reason = 7 }
+                else if previewHost?.hasPendingSpectrumSeek == true { reason = 8 }
+                else { reason = 9 }
+                SpectrumContinuityTrace.record(103, SpectrumContinuityTrace.tick, reason, Int64(seekToken),
+                    Int64(projectSession), SpectrumContinuityTrace.id(player.currentItem), SpectrumContinuityTrace.id(playback.timing.item))
+            }
             #endif
             if let view = previewHost, view.window != nil, view.spectrumOverlay.store === self,
                let item = player.currentItem, playback.timing.item === item {
@@ -434,7 +513,7 @@ extension ProjectStore {
                 frame = SpectrumPlaybackTiming.audioIntervalFrame(at: fallbackTime, timeline: timeline, validatedImageAccess: hasImages)
             }
             let fallbackFrame = SpectrumPlaybackTiming.frame(fallbackTime, duration: timeline.durationFrames)
-            if SpectrumContinuityTrace.active, fallbackFrame == nil || [0, 1, 2, 118, 119, 120, 121, 122, 238, 239, 240, 241, 242, 358, 359, 360].contains(fallbackFrame!) {
+            if SpectrumContinuityTrace.active, SpectrumContinuityTrace.ownerCapturing || fallbackFrame == nil || [0, 1, 2, 118, 119, 120, 121, 122, 238, 239, 240, 241, 242, 358, 359, 360].contains(fallbackFrame!) {
                 let covered = fallbackFrame.map { f in timeline.clips.contains { $0.start <= f && f < $0.end } } ?? false
                 SpectrumContinuityTrace.record(24, SpectrumContinuityTrace.tick,
                     fallbackTime.isNumeric ? Int64(fallbackTime.seconds * 1_000_000) : -1,
