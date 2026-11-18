@@ -10,7 +10,7 @@ final class SpectrumWindowObservation {
     deinit { NotificationCenter.default.removeObserver(token) }
 }
 
-/// One confirmed paused seek, never a playback clock. All presentation is main-actor only.
+/// One confirmed paused frame, from an exact seek or a natural item end.
 @MainActor
 final class PausedSpectrumOverlay {
     weak var view: PlayerNSView?
@@ -18,6 +18,7 @@ final class PausedSpectrumOverlay {
     private(set) var confirmedFrame: Int?
     private var confirmedToken: Int?
     private weak var confirmedItem: AVPlayerItem?
+    private var presentingNaturalEnd = false
     private var serial = 0 // view/request lifetime, not another project session
     private var tickets: [SpectrumFrameTicket] = []
     private var styleRequestsRemaining = 0
@@ -140,6 +141,14 @@ final class PausedSpectrumOverlay {
     }
 
     func invalidate(forgetFrame: Bool = false) {
+        if forgetFrame || presentingNaturalEnd {
+            confirmedFrame = nil; confirmedToken = nil; confirmedItem = nil
+            presentingNaturalEnd = false
+        }
+        clearPresentation()
+    }
+
+    private func clearPresentation() {
         serial &+= 1
         styleRequestsRemaining = 0
         pendingStyleRefresh = false
@@ -149,12 +158,31 @@ final class PausedSpectrumOverlay {
         view?.spectrumCanvas.sublayers = nil
         layers = [:]
         CATransaction.commit()
-        if forgetFrame { confirmedFrame = nil; confirmedToken = nil; confirmedItem = nil }
+    }
+
+    func discardNaturalEnd() {
+        if presentingNaturalEnd { invalidate(forgetFrame: true) }
+    }
+
+    func naturalPlaybackEnded(item: AVPlayerItem) {
+        guard let store, let view, store.previewHost === view, view.window != nil,
+              !view.hasPendingSpectrumSeek, !store.isPlaying, !store.relinkInProgress,
+              store.appliedGeneration == store.generation, store.player.currentItem === item,
+              item.status == .readyToPlay, store.playhead == store.timeline.durationFrames,
+              store.playhead > 0 else { return }
+        let frame = store.playhead - 1
+        guard store.timeline.spectra.contains(where: { $0.visible(atFrame: frame) }) else { return }
+        presentingNaturalEnd = true
+        confirmedFrame = frame; confirmedToken = store.seekToken; confirmedItem = item
+        refresh()
     }
 
     func seekFinished(token: Int, frame: Int, finished: Bool) {
         guard let store, token == store.seekToken, finished, !store.isPlaying,
               store.appliedGeneration == store.generation, let item = store.player.currentItem else { return }
+        // Image reconstruction can seek the AV item to its last sample while the
+        // UI stays at the exclusive endpoint. Only natural completion gets that view.
+        guard store.playhead != store.timeline.durationFrames || frame == store.playhead else { return }
         confirmedFrame = frame; confirmedToken = token; confirmedItem = item
         refresh()
     }
@@ -174,7 +202,7 @@ final class PausedSpectrumOverlay {
             serial &+= 1
             if let store { tickets.forEach { store.spectrumPreview.cancel($0) } }
             tickets = []
-        } else { invalidate() }
+        } else { clearPresentation() }
         guard let store, let view, view.window != nil, store.previewHost === view,
               !store.isPlaying, store.gestureBase == nil, !view.isShowingStill, store.appliedGeneration == store.generation,
               let frame = confirmedFrame, let token = confirmedToken, token == store.seekToken,
@@ -215,6 +243,11 @@ final class PausedSpectrumOverlay {
                           currentStore.spectrumPreview.epoch == epoch, currentStore.spectrumPreview.revision == revision else { return }
                     var accepted = outcome
                     if case .ready(_, .some) = outcome {
+                        if self.presentingNaturalEnd, let item,
+                           !(await currentStore.imageAccessAtNaturalEnd(for: item)) {
+                            if self.serial == generation { self.discardNaturalEnd() }
+                            return
+                        }
                         if let mediaID = currentStore.timeline.spectrumMediaID(entry), let asset = currentStore.mediaByID[mediaID] {
                             // Cached analysis does not prove the file is still present/unchanged.
                             // Metadata checks stay off the main actor; scope ownership stays in ProjectStore.

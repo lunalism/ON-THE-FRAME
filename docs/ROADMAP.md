@@ -2,6 +2,8 @@
 
 ## 현행 기능과 검증 경계
 
+**2026-11-18 · Spectrum 재생 전환.** 소유자 실기에서 지속 재생의 오디오 반응과 자연 종료 후 끝 위치·최종 정지 Spectrum 복원은 **PASS**, 시작 깜박임과 자연 종료 깜박임은 각각 **FAIL**이었다. 수동 끝점 Seek는 당시 요청 프레임과 화면 결과가 확인되지 않아 별도 미해결이다. [종료 표시 결정과 소유자 확인](DECISIONS.md#2026-11-18-spectrum-자연-재생-종료)
+
 **2026-11-18 · SPECTRUM-FX-02C.** FX 브랜치에서 색조 보간을 정수 입력·직접 scrubbing·Preview·Undo와 연결했다. Spectrum은 Format 11 appearance v2로 저장하며 v1과 Format 10은 Hue 0으로 연다. 서명 Debug 빌드와 집중 자동 검증이 통과했다. 소유자 실기에서는 180° 직접 입력과 주파수축 색 변화, 두 원색 유지, 360° 스크러빙과 Undo/Redo, Format 11 저장·재열기가 **PASS**였다. [색조 보간 결정](DECISIONS.md#2026-11-18-spectrum-fx-02c-정적-색조-보간)
 
 **2026-11-18 · SPECTRUM-FX-02B-CLOSE-02 이력.** Inside/Outside Color와 Format 11 appearance v1 구현을 완료했다. 소유자는 호환성 정정 이전의 서명된 Debug 앱에서 두 색의 독립 편집, Preview 그라데이션, 두 색의 Undo/Redo, 저장 후 두 색과 그라데이션 복원을 확인했다(핵심 6/6 PASS). 후속 COMPAT-01에서 Format 8의 금지된 색상 필드가 UTF-16에서 열리던 문제를 정정했다. 당시 최종 코덱 검사 19개와 별도 엔진 회귀 11개가 통과했다. 정정본의 물리 수락은 미검증이다. [수락 범위와 호환성 검증 이력](DECISIONS.md#2026-11-18-spectrum-fx-02b-close-02-핵심-수락과-호환성-정정)

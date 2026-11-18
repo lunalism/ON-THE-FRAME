@@ -28,7 +28,9 @@ final class ProjectStore {
     @ObservationIgnored private(set) var projectSession = 0
     /// 진행 중인 재연결 확인의 표식(CP-04, 아래 relinkMedia(_:to:) 설명)
     private(set) var pendingImageRelinkID: UUID?
-    @ObservationIgnored fileprivate var relinkOp: UUID?
+    @ObservationIgnored fileprivate var relinkOp: UUID? {
+        didSet { if relinkOp != nil { previewHost?.spectrumOverlay.discardNaturalEnd() } }
+    }
     /// 마지막으로 저장하거나 연 상태. 지금 상태와 다르면 저장하지 않은 변경이 있다(실행 취소로 돌아오면 사라짐).
     var savedTimeline = Timeline()
     var isDirty: Bool { history.timeline != savedTimeline }
@@ -227,7 +229,12 @@ final class ProjectStore {
     let player = AVPlayer()
     /// 프리뷰 재구성 세대. 편집마다 1 늘고, 마지막 세대의 결과만 적용한다.
     private(set) var generation = 0 {
-        didSet { if generation != oldValue { invalidateImagePlaybackReconstruction() } }
+        didSet {
+            if generation != oldValue {
+                invalidateImagePlaybackReconstruction()
+                previewHost?.spectrumOverlay.discardNaturalEnd()
+            }
+        }
     }
     /// 프리뷰에 적용된 세대(재구성·탐색까지 끝난 것)
     private(set) var appliedGeneration = 0
@@ -240,6 +247,7 @@ final class ProjectStore {
     private(set) var currentPlan: PlannedComposition?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
+    private var endObservationSerial = 0
     private var sleepAssertion: IOPMAssertionID = 0
     /// 드래그 시작 시점의 타임라인(트림·이동 미리 보기 계산 기준)
     private(set) var gestureBase: Timeline?
@@ -2312,9 +2320,9 @@ final class ProjectStore {
                 #if DEBUG
                 self.itemReplacements += 1
                 #endif
-                self.observeEnd(item)
                 self.seekToken &+= 1
                 let seekToken = self.seekToken, frame = self.playhead
+                if self.isPlaying { self.observeEnd(item, allowEndPreview: frame < snap.durationFrames) }
                 let finishSeek: @MainActor (Bool) -> Void = { [weak host = self.previewHost] finished in
                     host?.subtitleSeekFinished(token: seekToken, frame: frame, finished: finished)
                 }
@@ -2406,7 +2414,6 @@ final class ProjectStore {
                     }
                 }
                 self.previewHost?.setSubtitles(snap.renderedSubtitles,durationFrames:snap.durationFrames,fps:Double(s.fps),item:item)
-                self.observeEnd(item)
                 self.seekToken &+= 1
                 let token=self.seekToken,frame=min(self.playhead,max(0,snap.durationFrames-1))
                 rebuilding.seekToken = token
@@ -2439,15 +2446,39 @@ final class ProjectStore {
         }
     }
 
-    private func observeEnd(_ item: AVPlayerItem) {
+    /// Observe this playback run and seek. A queued notification from an earlier
+    /// run on the same AVPlayerItem must not authorize its last Spectrum frame.
+    private func observeEnd(_ item: AVPlayerItem, allowEndPreview: Bool) {
         if let o = endObserver { NotificationCenter.default.removeObserver(o) }
+        endObservationSerial &+= 1
+        let serial = endObservationSerial, token = seekToken, session = projectSession
         endObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main) { [weak self, weak item] _ in
             MainActor.assumeIsolated {
-                guard let self, let item, self.player.currentItem === item else { return }
+                guard let self, let item, self.isPlaying, self.player.currentItem === item,
+                      self.endObservationSerial == serial, self.seekToken == token, self.projectSession == session else { return }
+                let position = item.currentTime(), itemEnd = item.duration
+                if self.player.rate != 0, position.isNumeric, itemEnd.isNumeric, position < itemEnd { return }
+                let end = self.timeline.durationFrames
                 self.setPlaying(false)
-                self.playhead = self.timeline.durationFrames
+                self.playhead = end
+                // Transport still stops normally for a shorter/unsupported composition.
+                // Only an item that finished at the exact project boundary can authorize a raster.
+                if allowEndPreview, position == self.settings.time(end), itemEnd == self.settings.time(end) {
+                    self.previewHost?.spectrumOverlay.naturalPlaybackEnded(item: item)
+                }
             }
         }
+    }
+
+    /// Reuse the bounded live access worker for image compositions. A short play
+    /// may finish while its first check is still pending. Its eventual grant applies
+    /// only to the same installation. Audio identity is checked again by the overlay.
+    func imageAccessAtNaturalEnd(for item: AVPlayerItem) async -> Bool {
+        guard currentPlan?.isImagePreviewOnly == true else { return true }
+        if imagePlaybackAccessIsCurrent(for: item) { return true }
+        await imagePlaybackAccessTask?.value
+        return imagePreviewEligibility(for: item, session: projectSession, generation: generation) == .validatedAtInstallation
+            && imagePlaybackAccessNow < imagePlaybackAccessUntil
     }
 
     func togglePlay() { playbackRequested ? pause() : play() }
@@ -2474,6 +2505,7 @@ final class ProjectStore {
     }
     private func startPlayback() {
         if playhead >= timeline.durationFrames { seek(to: 0) }
+        if let item = player.currentItem { observeEnd(item, allowEndPreview: true) }
         player.play(); setPlaying(true)
     }
     func pause() {
@@ -2481,6 +2513,7 @@ final class ProjectStore {
         SpectrumContinuityTrace.record(61, Int64(playhead), Int64(projectSession), Int64(generation))
         #endif
         let wasPlaying = isPlaying
+        previewHost?.spectrumOverlay.discardNaturalEnd()
         let awaitingImage = imagePlaybackReconstruction != nil
         pendingImagePlay = nil
         player.pause(); setPlaying(false)
@@ -2509,6 +2542,9 @@ final class ProjectStore {
         // 그 프레임과 아직 끝나지 않은 탐색의 프레임에 보이는 자막 그림을 놓지 않는다. 재생 헤드를 바꾸기 전에 알린다(재생 헤드 didSet이 창을 맞춘다).
         seekToken &+= 1
         let token = seekToken
+        if isPlaying, let item = player.currentItem {
+            observeEnd(item, allowEndPreview: f < timeline.durationFrames)
+        }
         let host = previewHost
         // The host retires frame approval and output before the exact seek.
         // A hostless seek still fences playback.
