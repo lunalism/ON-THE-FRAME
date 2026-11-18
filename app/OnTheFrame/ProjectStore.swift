@@ -1012,6 +1012,7 @@ final class ProjectStore {
         allowed.maxHeightMilli = style.maxHeightMilli
         allowed.thicknessMilli = style.thicknessMilli; allowed.sides = style.sides; allowed.mode = style.mode
         allowed.red = style.red; allowed.green = style.green; allowed.blue = style.blue
+        allowed.outsideRGB = style.outsideRGB
         allowed.reactionPercent = style.reactionPercent
         allowed.lowHz = style.lowHz; allowed.highHz = style.highHz; allowed.bands = style.bands
         allowed.windowMs = style.windowMs; allowed.offsetMs = style.offsetMs
@@ -1026,6 +1027,33 @@ final class ProjectStore {
     struct SpectrumLiveSession {
         let id: UUID, project: Int, revision: Int, kind: String, base: Timeline
         var scrubToken: UUID? = nil
+        var colorToken: UUID? = nil
+    }
+    @ObservationIgnored let spectrumColorEditing = SpectrumColorEditing()
+    @discardableResult
+    func beginSpectrumColorEdit(_ token: UUID, target: SpectrumColorTarget, id: UUID,
+                                project: Int, revision: Int, expectedGeneration: Int) -> Bool {
+        guard project == projectSession, revision == spectrumSelectionRevision,
+              expectedGeneration == generation, selection == id, timeline.spectrum(id) != nil,
+              spectrumNumericEditingAvailable else { return false }
+        commitInlineEditIfAny(); pauseForEdit()
+        guard project == projectSession, revision == spectrumSelectionRevision,
+              selection == id, timeline.spectrum(id) != nil, spectrumNumericEditingAvailable else { return false }
+        spectrumColorEditing.begin(self, token: token, target: target, id: id)
+        return true
+    }
+    @discardableResult
+    func cancelSpectrumColorEdit(_ token: UUID) -> Bool {
+        guard spectrumLiveSession?.colorToken == token, let owned = spectrumColorEditing.state,
+              owned.token == token else { return false }
+        let current = spectrumColorEditing.isCurrent(self, token: token)
+        spectrumColorEditing.retire(); spectrumColorEventRevision &+= 1; spectrumLiveSession = nil
+        guard current else { return false }
+        if timeline != owned.base {
+            history.replaceWithoutUndo(owned.base)
+            publishSpectrumStylePreview(analysisChanged: false)
+        }
+        return true
     }
     private struct SpectrumNumericScrub {
         let token: UUID, id: UUID, project: UUID
@@ -1099,9 +1127,13 @@ final class ProjectStore {
     @ObservationIgnored var spectrumColorFocusObserver: NSObjectProtocol?
     func finishSpectrumLiveSession() {
         spectrumNumericScrub = nil
+        let currentColor: Bool
+        if let token = spectrumLiveSession?.colorToken { currentColor = spectrumColorEditing.isCurrent(self, token: token) }
+        else { currentColor = true }
+        spectrumColorEditing.retire()
         guard let session = spectrumLiveSession else { return }
         spectrumLiveSession = nil
-        guard session.project == projectSession else { return }
+        guard session.project == projectSession, currentColor else { return }
         let final = timeline
         history.replaceWithoutUndo(session.base)
         history.apply(final, focus: session.id)
@@ -1110,6 +1142,10 @@ final class ProjectStore {
     @discardableResult
     func updateSpectrumLiveStyle(_ id: UUID, style: SpectrumItemStyle, project: Int,
                                  revision: Int, expectedGeneration: Int, kind: String) -> Bool {
+        if kind == "native-color" {
+            guard let token = spectrumLiveSession?.colorToken,
+                  spectrumColorEditing.isCurrent(self, token: token) else { return false }
+        }
         if kind == "numeric-scrub" {
             guard let scrub = spectrumNumericScrub, scrub.id == id, scrub.session == project,
                   scrub.revision == revision, scrub.generation == expectedGeneration else { return false }
@@ -1125,6 +1161,7 @@ final class ProjectStore {
         allowed.maxHeightMilli = style.maxHeightMilli; allowed.thicknessMilli = style.thicknessMilli
         allowed.sides = style.sides; allowed.mode = style.mode
         allowed.red = style.red; allowed.green = style.green; allowed.blue = style.blue
+        allowed.outsideRGB = style.outsideRGB
         allowed.reactionPercent = style.reactionPercent
         allowed.lowHz = style.lowHz; allowed.highHz = style.highHz; allowed.bands = style.bands
         allowed.windowMs = style.windowMs; allowed.offsetMs = style.offsetMs
@@ -2864,6 +2901,7 @@ extension ProjectStore {
         return true
     }
     func stopAllScopes() {
+        spectrumColorEditing.retire()
         invalidateImageEligibility(.cancelled)
         imagePreviewTask?.cancel()
         // Old cancelled work may retain its own bounded cache until it drains;

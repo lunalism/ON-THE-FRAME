@@ -1,10 +1,10 @@
 import Foundation
 import Darwin
 
-/// Application persistence boundary: legacy 1–8, images 9, Spectrum reaction 10.
+/// Application persistence: legacy 1–8, images 9, Spectrum reaction 10, appearance 11.
 /// Version admission does not enable rendering or public export.
 public enum ProjectPersistence {
-    public static let currentVersion = 10
+    public static let currentVersion = ProjectFile.currentVersion
     public enum Failure: Error, CustomStringConvertible {
         case futureVersion(Int), invalid(String), sourceChanged(UUID), beforeCommit(String)
         public var description: String {
@@ -30,7 +30,7 @@ public enum ProjectPersistence {
         public let version: Int
         fileprivate init(state: OperationalProjectAdapter.State, version: Int? = nil) {
             self.state = state
-            self.version = version ?? (!state.timeline.spectra.isEmpty ? 10 : (state.timeline.stillImageIDs.isEmpty ? ProjectFile.version(for:state.timeline) : 9))
+            self.version = version ?? (!state.timeline.spectra.isEmpty ? ProjectFile.appearanceVersion : (state.timeline.stillImageIDs.isEmpty ? ProjectFile.version(for:state.timeline) : 9))
         }
         public var timeline: Timeline { state.timeline }
         public var projectID: UUID { state.projectID }

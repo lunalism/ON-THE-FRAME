@@ -219,7 +219,7 @@ final class SpectrumModelTests: XCTestCase {
         XCTAssertEqual(t.spectrumSourceState(s), .ok); XCTAssertEqual(t.spectrumExportBlockers(), [])
         XCTAssertEqual(try t1.addingSpectrum(fromAudioClip: r, newLaneName: "SP").spectra[0].sourceKey, w, "조각에서 만들어도 같은 소스")
         let (back, doc) = try ProjectFile.decode(try ProjectFile.encode(t, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil))
-        XCTAssertEqual(doc.version, 10); XCTAssertEqual(back, t)
+        XCTAssertEqual(doc.version, 11); XCTAssertEqual(back, t)
         let bs = back.spectrum(s.id)!
         XCTAssertEqual(bs.sourceKey, w); XCTAssertEqual(back.spectrumSourceState(bs), .ok)
         XCTAssertEqual(back.spectrumSource(key: w)!.pieces.map(\.id), [l, r])
@@ -258,7 +258,7 @@ final class SpectrumModelTests: XCTestCase {
         let data = try ProjectFile.encode(edited, projectID: id, settings: .m1, bookmarks: [:], projectURL: nil)
         let restored = try ProjectFile.decode(data)
         XCTAssertEqual(restored.timeline, edited)
-        XCTAssertEqual(restored.document.version, 10)
+        XCTAssertEqual(restored.document.version, 11)
         XCTAssertEqual(try ProjectFile.encode(restored.timeline, projectID: id, settings: .m1,
                                              bookmarks: [:], projectURL: nil), data)
     }
@@ -291,7 +291,7 @@ final class SpectrumModelTests: XCTestCase {
                     let data = try ProjectFile.encode(edited, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)
                     let restored = try ProjectFile.decode(data)
                     XCTAssertEqual(restored.timeline, edited)
-                    XCTAssertEqual(restored.document.version, 10)
+                    XCTAssertEqual(restored.document.version, 11)
                 }
             }
         }
@@ -407,7 +407,7 @@ final class SpectrumModelTests: XCTestCase {
             let project = try ProjectPersistence.make(timeline: timeline, projectID: UUID())
             _ = try ProjectPersistence.write(project, to: url)
             let reopened = try ProjectPersistence.decode(Data(contentsOf: url))
-            XCTAssertEqual(reopened.version, 10)
+            XCTAssertEqual(reopened.version, 11)
             XCTAssertEqual(reopened.timeline.lanes, timeline.lanes)
             XCTAssertEqual(reopened.timeline.spectra, timeline.spectra)
             XCTAssertEqual(reopened.timeline.clips, timeline.clips)
@@ -628,10 +628,10 @@ final class SpectrumModelTests: XCTestCase {
         XCTAssertTrue(split.audioClips.filter { $0.mediaID == wav.id }.allSatisfy { $0.lineageKey == w })
         var style = SpectrumItemStyle.provisionalDefault; style.mode = .analog; style.sides = .above; style.bands = 48; style.offsetMs = -20
         let withSpec = try split.addingSpectrum(lane: sl, at: 5, length: 70, sourceKey: w, style: style)
-        XCTAssertEqual(ProjectFile.version(for: withSpec), 10)
+        XCTAssertEqual(ProjectFile.version(for: withSpec), 11)
         let d1 = try ProjectFile.encode(withSpec, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)
         let r1 = try ProjectFile.decode(d1)
-        XCTAssertEqual(r1.document.version, 10); XCTAssertEqual(r1.timeline, withSpec)
+        XCTAssertEqual(r1.document.version, 11); XCTAssertEqual(r1.timeline, withSpec)
         // 스펙트럼 레인만(스펙트럼 0개)도 형식 8
         XCTAssertEqual(ProjectFile.version(for: t1), 8)
         // 스펙트럼 레인을 지워도 계보가 남아 있으면 형식 8 그대로(버리지 않음), 왕복 같음
@@ -654,7 +654,7 @@ final class SpectrumModelTests: XCTestCase {
             var a = j["audioClips"] as! [[String: Any]]; a[0]["origin"] = UUID().uuidString; j["audioClips"] = a
         }
         XCTAssertThrowsError(try ProjectFile.decode(injected)) { e in guard case .invalid = e as? ProjectFile.LoadError else { return XCTFail("\(e)") } }
-        XCTAssertThrowsError(try ProjectFile.decode(mutated(d1) { $0["version"] = 11 })) { XCTAssertEqual($0 as? ProjectFile.LoadError, .newerVersion(11)) }
+        XCTAssertThrowsError(try ProjectFile.decode(mutated(d1) { $0["version"] = 12 })) { XCTAssertEqual($0 as? ProjectFile.LoadError, .newerVersion(12)) }
         // 형식 8 안의 잘못된 값: 스펙트럼 모양, 영상 클립 계보, 스펙트럼이 다른 종류 레인에
         XCTAssertThrowsError(try ProjectFile.decode(mutated(d1) { j in
             var s = j["spectra"] as! [[String: Any]]; var st = s[0]["style"] as! [String: Any]; st["thicknessMilli"] = 0; s[0]["style"] = st; j["spectra"] = s
@@ -688,5 +688,62 @@ final class SpectrumModelTests: XCTestCase {
         private let l = NSLock(); private var u: URL?
         func set(_ x: URL) { l.lock(); u = x; l.unlock() }
         func get() -> URL? { l.lock(); defer { l.unlock() }; return u }
+    }
+}
+
+extension SpectrumModelTests {
+    func testOutsideRGBFallbackAndStandaloneCodablePreserveLegacyValues() throws {
+        var style = SpectrumItemStyle.provisionalDefault
+        style.red = 12; style.green = 34; style.blue = 56; style.alpha = 173
+        style.thicknessMilli = 3125; style.startXMilli = 320123
+        style.reactionPercent = 150; style.windowMs = 300; style.offsetMs = -500
+        XCTAssertNil(style.outsideRGB)
+        XCTAssertEqual(style.resolvedOutsideRGB, .init(red: 12, green: 34, blue: 56))
+        let bytes = try JSONEncoder().encode(style)
+        let decoded = try JSONDecoder().decode(SpectrumItemStyle.self, from: bytes)
+        XCTAssertEqual(decoded, style)
+        XCTAssertNil(decoded.outsideRGB, "Equal saved colors canonicalize to the legacy programmatic fallback")
+        var programmatic = decoded; programmatic.red = 91
+        XCTAssertEqual(programmatic.resolvedOutsideRGB, programmatic.insideRGB)
+        var explicit = style; explicit.outsideRGB = explicit.insideRGB
+        XCTAssertEqual(explicit, style, "Backing representation must not create a dirty/Undo difference")
+        explicit.red = 91
+        XCTAssertEqual(explicit.resolvedOutsideRGB, .init(red: 12, green: 34, blue: 56), "Explicit Outside remains independent")
+        XCTAssertNotEqual(explicit, programmatic)
+        XCTAssertEqual(explicit.alpha, 173)
+        XCTAssertEqual(explicit.analysisSettings, style.analysisSettings)
+        var legacy = try JSONSerialization.jsonObject(with: bytes) as! [String:Any]
+        legacy.removeValue(forKey: "appearance")
+        let old = try JSONDecoder().decode(SpectrumItemStyle.self, from: JSONSerialization.data(withJSONObject: legacy))
+        XCTAssertEqual(old, style)
+        for outside in [SpectrumItemStyle.RGB(red: -1, green: 0, blue: 0), .init(red: 256, green: 0, blue: 0),
+                        .init(red: Int.min, green: 0, blue: 0), .init(red: 0, green: Int.max, blue: 0)] {
+            var invalid = style; invalid.outsideRGB = outside
+            XCTAssertFalse(invalid.isValid)
+        }
+    }
+
+    func testOutsideColorHistoryNoOpAndFormat11KeepSourceAndAnalysis() throws {
+        let (base, audio, _) = try base(), (laned, lane) = try spectrumLane(base)
+        let timeline = try laned.addingSpectrum(lane: lane, at: 0, length: 100, sourceKey: audio)
+        let item = try XCTUnwrap(timeline.spectra.first)
+        var history = EditHistory(timeline), style = item.style
+        style.outsideRGB = style.insideRGB
+        history.apply(try timeline.settingSpectrumStyle(item.id, style), focus: item.id)
+        XCTAssertFalse(history.canUndo)
+        style.outsideRGB = .init(red: 0, green: 64, blue: 255)
+        let edited = try timeline.settingSpectrumStyle(item.id, style)
+        history.apply(edited, focus: item.id)
+        XCTAssertEqual(history.undoDepth, 1)
+        XCTAssertEqual(edited.audioClips, timeline.audioClips)
+        XCTAssertEqual(edited.spectrumPieces(edited.spectra[0]), timeline.spectrumPieces(item))
+        XCTAssertEqual(style.analysisSettings, item.style.analysisSettings)
+        history.undo(); XCTAssertEqual(history.timeline, timeline)
+        history.redo(); XCTAssertEqual(history.timeline, edited)
+        let bytes = try ProjectFile.encode(edited, projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)
+        let reopened = try ProjectFile.decode(bytes)
+        XCTAssertEqual(reopened.document.version, 11)
+        XCTAssertEqual(reopened.timeline, edited)
+        XCTAssertEqual(reopened.timeline.spectra[0].style.resolvedOutsideRGB, style.resolvedOutsideRGB)
     }
 }

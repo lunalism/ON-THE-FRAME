@@ -98,6 +98,70 @@ final class SpectrumInternalZeroTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
     }
 
+    /// Four bounded appearance configurations: 124 sequential prepared frames,
+    /// 20 Preview/internal-worker checkpoints. No encoded Export or full-parity claim.
+    func testTwoColorAppearanceMatchesActualInternalWorker() async throws {
+        let folder = ExportEndToEndTests.root.appendingPathComponent("spectrum-color-internal-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let (video, audio) = try await media(in: folder)
+        let spectrumLane = UUID(), subtitleLane = UUID(), id = UUID()
+        let clip = Clip(mediaID: audio.id, start: 0, sourceIn: 0, length: 360, lane: Lane.audioID)
+        let subtitles = (0..<3).map { SubtitleItem(lane: subtitleLane, start: $0 * 120, length: 120, text: "Color \($0)") }
+        let cases: [(SpectrumItemStyle.Mode, SpectrumItemStyle.Sides, Bool, Int)] = [
+            (.digital, .above, false, 400_000), (.digital, .mirrored, true, 400_000),
+            (.analog, .mirrored, true, 400_000), (.digital, .below, false, 0)
+        ]
+        let probes: Set<Int> = [0, 1, 15, 29, 30]
+        for (mode, sides, diagonal, height) in cases {
+            var style = SpectrumItemStyle.provisionalDefault
+            style.mode = mode; style.sides = sides; style.bands = 8; style.thicknessMilli = 6_000
+            style.startYMilli = 800_500; style.endYMilli = diagonal ? 300_500 : 800_500
+            style.maxHeightMilli = height; style.red = 255; style.green = 0; style.blue = 0; style.alpha = 160
+            style.outsideRGB = .init(red: 0, green: 32, blue: 255)
+            let spectrum = SpectrumItem(id: id, lane: spectrumLane, start: 0, length: 360, sourceKey: clip.lineageKey, style: style)
+            let timeline = Timeline(clips: [Clip(mediaID: video.id, start: 0, sourceIn: 0, length: 360, lane: Lane.videoID)],
+                audioClips: [clip], subtitles: subtitles, spectra: [spectrum],
+                lanes: [Lane(id: subtitleLane, kind: .subtitle, name: "S"), Lane(id: spectrumLane, kind: .spectrum, name: "SP")] + Lane.defaults,
+                media: [MediaRef(video), MediaRef(audio)], mediaFrames: [video.id: video.frameCount, audio.id: audio.frameCount],
+                mediaHasAudio: [video.id: video.hasAudio, audio.id: audio.hasAudio], durationFrames: 360)
+            XCTAssertTrue(timeline.isValid)
+            typealias Result = (bands: [Float], raster: SpectrumRenderedFrame?, bytes: Int)
+            let results = OSAllocatedUnfairLock(initialState: [Int: Result]())
+            var controls = SpectrumExportControls(stepTimeout: 10, jobTimeout: 120)
+            controls.prepared = { frame, bands, raster, bytes in
+                if probes.contains(frame) { results.withLock { $0[frame] = (bands, raster, bytes) } }
+            }
+            var worker: SpectrumExportFrames? = try SpectrumExportFrames(timeline: timeline, assets: [video, audio], controls: controls)
+            let preview = SpectrumFrameCoordinator(deliveryQueue: DispatchQueue(label: "test.color.internal.preview"))
+            preview.update(timeline: timeline, media: [video, audio])
+            for frame in 0...30 {
+                let footprint = try await worker!.prepare(frame)
+                guard probes.contains(frame) else { continue }
+                let outcome = await withCheckedContinuation { continuation in
+                    preview.request(spectrum: id, frame: frame, canvasWidth: 1920, canvasHeight: 1080) { continuation.resume(returning: $0) }
+                }
+                guard case let .ready(bands, actual?) = outcome else { return XCTFail("appearance Preview must be ready") }
+                let exported = try XCTUnwrap(results.withLock { $0[frame] })
+                let expected = try XCTUnwrap(exported.raster)
+                XCTAssertNotNil(footprint)
+                XCTAssertEqual(bands, exported.bands)
+                XCTAssertEqual(actual.drawRect, expected.drawRect)
+                XCTAssertEqual(SpectrumFrameRendererTests.bytes(actual.image), SpectrumFrameRendererTests.bytes(expected.image))
+                XCTAssertLessThanOrEqual(exported.bytes, 8 << 20)
+                XCTAssertLessThanOrEqual(actual.image.bytesPerRow * actual.image.height, 16 << 20)
+                if frame < 2 { XCTAssertTrue(bands.allSatisfy { $0 == 0 }) }
+            }
+            XCTAssertEqual(results.withLock { $0.count }, probes.count)
+            worker = nil; preview.resetProject()
+            XCTAssertTrue(SpectrumExportFrames.isIdleForTest)
+            let plan = try await CompositionPlanner.plan(timeline, media: [video.id: video, audio.id: audio])
+            let destination = folder.appendingPathComponent("public-gate-\(mode.rawValue)-\(sides.rawValue).mp4")
+            let outcome = await ExportService.export(plan, to: .fromSavePanel(destination), sources: [video, audio]) { _ in }
+            if case .failed = outcome {} else { XCTFail("Two-color appearance does not enable public Spectrum Export") }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        }
+    }
+
     /// Bounded frame production, not an encoded Export or a full parity claim.
     /// Reuse one generated 12s source pair; each worker still starts at frame zero
     /// and advances sequentially through at most frame 60.

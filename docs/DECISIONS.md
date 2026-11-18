@@ -1106,3 +1106,33 @@
 - **이전에 실행한 자동 검증과 실패 이력:** 앞 절의 8개 앱/도구 묶음은 합계 **1230 PASS/0 FAIL/0 SKIP**였다. 선택 엔진 suite의 최초 실행은 **98 PASS/1 FAIL/0 SKIP**였고, 실패는 독립 Spectrum이 가로지르는 경계에서 ripple trim을 시도한 새 테스트 fixture의 안전 규칙 위반이었다. 제품 코드나 timing 기대값을 바꾸지 않고 fixture만 허용된 편집 순서로 정정한 뒤 **해당 1개만 재실행해 1 PASS/0 FAIL/0 SKIP**를 확인했다. 나머지 98개와 합쳐 서로 다른 **99개 엔진 테스트의 최신 개별 결과가 PASS**이며, 정정 후 전체 suite를 재실행한 것은 아니다. 최초 실패와 정정 증거를 보존한다. 이 수치는 이전 구현 작업의 실행 기록이며 CLOSE-01에서 재실행한 결과가 아니다.
 - **Preview·내부 Export·빌드 증거 경계:** 이전 Seek 캡처 **18/18**, authoritative style raster **66/66 일치**, 새 timing의 실제 내부 worker **4설정·순차 154프레임·18개 비교 지점 일치**를 유지한다. 이는 제한된 프레임/래스터 비교이며 전체 Preview/internal Export parity 수락이 아니다. 별도 출력의 Debug 제품 빌드는 **첫 시도 1회에 성공**했고 서명과 source fingerprint를 확인했다. 앞 절의 자원 관측·compiler 경고·전체 로그와 fixture 정정은 app/selftest-work/spectrum-fx01c-20261118-01/에 보존한다. helper·합성 native 입력·내부 설치 레이어의 관측을 소유자 물리 입력이나 화면 scan-out/FPS로 바꾸어 쓰지 않는다.
 - **보존 계약과 남은 문제:** window 1–1000ms, offset −10000–10000ms, 기존 centered window·표본 반올림, 양수는 뒤/음수는 앞의 소리 선택, clip/source 밖 zero-fill과 보수적 overlap 거부를 유지한다. clip trim/split/move·계보·gain/fade/mute, 정수 UI·기존 scrub/Undo 구조, 분석 revision·stale 결과 거절·bounded cache와 FX-01B 편집을 유지했다. FFT·renderer·Format 10 schema·migration 변경과 공개 Spectrum Export 활성화는 없다. 기존 Native Inspector **7 FAIL/4 SKIP**, 내부 Undo/Redo Seek 지연 조사, image gate-off 재연결 UI 문제는 **OPEN**이다. 장시간·다른 하드웨어·전체 parity는 미검증이다. **SPECTRUM-UX-02는 planned v1.1 deferred WIP·미수락**으로 유지하며 이 체크포인트에 포함하지 않는다. **SPECTRUM-FX-02는 다음 개발 단계 제안이며 미승인·미구현**이다. 설계나 구현 착수는 별도 소유자 검토·승인 후 진행한다.
+
+
+### 2026-11-18 SPECTRUM-FX-02B 안쪽과 바깥쪽 색상
+
+- **소유자 승인 R-FX02:** FX-02 범위는 Inside/Outside Color, Hue Interpolation, Softness 세 효과다. 이번 B 단계는 두 색과 Format 11 appearance 계약 v1이다. Hue Interpolation과 Softness 구현은 후속 승인 단계로 남긴다. UX-02는 planned v1.1 유보 WIP이며 공개 Spectrum Export는 비활성이다.
+- **색상 계약:** Inside는 기준선, Outside는 Maximum Height의 색이다. 캔버스 좌표에서 기준선에 수직인 절대 거리로 진행하며 기존 sRGB 색을 선형광 RGB로 보간한다. 짧은 막대는 중간 색까지 나타날 수 있다. Digital 막대·유효 0높이 원과 Analog 연결선 기하를 재사용한다. 대각선·양쪽 방향에도 같은 색장을 쓰며 높이 0은 Inside를 사용한다. 공통 alpha와 premultiplied BGRA를 유지한다.
+- **저장 계약:** 실제 Spectrum 항목을 저장하는 원시·이미지 인식 경로는 Format 11을 사용한다. 기존 RGB는 Inside이며 `appearance` 객체의 `contractVersion: 1`과 `outsideRGB`가 Outside를 기록한다. 새 reader는 레거시 항목의 저장 RGB를 양쪽 색으로 복원한다. 같은 색은 기존 단색 raster 경로를 쓴다. Raw `ProjectFile`은 1–8, 10–11의 지원 페이로드를 읽고 Format 9와 이미지 포함 페이로드는 거절한다. 이미지 인식 경로는 1–11을 지원한다. Format 11에서 appearance 누락·잘못된 값·미지원 계약 버전·알 수 없는 중첩 키를 거절한다. 구형 형식에 새 appearance를 끼워 넣는 파일도 거절한다. Format 10의 reaction, 주파수·시간 의미와 미디어 참조·bookmark를 유지한다. 실제 Spectrum이 없는 프로젝트는 기존 형식 선택을 사용한다.
+- **편집 계약:** 기존 sRGB 변환과 8비트 양자화를 두 색에 적용한다. 공통 alpha를 보존하며 각 네이티브 색상 컨트롤은 지정된 대상과 세션만 갱신한다. 패널 닫힘과 포커스 상실 시 확정하고, Escape는 소유권을 확인할 수 있는 세션만 취소한다. Undo와 저장은 기존 편집 수명 주기를 사용한다. 두 색은 표시 속성이므로 기존 coalescing과 raster 갱신 경로를 사용하고 분석 설정과 PCM/FFT 캐시 키는 유지한다.
+- **앱 자동 검증:** 서명된 Debug에서 실제 Gate 17 WAV와 IMG_1749.jpg 검증 182 PASS, 설치된 Preview 레이어·캐시 검증 200 PASS, 네이티브 색상 컨트롤 최종 검증 63 PASS였다. 수치 스크럽 443, 주파수·타이밍 Inspector 95, 이미지 재생 요청 130, 재생 146, overlay 61 PASS였다. 각 최종 실행은 0 FAIL/0 SKIP이다. 초기 네이티브 검사 두 건의 시간 초과는 panel key 전환과 Inspector 재장착을 기다리는 검사 코드의 수정 후 해소됐다. Seek 캡처 18/18, raster 대조 66/66이 일치했다.
+- **엔진 자동 검증:** 최초 선택 실행은 156 PASS/1 FAIL/0 SKIP이었다. 실패했던 새 Format 11 어댑터 검사가 저장 대상이 아닌 런타임 이미지 검증 상태까지 복원을 요구했다. 해당 기대값을 정정하고 두 raster 검사의 픽셀 데이터 수명 처리도 보완했다. 제품 코드는 그대로 둔 상태에서 수정된 범위를 재실행해 24 PASS/0 FAIL/0 SKIP을 확인했다. 두 실행에서 서로 다른 157개 엔진 테스트의 최신 개별 결과가 PASS다. 원본 로그와 정정 증거는 `app/selftest-work/spectrum-fx02b-20261118-01/`에 보존한다.
+- **호환성과 내부 Export 검증:** 실제 FX-01C reader는 Format 11 열기를 거절했다. 새 앱과 이전 빌드의 단색 raster 해시 및 그리기 영역은 Digital·Analog와 세 방향의 6개 조합에서 일치했다. 두 색을 쓴 합성 소스의 실제 내부 Export worker 4설정·124프레임에서 20개 비교 지점의 분석값·그리기 영역·raster 바이트가 Preview와 일치했다.
+- 구현 검증 종료 당시에는 두 색의 독립 편집과 Preview 그라데이션을 첫 수동 확인 항목으로 두었다. 이후 소유자가 확인한 범위는 [FX-02B 핵심 수락과 호환성 정정](#2026-11-18-spectrum-fx-02b-close-02-핵심-수락과-호환성-정정)에 기록했다.
+- **열린 제한:** 이전 Native Inspector 7 FAIL/4 SKIP, Undo/Redo Seek 설치 지연, 이미지 gate-off 재연결 UI를 계속 추적한다. 현재 Swift 5 모드의 Debug 빌드는 통과했고 네이티브 색상 컨트롤의 `NSEvent` 전달에 Swift 6 동시성 경고가 남아 있다. 전체 Preview/Export parity, 장시간·다른 하드웨어·화면 FPS는 미검증이다. 내부 설치와 helper의 파일 접근은 물리 화면 제시와 소유자 앱의 미디어 권한과 별도로 검증한다.
+
+### 2026-11-18 SPECTRUM-FX-02B-CLOSE-02 핵심 수락과 호환성 정정
+
+소유자는 COMPAT-01 수정 **이전의 서명된 FX-02B Debug 앱**을 실제 Mac에서 사용해 다음 여섯 항목을 모두 확인했다. 확인 중 추가 문제는 보고하지 않았다.
+
+1. 안쪽 색상을 바꿔도 바깥쪽 색상이 유지됐다.
+2. 바깥쪽 색상을 바꿔도 안쪽 색상이 유지됐다.
+3. Preview에서 기준선부터 설정한 Maximum Height 방향으로 두 색이 이어졌다.
+4. 두 색상 컨트롤에서 각각 Undo와 Redo가 동작했다.
+5. Format 11 프로젝트를 저장한 뒤 다시 열었을 때 두 색상 값이 유지됐다.
+6. 다시 연 프로젝트의 Preview에도 그라데이션이 유지됐다.
+
+CLOSE-01에서 이전 디코더가 동일한 Format 8 프로젝트의 금지된 `appearance`를 UTF-8에서는 거절하고 UTF-16에서는 받아들이는 것을 재현했다. Foundation은 두 인코딩을 읽었지만 원문 키 검사는 UTF-8을 가정했고, 레거시 변환이 해당 필드를 남겼다. COMPAT-01은 원본에서 파싱한 Spectrum 스타일에 Format 11 미만의 `appearance` 또는 Format 10 미만의 `reactionPercent`가 있으면 레거시 기본값을 넣기 전에 거절한다. BOM과 처음 바이트의 배열로 원문 인코딩을 판별해 중복 키와 숫자의 원래 표기도 검사한다. UTF-8과 UTF-16 모두 정상 Format 8 단색 프로젝트는 열리고 금지된 색상 필드는 거절된다. 기존 RGB·공통 alpha·milli 정밀도, Format 10 reaction, Format 11 appearance v1의 두 색을 보존한다.
+
+**COMPAT-01 자동 검증**의 최초 코덱 실행은 17 PASS / 1 FAIL이었다. 테스트는 BOM이 붙은 UTF-32LE 입력을 허용한다고 가정했으나 이 Mac의 Foundation과 이전 빌드는 헤더에서 거절했다. 이 조합을 Foundation의 실제 판정과 대조하도록 기대값을 정정했다. 최종 코덱 실행은 **19 PASS / 0 FAIL / 0 SKIP**, 별도로 실행한 관련 엔진 회귀는 **11 PASS / 0 FAIL / 0 SKIP**이었다. 지원 인코딩 조합 9개에서 정상 입력 54건을 열기·저장·재열기 했고, 금지 필드·중복·알 수 없는 키·잘못된 값 등을 포함한 입력 198건을 거절했다. 원본 로그는 `app/selftest-work/spectrum-fx02b-compat01-20261118-01/`에 있다. 앞 절의 FX-02B 자동 검사와 이 호환성 검사는 별도 실행이며 CLOSE-02에서는 기존 결과와 소스 지문을 대조했다.
+
+코덱 정정본은 엔진에서 검증했다. 이 정정본의 소유자 물리 시험, 색상 패널의 모든 Escape·포커스 전환, 모든 실제 레거시 프로젝트와 Digital·Analog 배치, 장시간·다른 하드웨어·화면 FPS·전체 Preview/Export 일치는 미검증이다. 공개 Spectrum Export는 비활성이며 UX-02는 계획된 v1.1로 유보한다. 다음 구현 제안은 FX-02C Hue Interpolation이고 이후 제안은 FX-02D Softness다. 에이전트 작업 절차 문서 점검과 정리는 별도 작업으로 계획한다.

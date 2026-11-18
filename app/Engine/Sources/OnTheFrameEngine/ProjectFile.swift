@@ -28,7 +28,9 @@ public enum ProjectFile {
     /// 그 값들은 형식 8에만 둔다). 이전 파일의 조각 사이 계보는 추측해 만들지 않는다(소유자 결정 2026-10-25).
     /// Format 10: actual Spectrum items persist an explicit reactionPercent.
     /// Empty Spectrum lanes / lineage retain format 8; images use the image-aware codec.
-    public static let currentVersion = 10
+    /// Format 11: actual Spectrum items also require appearance contract v1.
+    public static let currentVersion = 11
+    public static let appearanceVersion = 11
     public static let reactionVersion = 10
     public static let spectrumVersion = 8
     /// 켜진 자막 효과(외곽선·그림자·배경)가 있을 때의 형식(2026-10-23, D-040)
@@ -68,7 +70,7 @@ public enum ProjectFile {
     /// 꺼진 효과의 설정 값(enabled = false)은 형식 6에도 그대로 적는다 — 형식 6을 읽는 이전 빌드는 모르는 키를 무시하고(효과 없음),
     /// 이 빌드는 다시 읽어 설정을 되살린다. 이전 빌드가 그 파일을 다시 저장하면 꺼진 설정 값은 없어진다(효과가 꺼져 있으므로 그림은 같다).
     public static func version(for t: Timeline) -> Int {
-        if !t.spectra.isEmpty { return reactionVersion }
+        if !t.spectra.isEmpty { return appearanceVersion }
         if t.needsSpectrumFormat || t.audioClips.contains(where: { $0.origin != nil }) { return spectrumVersion }
         if t.subtitles.contains(where: { $0.style.hasEnabledEffects }) { return subtitleEffectsVersion }
         return t.needsSubtitleFormat ? subtitleVersion : subtitleFreeVersion
@@ -218,22 +220,85 @@ public enum ProjectFile {
 }
 
 extension ProjectFile {
+    /// A project starts with an ASCII object delimiter or JSON whitespace. The BOM
+    /// or the position of its zero bytes distinguishes Foundation's Unicode encodings.
+    private static func jsonSourceText(_ data: Data) throws -> String {
+        var bytes = data.makeIterator()
+        let encoding: String.Encoding
+        switch (bytes.next(), bytes.next(), bytes.next(), bytes.next()) {
+        case (0, 0, _, _):
+            encoding = .utf32BigEndian
+        case (0xff, 0xfe, 0, 0), (_, 0, 0, 0):
+            encoding = .utf32LittleEndian
+        case (0xfe, 0xff, _, _), (0, _, _, _):
+            encoding = .utf16BigEndian
+        case (0xff, 0xfe, _, _), (_, 0, _, _):
+            encoding = .utf16LittleEndian
+        default:
+            encoding = .utf8
+        }
+        guard let text = String(data: data, encoding: encoding) else {
+            throw LoadError.malformed("JSON text encoding")
+        }
+        return text
+    }
+
     /// Version-aware wire validation. Legacy defaults are injected only after rejecting
     /// contradictory fields. This creates temporary bytes; it never writes a source file.
     static func reactionDocument(_ data: Data, version: Int) throws -> Data {
         guard var raw = try JSONSerialization.jsonObject(with: data) as? [String:Any] else {
             throw LoadError.malformed("document object")
         }
+        var spectra = raw["spectra"] as? [[String:Any]] ?? []
+        if version < appearanceVersion {
+            for spectrum in spectra {
+                let style = spectrum["style"] as? [String:Any]
+                if style?["appearance"] != nil {
+                    throw LoadError.invalid("Spectrum appearance requires format 11")
+                }
+                if version < reactionVersion, style?["reactionPercent"] != nil {
+                    throw LoadError.invalid("reactionPercent requires format 10 or later")
+                }
+            }
+        }
         // JSONDecoder accepts e.g. 100.0 as Int. Check original JSON tokens so the
         // new field's wire contract is an integer, including escaped JSON key names.
-        let text = String(decoding: data, as: UTF8.self)
+        let text = try jsonSourceText(data)
         let expression = try NSRegularExpression(pattern: #""(?:[^"\\]|\\.)*"|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null|[{}\[\]:,]"#)
         let ns = text as NSString
         let tokens = expression.matches(in: text, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range) }
-        var count = 0
+        var count = 0, appearanceCount = 0
         for i in tokens.indices where tokens[i].hasPrefix("\"") && i + 2 < tokens.count && tokens[i + 1] == ":" {
-            guard (try? JSONDecoder().decode(String.self, from: Data(tokens[i].utf8))) == "reactionPercent" else { continue }
-            guard version == reactionVersion else { throw LoadError.invalid("reactionPercent requires format 10") }
+            let key = try? JSONDecoder().decode(String.self, from: Data(tokens[i].utf8))
+            if key == "appearance" {
+                guard version >= appearanceVersion, tokens[i + 2] == "{" else {
+                    throw LoadError.invalid("Spectrum appearance requires format 11 and an object")
+                }
+                var end = i + 2, depth = 0
+                repeat {
+                    if tokens[end] == "{" { depth += 1 }
+                    if tokens[end] == "}" { depth -= 1 }
+                    end += 1
+                } while end < tokens.count && depth > 0
+                guard depth == 0 else { throw LoadError.invalid("appearance object") }
+                var keys: [String: Int] = [:]
+                for j in (i + 3)..<end where tokens[j].hasPrefix("\"") && j + 2 < end && tokens[j + 1] == ":" {
+                    guard let name = try? JSONDecoder().decode(String.self, from: Data(tokens[j].utf8)) else { continue }
+                    keys[name, default: 0] += 1
+                    guard name != "outsideRGB" else { continue }
+                    let token = tokens[j + 2]
+                    guard token.range(of: #"^(0|[1-9][0-9]*)$"#, options: .regularExpression) != nil,
+                          let value = Int(token), (name == "contractVersion" ? value == 1 : (0...255).contains(value)) else {
+                        throw LoadError.invalid("appearance values must be valid integer tokens")
+                    }
+                }
+                guard keys == ["contractVersion": 1, "outsideRGB": 1, "red": 1, "green": 1, "blue": 1] else {
+                    throw LoadError.invalid("unknown, duplicate or missing appearance fields")
+                }
+                appearanceCount += 1
+            }
+            guard key == "reactionPercent" else { continue }
+            guard version >= reactionVersion else { throw LoadError.invalid("reactionPercent requires format 10 or later") }
             let token = tokens[i + 2]
             guard token.range(of: #"^(0|[1-9][0-9]*)$"#, options: .regularExpression) != nil,
                   let value = Int(token), (0...200).contains(value) else {
@@ -241,14 +306,19 @@ extension ProjectFile {
             }
             count += 1
         }
-        var spectra = raw["spectra"] as? [[String:Any]] ?? []
-        if version == reactionVersion {
+        if version >= reactionVersion {
             try StillImageProjectCodec.validateSchema(raw, version: version)
             guard count == spectra.count else { throw LoadError.invalid("required reactionPercent / duplicate field") }
             for spectrum in spectra {
                 guard let style = spectrum["style"] as? [String:Any], style["reactionPercent"] != nil else {
                     throw LoadError.invalid("missing reactionPercent")
                 }
+                if version >= appearanceVersion, !(style["appearance"] is [String:Any]) {
+                    throw LoadError.invalid("missing Spectrum appearance")
+                }
+            }
+            if version >= appearanceVersion, appearanceCount != spectra.count {
+                throw LoadError.invalid("required appearance / duplicate field")
             }
             return data
         }

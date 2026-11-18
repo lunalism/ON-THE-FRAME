@@ -1,5 +1,9 @@
 # 오디오 스펙트럼 — 첫 구현 설계와 기술 타당성 검사(2026-10-24, 제품 구현 전)
 
+**2026-11-18 SPECTRUM-FX-02B-CLOSE-02.** 안쪽은 기준선의 색이며 바깥쪽은 Maximum Height의 색이다. 기준선에서 수직 거리만큼 선형광 RGB로 보간한다. 기존 Digital 막대·점과 Analog 연결선에 같은 색장을 적용하고 한 항목의 공통 alpha를 보존한다. 높이 0은 안쪽 색이며 짧은 막대는 바깥쪽 색에 도달하지 않을 수 있다. 두 색이 같으면 기존 단색 경로를 사용한다. 실제 Spectrum 저장은 Format 11 appearance v1이며 지원 레거시 파일의 기존 RGB는 양쪽 색으로 복원한다. 이전 빌드와 단색 raster 6/6, 내부 Export worker와 Preview의 제한된 두 색 raster 비교 20/20이 일치했다.
+
+소유자는 기존 서명 Debug 앱에서 두 색의 독립 편집, 기준선에서 높이 방향으로 이어지는 그라데이션, 두 색의 Undo/Redo, Format 11 재열기 후 색과 그라데이션 유지를 수락했다(6/6 PASS). 이후 COMPAT-01에서 Format 8 단색 파일과 금지된 색상 필드를 UTF-8·UTF-16에서 일관되게 구분하도록 디코더를 정정했다. 정정본은 코덱·엔진 자동 검증 범위다. 공개 Spectrum Export는 비활성이며 UX-02는 v1.1로 유보한다. 다음 제안은 FX-02C Hue Interpolation이며 이후 FX-02D Softness를 검토한다. 아래 FX-01C-CLOSE-01과 D-S6 제안은 작성 당시 이력이다. [수락 및 호환성 정정 기록](DECISIONS.md#2026-11-18-spectrum-fx-02b-close-02-핵심-수락과-호환성-정정)
+
 **2026-11-18 SPECTRUM-FX-01C-CLOSE-01 현행 수락:** Analysis Window·Audio Offset 구현 범위를 완료했고 소유자가 실제 Mac에서 확인한 **핵심 직접 관찰 9항목 PASS**를 기록한다. 이전 8개 앱/helper 그룹1230 PASS와 엔진 최초98 PASS/fixture1 FAIL→fixture만 정정한1개 재검사PASS(99개 최신 개별 결과·전체 재실행 아님)는 과거 자동 증거다. 이번 CLOSE에서 빌드·제품 검사는 재실행하지 않는다. 물리 미시험 경계·공개 Spectrum Export 비활성·Format 10과 기존 시간 계약은 유지하며 **FX-02는 다음 제안일 뿐 미승인·미구현**이다. 로컬 체크포인트 승인과 원격 게시를 구분한다([수락 범위](DECISIONS.md#2026-11-18-spectrum-fx-01c-close-01-핵심-수락과-로컬-체크포인트)). 아래 FX-01C 구현 기록의 수락 대기와 FX-01B-CLOSE-01의 다음 계획은 작성 당시 이력이다.
 
 **2026-11-18 SPECTRUM-FX-01C 현행 amendment:** 기존 창/오프셋 모델 필드를 Audio Analysis Inspector에 연결했다. 창1–1000ms·오프셋±10000ms 정수, 창2pt/ms·오프셋1pt/ms와 기존4pt scrub 문턱·native 편집·gesture Undo/취소를 사용한다. 새 Debug 빌드·서명/App Sandbox·source152를 확인했고 numeric443·실제Inspector95·설치Preview190·실제미디어155 및 기존 앱 회귀가 PASS다. 엔진 최초98 PASS/fixture1 FAIL 뒤 해당1개만 정정·재실행PASS하여 서로 다른99개 최신결과가PASS다(전체 재실행 아님). 내부 worker4설정154prepare/18비교는 한정된 증거다. **owner 물리 수락은 대기**다. 아래 FX-01B-CLOSE-01의 “다음 계획”은 당시 상태로 보존하며 이번 별도 승인이 그 후속이다([현행 기록](DECISIONS.md#2026-11-18-spectrum-fx-01c-분석-창과-오디오-오프셋)).
@@ -28,7 +32,7 @@ ON THE FRAME의 오디오 스펙트럼(R-10~R-12) 설계다. 표시:
 - **가용성·시간 경계:** missing·unavailable·pending·실패·stale 결과를 유효한 무음으로 바꾸지 않고, Spectrum의 활성 구간 밖에서는 표시하지 않는다. 정확 PTS·seek token·player item·source identity·generation/revision/epoch 검증과 원래 오디오 시간 매핑을 유지한다. 이전 프레임을 현재 프레임으로 승인하지 않는다.
 - **공유 그리기와 Export 범위:** Preview와 내부 Export는 같은 분석·`SpectrumFrameRenderer` 계약을 사용한다. 실제 내부 worker와 Preview의 일부 프레임 bands·전체 raster, 120프레임 checkpoint 인코딩/디코딩 검증은 한정 증거다. **전체 Preview/Export parity는 미검증이고 공개 Spectrum Export는 계속 비활성**이다. 내부 Debug slice의 통과를 일반 Export 지원으로 표시하지 않는다.
 - **열린 제한:** Native Inspector **7 FAIL/4 SKIP**을 유지한다. 내부 Undo/Redo Seek 설치 지연 **53.6→116.2ms median** 조사는 OPEN이며 화면 FPS 측정이 아니다. 장시간 성능·다른 하드웨어·전체 Preview/Export parity는 미검증이다. 이전 소유자 수락은 시험한 시나리오 밖으로 확대하지 않는다.
-- **후속 계획 — 이력과 현행 구분:** DOC-ALIGN-01 당시 순서는 **SPECTRUM-UX-02 → SPECTRUM-FX-01 → SPECTRUM-FX-02 → SPECTRUM-SHADOW-01**이었다. 후속 소유자 지시로 UX-02는 planned v1.1 deferred WIP·미수락으로 분리하고 FX-01B 세 분석 필드와 FX-01C 창/오프셋의 구현·핵심 수락을 마쳤다. 다음 제안은 **SPECTRUM-FX-02 설계 검토**이며 세부 범위·구현은 미승인·미구현이다. 다른 FX·Shadow도 별도 승인이 필요하고 과거 CLOSE-01이 후속 구현을 승인했던 것으로 소급하지 않는다.
+- **후속 계획 — 이력과 현행 구분:** DOC-ALIGN-01 당시 순서는 **SPECTRUM-UX-02 → SPECTRUM-FX-01 → SPECTRUM-FX-02 → SPECTRUM-SHADOW-01**이었다. 후속 소유자 지시로 UX-02는 planned v1.1 deferred WIP·미수락으로 분리하고 FX-01B 세 분석 필드와 FX-01C 창/오프셋의 구현·핵심 수락을 마쳤다. 후속 승인된 FX-02 범위는 두 색, Hue Interpolation, Softness이며 이번 B 단계는 두 색과 appearance v1이다. Hue Interpolation과 Softness는 후속 구현 승인이 필요하다. 다른 FX·Shadow도 별도 승인이 필요하고 과거 CLOSE-01이 후속 구현을 승인했던 것으로 소급하지 않는다.
 
 ### FX-01C 핵심 수락과 다음 제안
 

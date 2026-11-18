@@ -70,7 +70,7 @@ final class ProjectPersistenceTests: XCTestCase {
         XCTAssertEqual(back.media[0].path,model.media[0].ref.path)
         XCTAssertThrowsError(try CompositionPlanner.layerStack(back.timeline,from:0,to:1,media:[:],render:CGSize(width:1920,height:1080)))
         var raw=try JSONSerialization.jsonObject(with:bytes) as! [String:Any]
-        raw["version"]=11
+        raw["version"]=12
         XCTAssertThrowsError(try ProjectPersistence.decode(JSONSerialization.data(withJSONObject:raw)))
         raw["version"]=9;raw["media"]=[]
         XCTAssertThrowsError(try ProjectPersistence.decode(JSONSerialization.data(withJSONObject:raw)))
@@ -125,5 +125,30 @@ final class ProjectPersistenceTests: XCTestCase {
             let data=try ProjectPersistence.encode(project,at:dest)
             XCTAssertEqual(try ProjectFile.decode(data).document.version,version)
         }
+    }
+    func testAppearanceFormat11SaveReopenAndPrecommitFailurePreserveBytes() async throws {
+        let model = try await StillImageProjectCodecTests().reactionProject(image: true)
+        var timeline = try OperationalProjectAdapter.restore(model).timeline
+        let item = timeline.spectra[0]
+        var style = item.style; style.red = 12; style.green = 34; style.blue = 56; style.alpha = 173
+        style.outsideRGB = .init(red: 17, green: 31, blue: 47)
+        style.reactionPercent = 150; style.windowMs = 300; style.offsetMs = -500
+        timeline = try timeline.settingSpectrumStyle(item.id, style)
+        let bookmarks = Dictionary(uniqueKeysWithValues: model.media.compactMap { e in e.bookmark.map { (e.ref.id, $0) } })
+        let project = try ProjectPersistence.make(timeline: timeline, projectID: model.projectID, bookmarks: bookmarks)
+        let destination = try root().appendingPathComponent("appearance.ontheframe")
+        let receipt = try ProjectPersistence.write(project, to: destination)
+        XCTAssertNil(receipt.postCommitWarning)
+        XCTAssertEqual(receipt.project.version, 11)
+        let bytes = try Data(contentsOf: destination), loaded = try ProjectPersistence.decode(bytes)
+        XCTAssertEqual(loaded.timeline, timeline)
+        XCTAssertEqual(loaded.timeline.spectra[0].style, style)
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues: loaded.media.compactMap { r in r.bookmark.map { (r.id, $0) } }), bookmarks)
+        XCTAssertThrowsError(try ProjectPersistence.write(project, to: destination, beforeCommit: { throw CocoaError(.fileWriteUnknown) }))
+        XCTAssertEqual(try Data(contentsOf: destination), bytes)
+        var invalid = style; invalid.outsideRGB = .init(red: 256, green: 0, blue: 0)
+        let malformed = timeline.rebuilt(spectra: [item.with(style: invalid)])
+        XCTAssertThrowsError(try ProjectPersistence.make(timeline: malformed, projectID: model.projectID))
+        XCTAssertEqual(try Data(contentsOf: destination), bytes)
     }
 }

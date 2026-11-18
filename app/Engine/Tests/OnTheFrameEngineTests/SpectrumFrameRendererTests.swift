@@ -288,6 +288,116 @@ final class SpectrumFrameRendererTests: XCTestCase {
 }
 
 extension SpectrumFrameRendererTests {
+    private func appearancePixel(_ f: SpectrumRenderedFrame, _ x: Int, _ y: Int, bytes: [UInt8]) -> [UInt8] {
+        let xx = x - Int(f.drawRect.minX), yy = y - Int(f.drawRect.minY)
+        guard (0..<f.image.width).contains(xx), (0..<f.image.height).contains(yy) else { return [0, 0, 0, 0] }
+        let offset = yy * f.image.bytesPerRow + xx * 4
+        return Array(bytes[offset..<(offset + 4)])
+    }
+
+    func testSameColorAppearanceRetainsExactLegacyPath() throws {
+        let renderer = try SpectrumFrameRenderer(width: 1920, height: 1080)
+        let legacy = try SpectrumCanvas(width: 1920, height: 1080)
+        for mode in Self.modes { for side in Self.sides { for diagonal in [false, true] {
+            for alpha in [0, 128, 255] { for zero in [false, true] {
+                var s = style(mode, side, bands: 8, start: (192_125, 800_500),
+                    end: diagonal ? (1_728_375, 200_250) : (1_728_375, 800_500),
+                    maxHeight: 300_250, thickness: 3_125, rgba: (240, 80, 16, alpha))
+                let values = zero ? [Float](repeating: 0, count: 8) : Self.values(8, seed: 42)
+                XCTAssertNil(s.outsideRGB)
+                let original = try legacy.render(values, style: s.renderStyle)
+                s.outsideRGB = s.insideRGB
+                XCTAssertFalse(s.renderStyle.hasColorGradient)
+                XCTAssertNil(Self.difference(try renderer.render(bands: values, style: s), original),
+                    "explicit same RGB must use the original drawing commands, including alpha and milli geometry")
+                s.outsideRGB = nil; s.red = 17; s.blue = 209
+                XCTAssertEqual(s.resolvedOutsideRGB, s.insideRGB, "programmatic legacy RGB edits remain single-color")
+                XCTAssertFalse(s.renderStyle.hasColorGradient)
+            } }
+        } } }
+    }
+
+    func testLinearLightGradientAndShortBarUseConfiguredHeight() throws {
+        let r = try SpectrumFrameRenderer(width: 1920, height: 1080)
+        var s = style(.digital, .above, bands: 3, start: (192_000, 800_500), end: (1_728_000, 800_500),
+                      maxHeight: 400_000, thickness: 16_000, rgba: (255, 0, 0, 128))
+        s.outsideRGB = .init(red: 0, green: 0, blue: 255)
+        let f = try XCTUnwrap(r.render(bands: [1, 0.5, 0], style: s))
+        let bytes = Self.bytes(f.image)
+        // Pixel centers at y=800.5,600.5,400.5 are exactly baseline/half/full height.
+        let baseline = appearancePixel(f, 448, 800, bytes: bytes), outside = appearancePixel(f, 448, 400, bytes: bytes)
+        XCTAssertGreaterThan(baseline[3], 0); XCTAssertEqual(baseline, [0, 0, baseline[3], baseline[3]])
+        XCTAssertGreaterThan(outside[3], 0); XCTAssertEqual(outside, [outside[3], 0, 0, outside[3]])
+        XCTAssertEqual(appearancePixel(f, 448, 600, bytes: bytes), [94, 0, 94, 128],
+            "linear-light half red/blue encodes to sRGB 188/255, then common alpha is applied once")
+        let shortTip = appearancePixel(f, 960, 600, bytes: bytes)
+        XCTAssertGreaterThan(shortTip[2], 0); XCTAssertGreaterThan(shortTip[0], 0)
+        XCTAssertLessThan(shortTip[0], shortTip[3], "a half-height band's tip is not normalized to Outside")
+        var invalidPremultiplication = 0
+        for p in stride(from: 0, to: bytes.count, by: 4) {
+            if bytes[p] > bytes[p + 3] || bytes[p + 1] > bytes[p + 3] || bytes[p + 2] > bytes[p + 3] {
+                invalidPremultiplication += 1
+            }
+        }
+        XCTAssertEqual(invalidPremultiplication, 0)
+    }
+
+    func testGradientSpatialOracleForAnalogMirroredAndDiagonal() throws {
+        func linear(_ x: Double) -> Double { x <= 0.04045 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4) }
+        func encoded(_ x: Double) -> Double { x <= 0.0031308 ? 12.92 * x : 1.055 * pow(x, 1 / 2.4) - 0.055 }
+        let renderer = try SpectrumFrameRenderer(width: 1920, height: 1080)
+        for mode in Self.modes { for side in Self.sides { for diagonal in [false, true] {
+            var s = style(mode, side, bands: 8, start: (192_000, 700_500),
+                end: diagonal ? (1_728_000, 300_500) : (1_728_000, 700_500),
+                maxHeight: 360_000, thickness: 16_000, rgba: (255, 16, 0, 160))
+            s.outsideRGB = .init(red: 0, green: 32, blue: 255)
+            let f = try XCTUnwrap(renderer.render(bands: [0.125, 0.25, 0.5, 0.75, 1, 0.5, 0.25, 0.125], style: s))
+            let bytes = Self.bytes(f.image)
+            let ax = Double(s.startXMilli) / 1000, ay = Double(s.startYMilli) / 1000
+            let dx = Double(s.endXMilli - s.startXMilli) / 1000, dy = Double(s.endYMilli - s.startYMilli) / 1000
+            let length = hypot(dx, dy), outside = s.resolvedOutsideRGB
+            let from = [s.blue, s.green, s.red].map { linear(Double($0) / 255) }
+            let to = [outside.blue, outside.green, outside.red].map { linear(Double($0) / 255) }
+            var samples = 0
+            for y in stride(from: Int(f.drawRect.minY), to: Int(f.drawRect.maxY), by: 7) {
+                for x in stride(from: Int(f.drawRect.minX), to: Int(f.drawRect.maxX), by: 11) {
+                    let pixel = appearancePixel(f, x, y, bytes: bytes); guard pixel[3] > 0 else { continue }
+                    let distance = abs((Double(x) + 0.5 - ax) * dy / length - (Double(y) + 0.5 - ay) * dx / length)
+                    let t = min(1, distance / 360)
+                    for channel in 0..<3 {
+                        let expected = Int((encoded(from[channel] * (1 - t) + to[channel] * t) * Double(pixel[3])).rounded())
+                        XCTAssertLessThanOrEqual(abs(Int(pixel[channel]) - expected), 1,
+                            "independent floating-point operation order may differ by one 8-bit quantization unit: \(mode)/\(side)/diagonal=\(diagonal) @ \(x),\(y)")
+                    }
+                    samples += 1
+                }
+            }
+            XCTAssertGreaterThan(samples, 30)
+        } } }
+    }
+
+    func testGradientClippingOwnershipAndInvalidOutside() throws {
+        for (w, h) in [(16, 16), (960, 540), (1920, 1080), (3840, 2160)] {
+            let r = try SpectrumFrameRenderer(width: w, height: h)
+            var s = style(.digital, .mirrored, bands: 1024, start: (0, 540_000), end: (1_920_000, 540_000),
+                          maxHeight: 1_080_000, thickness: 64_000)
+            s.outsideRGB = .init(red: 0, green: 32, blue: 255)
+            let v = [Float](repeating: 1, count: 1024), kept = try XCTUnwrap(r.render(bands: v, style: s))
+            let bytes = Self.bytes(kept.image)
+            XCTAssertTrue(CGRect(x: 0, y: 0, width: w, height: h).contains(kept.drawRect))
+            XCTAssertLessThanOrEqual(kept.image.bytesPerRow * kept.image.height, w * h * 4)
+            for bad in [-1, 256, Int.min, Int.max] {
+                var invalid = s; invalid.outsideRGB = .init(red: bad, green: 0, blue: 0)
+                XCTAssertThrowsError(try r.render(bands: v, style: invalid))
+            }
+            s.alpha = 0
+            let clear = try XCTUnwrap(r.render(bands: v, style: s))
+            XCTAssertEqual(clear.drawRect.size, CGSize(width: 1, height: 1))
+            XCTAssertTrue(Self.bytes(clear.image).allSatisfy { $0 == 0 })
+            XCTAssertEqual(Self.bytes(kept.image), bytes, "later renders and rejected inputs never mutate an owned frame")
+        }
+    }
+
     func testReactionMappingMatchesExistingGeometry() throws {
         let renderer = try SpectrumFrameRenderer(width: 1920, height: 1080)
         let reference = try SpectrumCanvas(width: 1920, height: 1080)

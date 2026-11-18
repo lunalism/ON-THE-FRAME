@@ -63,7 +63,7 @@ enum StillImageProjectCodec {
         let subtitles: [SubtitleItem]?
         let spectra: [SpectrumItem]?
         init(_ p: Model.Project, projectURL: URL?) {
-            format=ProjectFile.format;version=p.spectra?.isEmpty == false ? 10 : 9;projectID=p.projectID;settings=p.settings;durationFrames=p.durationFrames;lanes=p.lanes
+            format=ProjectFile.format;version=p.spectra?.isEmpty == false ? ProjectFile.appearanceVersion : 9;projectID=p.projectID;settings=p.settings;durationFrames=p.durationFrames;lanes=p.lanes
             media=p.media.map { e in
                 let relative=projectURL.map { ProjectFile.relative(URL(fileURLWithPath:e.ref.path),from:$0.deletingLastPathComponent().standardizedFileURL) } ?? e.relativePath
                 return Entry(ref:Reference(e.ref),relativePath:relative,bookmark:e.bookmark)
@@ -71,14 +71,14 @@ enum StillImageProjectCodec {
             videoClips=p.videoClips;audioClips=p.audioClips;subtitles=p.subtitles;spectra=p.spectra
         }
         var project: Model.Project {
-            var p=Model.Project(.init(format:format,version:(spectra?.isEmpty == false ? 10 : 8),projectID:projectID,settings:settings,durationFrames:durationFrames,lanes:lanes,media:[],videoClips:videoClips,audioClips:audioClips,subtitles:subtitles,spectra:spectra))
+            var p=Model.Project(.init(format:format,version:(spectra?.isEmpty == false ? ProjectFile.appearanceVersion : 8),projectID:projectID,settings:settings,durationFrames:durationFrames,lanes:lanes,media:[],videoClips:videoClips,audioClips:audioClips,subtitles:subtitles,spectra:spectra))
             p.media=media.map {.init(ref:$0.ref.value,relativePath:$0.relativePath,bookmark:$0.bookmark)};return p
         }
     }
     private struct Header: Decodable { let format: String; let version: Int }
     static func version(for project: Model.Project) throws -> Int {
         try project.validate()
-        if project.spectra?.isEmpty == false { return 10 }
+        if project.spectra?.isEmpty == false { return ProjectFile.appearanceVersion }
         if project.media.contains(where:{$0.ref.kind == .stillImage}) {return 9}
         let (timeline,_)=try ProjectFile.decode(JSONEncoder().encode(project.temporalDocument()))
         return ProjectFile.version(for:timeline)
@@ -104,11 +104,11 @@ enum StillImageProjectCodec {
     static func decode(_ data: Data) throws -> Model.Project {
         let header=try JSONDecoder().decode(Header.self,from:data)
         try Model.require(header.format == ProjectFile.format,"project format")
-        try Model.require((1...10).contains(header.version), "unsupported project version")
+        try Model.require((1...ProjectFile.currentVersion).contains(header.version), "unsupported project version")
         let validatedData = try ProjectFile.reactionDocument(data, version: header.version)
         let rawDocument = try JSONSerialization.jsonObject(with: data) as! [String:Any]
         let hasKinds = (rawDocument["media"] as? [[String:Any]] ?? []).contains { ($0["ref"] as? [String:Any])?["kind"] != nil }
-        if header.version <= 8 || (header.version == 10 && !hasKinds) {
+        if header.version <= 8 || (header.version >= ProjectFile.reactionVersion && !hasKinds) {
             // Format-9 payload must never disappear through the permissive legacy decoder.
             if let raw = try JSONSerialization.jsonObject(with:data) as? [String:Any],
                let entries = raw["media"] as? [[String:Any]] {
@@ -125,7 +125,7 @@ enum StillImageProjectCodec {
             project.videoClips = timeline.clips; project.audioClips = timeline.audioClips
             return project
         }
-        try Model.require(header.version == 9 || header.version == 10,"unsupported project version")
+        try Model.require(header.version == 9 || (ProjectFile.reactionVersion...ProjectFile.currentVersion).contains(header.version),"unsupported project version")
         // Check raw image-clip fields before Clip normalizes default audio/origin values.
         guard let raw=try JSONSerialization.jsonObject(with:data) as? [String:Any],
               let entries=raw["media"] as? [[String:Any]],let visual=raw["videoClips"] as? [[String:Any]] else {throw Model.Failure.invalid("document structure")}
@@ -171,7 +171,14 @@ enum StillImageProjectCodec {
         }
         for spectrum in raw["spectra"] as? [[String:Any]] ?? [] {
             try keys(spectrum,["id","lane","start","length","sourceKey","style"])
-            try keys(spectrum["style"],Set(["mode","sides","startXMilli","startYMilli","endXMilli","endYMilli","maxHeightMilli","thicknessMilli","red","green","blue","alpha","bands","lowHz","highHz","windowMs","offsetMs","floorDB"]).union(version == 10 ? ["reactionPercent"] : []))
+            let allowed = Set(["mode","sides","startXMilli","startYMilli","endXMilli","endYMilli","maxHeightMilli","thicknessMilli","red","green","blue","alpha","bands","lowHz","highHz","windowMs","offsetMs","floorDB"])
+                .union(version >= ProjectFile.reactionVersion ? ["reactionPercent"] : [])
+                .union(version >= ProjectFile.appearanceVersion ? ["appearance"] : [])
+            try keys(spectrum["style"], allowed)
+            if let style = spectrum["style"] as? [String:Any], let appearance = style["appearance"] {
+                try keys(appearance, ["contractVersion", "outsideRGB"])
+                if let object = appearance as? [String:Any] { try keys(object["outsideRGB"], ["red", "green", "blue"]) }
+            }
         }
         for entry in entries {
             try keys(entry,["ref","relativePath","bookmark"])

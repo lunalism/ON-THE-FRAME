@@ -2,29 +2,118 @@ import Foundation
 
 // 스펙트럼 클립 모델(2026-10-25, SP-1A 1단계 — docs/SPECTRUM-DESIGN.md §1·§15): 스펙트럼 레인의 독립 항목, 소스 오디오 계보 참조, 상태 판정.
 // 이 단계는 엔진 모델·편집·저장(형식 8)·판정까지다. 앱 UI·프리뷰·내보내기 그리기는 다음 단계(§15)다.
-// 모양 값의 기본은 잠정(D-S5, 참고 그림 값). 두 색·부드러움은 SP-2(D-S6) — 이 단계는 한 색이다.
+// 기본값은 잠정(D-S5). FX-02B는 Format 11 appearance v1의 두 RGB를 추가한다. Hue/Softness는 별도 후속 범위다.
 
 /// 스펙트럼 모양·분석 값(저장 단위: 정수 — 위치·높이·두께는 1920×1080 기준 화소의 1/1000, 색 0–255, 주파수 Hz, 시간 ms).
 public struct SpectrumItemStyle: Sendable, Equatable, Codable {
     public enum Mode: String, Sendable, Codable { case digital, analog }
     public enum Sides: String, Sendable, Codable { case above, mirrored, below }
+    public struct RGB: Sendable, Equatable, Codable {
+        public var red: Int, green: Int, blue: Int
+        public init(red: Int, green: Int, blue: Int) { self.red = red; self.green = green; self.blue = blue }
+        public var isValid: Bool { [red, green, blue].allSatisfy { (0...255).contains($0) } }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: WireKey.self)
+            guard Set(c.allKeys.map(\.stringValue)) == ["red", "green", "blue"] else {
+                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "unknown or missing RGB fields"))
+            }
+            red = try c.decode(Int.self, forKey: WireKey("red")); green = try c.decode(Int.self, forKey: WireKey("green")); blue = try c.decode(Int.self, forKey: WireKey("blue"))
+            guard isValid else { throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "RGB outside 0...255")) }
+        }
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: WireKey.self)
+            try c.encode(red, forKey: WireKey("red")); try c.encode(green, forKey: WireKey("green")); try c.encode(blue, forKey: WireKey("blue"))
+        }
+    }
+    private struct WireKey: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(_ value: String) { stringValue = value }
+        init?(stringValue: String) { self.init(stringValue) }
+        init?(intValue: Int) { return nil }
+    }
+    /// Contract v1 adds Outside RGB; the existing outer RGB fields remain Inside.
+    /// Higher appearance contracts are rejected, not decoded with missing effects.
+    private struct Appearance: Codable {
+        let outsideRGB: RGB
+        init(_ outside: RGB) { outsideRGB = outside }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: WireKey.self)
+            guard Set(c.allKeys.map(\.stringValue)) == ["contractVersion", "outsideRGB"],
+                  try c.decode(Int.self, forKey: WireKey("contractVersion")) == 1 else {
+                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "unsupported or malformed Spectrum appearance contract"))
+            }
+            outsideRGB = try c.decode(RGB.self, forKey: WireKey("outsideRGB"))
+        }
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: WireKey.self)
+            try c.encode(1, forKey: WireKey("contractVersion")); try c.encode(outsideRGB, forKey: WireKey("outsideRGB"))
+        }
+    }
     public var mode: Mode
     public var sides: Sides
     public var startXMilli: Int, startYMilli: Int, endXMilli: Int, endYMilli: Int
     public var maxHeightMilli: Int, thicknessMilli: Int
     public var red: Int, green: Int, blue: Int, alpha: Int
+    /// nil preserves the original programmatic single-color behavior when callers
+    /// mutate Inside RGB after initialization. Color editors freeze the resolved
+    /// Outside value before changing Inside independently.
+    public var outsideRGB: RGB?
+    public var insideRGB: RGB { RGB(red: red, green: green, blue: blue) }
+    public var resolvedOutsideRGB: RGB { outsideRGB ?? insideRGB }
     public var reactionPercent: Int
     public var bands: Int, lowHz: Int, highHz: Int, windowMs: Int, offsetMs: Int, floorDB: Int
     public init(mode: Mode, sides: Sides, startXMilli: Int, startYMilli: Int, endXMilli: Int, endYMilli: Int, maxHeightMilli: Int, thicknessMilli: Int,
-                red: Int, green: Int, blue: Int, alpha: Int, bands: Int, lowHz: Int, highHz: Int, windowMs: Int, offsetMs: Int, floorDB: Int, reactionPercent: Int = 100) {
+                red: Int, green: Int, blue: Int, alpha: Int, bands: Int, lowHz: Int, highHz: Int, windowMs: Int, offsetMs: Int, floorDB: Int, reactionPercent: Int = 100, outsideRGB: RGB? = nil) {
         self.mode = mode; self.sides = sides; self.reactionPercent = reactionPercent
         self.startXMilli = startXMilli; self.startYMilli = startYMilli; self.endXMilli = endXMilli; self.endYMilli = endYMilli
         self.maxHeightMilli = maxHeightMilli; self.thicknessMilli = thicknessMilli
         self.red = red; self.green = green; self.blue = blue; self.alpha = alpha
+        self.outsideRGB = outsideRGB
         self.bands = bands; self.lowHz = lowHz; self.highHz = highHz; self.windowMs = windowMs; self.offsetMs = offsetMs; self.floorDB = floorDB
     }
+    private enum CodingKeys: String, CodingKey {
+        case mode, sides, startXMilli, startYMilli, endXMilli, endYMilli, maxHeightMilli, thicknessMilli
+        case red, green, blue, alpha, reactionPercent, bands, lowHz, highHz, windowMs, offsetMs, floorDB, appearance
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        mode = try c.decode(Mode.self, forKey: .mode); sides = try c.decode(Sides.self, forKey: .sides)
+        startXMilli = try c.decode(Int.self, forKey: .startXMilli); startYMilli = try c.decode(Int.self, forKey: .startYMilli)
+        endXMilli = try c.decode(Int.self, forKey: .endXMilli); endYMilli = try c.decode(Int.self, forKey: .endYMilli)
+        maxHeightMilli = try c.decode(Int.self, forKey: .maxHeightMilli); thicknessMilli = try c.decode(Int.self, forKey: .thicknessMilli)
+        red = try c.decode(Int.self, forKey: .red); green = try c.decode(Int.self, forKey: .green); blue = try c.decode(Int.self, forKey: .blue)
+        alpha = try c.decode(Int.self, forKey: .alpha); reactionPercent = try c.decode(Int.self, forKey: .reactionPercent)
+        bands = try c.decode(Int.self, forKey: .bands); lowHz = try c.decode(Int.self, forKey: .lowHz); highHz = try c.decode(Int.self, forKey: .highHz)
+        windowMs = try c.decode(Int.self, forKey: .windowMs); offsetMs = try c.decode(Int.self, forKey: .offsetMs); floorDB = try c.decode(Int.self, forKey: .floorDB)
+        if c.contains(.appearance) {
+            let outside = try c.decode(Appearance.self, forKey: .appearance).outsideRGB
+            outsideRGB = outside == RGB(red: red, green: green, blue: blue) ? nil : outside
+        } else { outsideRGB = nil }
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(mode, forKey: .mode); try c.encode(sides, forKey: .sides)
+        try c.encode(startXMilli, forKey: .startXMilli); try c.encode(startYMilli, forKey: .startYMilli)
+        try c.encode(endXMilli, forKey: .endXMilli); try c.encode(endYMilli, forKey: .endYMilli)
+        try c.encode(maxHeightMilli, forKey: .maxHeightMilli); try c.encode(thicknessMilli, forKey: .thicknessMilli)
+        try c.encode(red, forKey: .red); try c.encode(green, forKey: .green); try c.encode(blue, forKey: .blue); try c.encode(alpha, forKey: .alpha)
+        try c.encode(reactionPercent, forKey: .reactionPercent); try c.encode(bands, forKey: .bands)
+        try c.encode(lowHz, forKey: .lowHz); try c.encode(highHz, forKey: .highHz)
+        try c.encode(windowMs, forKey: .windowMs); try c.encode(offsetMs, forKey: .offsetMs); try c.encode(floorDB, forKey: .floorDB)
+        try c.encode(Appearance(resolvedOutsideRGB), forKey: .appearance)
+    }
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        guard lhs.mode == rhs.mode, lhs.sides == rhs.sides, lhs.startXMilli == rhs.startXMilli, lhs.startYMilli == rhs.startYMilli,
+              lhs.endXMilli == rhs.endXMilli, lhs.endYMilli == rhs.endYMilli, lhs.maxHeightMilli == rhs.maxHeightMilli,
+              lhs.thicknessMilli == rhs.thicknessMilli, lhs.red == rhs.red, lhs.green == rhs.green, lhs.blue == rhs.blue,
+              lhs.alpha == rhs.alpha, lhs.reactionPercent == rhs.reactionPercent, lhs.bands == rhs.bands,
+              lhs.lowHz == rhs.lowHz, lhs.highHz == rhs.highHz, lhs.windowMs == rhs.windowMs, lhs.offsetMs == rhs.offsetMs,
+              lhs.floorDB == rhs.floorDB else { return false }
+        return lhs.resolvedOutsideRGB == rhs.resolvedOutsideRGB
+    }
     /// 잠정 기본값(D-S5 미확정, 참고 그림 값 중 한 색 단계에 쓰는 것): 시작/끝 (192,540)/(1728,540), 최대 높이 480, 두께 3, 디지털, 위아래 대칭,
-    /// 64밴드, 20–2000 Hz, 분석 90 ms, 오프셋 0, 바닥 −60 dB, 흰색(두 색·부드러움은 SP-2).
+    /// 64밴드, 20–2000 Hz, 분석 90 ms, 오프셋 0, 바닥 −60 dB, 양쪽 흰색(Outside 미지정은 Inside를 따른다).
     public static let provisionalDefault = SpectrumItemStyle(mode: .digital, sides: .mirrored, startXMilli: 192_000, startYMilli: 540_000, endXMilli: 1_728_000, endYMilli: 540_000,
                                                               maxHeightMilli: 480_000, thicknessMilli: 3_000, red: 255, green: 255, blue: 255, alpha: 255,
                                                               bands: 64, lowHz: 20, highHz: 2000, windowMs: 90, offsetMs: 0, floorDB: -60)
@@ -32,6 +121,7 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
     public var isValid: Bool {
         guard (0...200).contains(reactionPercent) else { return false }
         guard [red, green, blue, alpha].allSatisfy({ (0...255).contains($0) }) else { return false }
+        guard resolvedOutsideRGB.isValid else { return false }
         guard renderStyle.validationError() == nil else { return false }
         return analysisSettings.validationError(rate: 48_000) == nil
     }
@@ -40,7 +130,9 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
         SpectrumStyle(start: CGPoint(x: Double(startXMilli) / 1000, y: Double(startYMilli) / 1000), end: CGPoint(x: Double(endXMilli) / 1000, y: Double(endYMilli) / 1000),
                       maxHeight: Double(maxHeightMilli) / 1000, thickness: Double(thicknessMilli) / 1000,
                       mode: mode == .digital ? .digital : .analog, sides: sides == .above ? .above : (sides == .mirrored ? .mirrored : .below),
-                      red: Double(red) / 255, green: Double(green) / 255, blue: Double(blue) / 255, alpha: Double(alpha) / 255)
+                      red: Double(red) / 255, green: Double(green) / 255, blue: Double(blue) / 255, alpha: Double(alpha) / 255,
+                      outsideRed: Double(resolvedOutsideRGB.red) / 255, outsideGreen: Double(resolvedOutsideRGB.green) / 255,
+                      outsideBlue: Double(resolvedOutsideRGB.blue) / 255)
     }
     /// 분석 설정(엔진 SpectrumAnalysis)
     public var analysisSettings: SpectrumAnalysisSettings {

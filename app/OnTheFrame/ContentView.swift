@@ -935,6 +935,7 @@ struct SpectrumStyleDraft {
     var lowHz: String, highHz: String, bands: String
     var windowMs: String, offsetMs: String
     var red: String, green: String, blue: String
+    var outsideRed: String, outsideGreen: String, outsideBlue: String
     var thickness: String
     var sides: SpectrumItemStyle.Sides
     var mode: SpectrumItemStyle.Mode
@@ -954,6 +955,8 @@ struct SpectrumStyleDraft {
         lowHz = String(style.lowHz); highHz = String(style.highHz); bands = String(style.bands)
         windowMs = String(style.windowMs); offsetMs = String(style.offsetMs)
         red = String(style.red); green = String(style.green); blue = String(style.blue)
+        let outside = style.resolvedOutsideRGB
+        outsideRed = String(outside.red); outsideGreen = String(outside.green); outsideBlue = String(outside.blue)
     }
     struct Invalid: LocalizedError {
         let message: String
@@ -1021,7 +1024,10 @@ struct SpectrumStyleDraft {
         result.maxHeightMilli = try milli(height, "최대 높이", original: base.maxHeightMilli, range: 0...1_080_000)
         result.thicknessMilli = try milli(thickness, "두께", original: base.thicknessMilli, range: 500...64_000)
         result.sides = sides; result.mode = mode
+        let outside = SpectrumItemStyle.RGB(red: try color(outsideRed, "바깥 빨강"),
+            green: try color(outsideGreen, "바깥 초록"), blue: try color(outsideBlue, "바깥 파랑"))
         result.red = try color(red, "빨강"); result.green = try color(green, "초록"); result.blue = try color(blue, "파랑")
+        if result.insideRGB != base.insideRGB || outside != base.resolvedOutsideRGB { result.outsideRGB = outside }
         guard hypot(Double(result.endXMilli - result.startXMilli), Double(result.endYMilli - result.startYMilli)) >= 1000 else {
             throw Invalid(message: "시작점과 끝점의 거리는 1 px 이상이어야 합니다.")
         }
@@ -1032,8 +1038,9 @@ struct SpectrumStyleDraft {
 
 // Valid numeric drafts are the source of truth; the view retains only the last valid swatch.
 enum SpectrumPickerRGB {
-    static func channels(_ draft: SpectrumStyleDraft) -> (Int, Int, Int)? {
-        let values = [draft.red, draft.green, draft.blue].compactMap { text -> Int? in
+    static func channels(_ draft: SpectrumStyleDraft, outside: Bool = false) -> (Int, Int, Int)? {
+        let texts = outside ? [draft.outsideRed, draft.outsideGreen, draft.outsideBlue] : [draft.red, draft.green, draft.blue]
+        let values = texts.compactMap { text -> Int? in
             let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard text.range(of: #"^[0-9]{1,3}$"#, options: .regularExpression) != nil,
                   let value = Int(text), (0...255).contains(value) else { return nil }
@@ -1045,8 +1052,9 @@ enum SpectrumPickerRGB {
     static func color(_ rgb: (Int, Int, Int)) -> Color {
         Color(.sRGB, red: Double(rgb.0) / 255, green: Double(rgb.1) / 255, blue: Double(rgb.2) / 255)
     }
-    static func channels(_ color: Color) -> (Int, Int, Int)? {
-        guard let rgb = NSColor(color).usingColorSpace(.extendedSRGB) else { return nil }
+    static func channels(_ color: Color) -> (Int, Int, Int)? { channels(NSColor(color)) }
+    static func channels(_ color: NSColor) -> (Int, Int, Int)? {
+        guard let rgb = color.usingColorSpace(.extendedSRGB) else { return nil }
         return quantized([rgb.redComponent, rgb.greenComponent, rgb.blueComponent])
     }
     static func quantized(_ components: [CGFloat]?) -> (Int, Int, Int)? {
@@ -1166,6 +1174,7 @@ struct SpectrumStyleAdjust: View {
     @State private var feedback: String?
     @State private var pickerActive = false
     @State private var lastValidSwatch: Color
+    @State private var lastValidOutsideSwatch: Color
     @State private var positionExpanded = true
     @State private var appearanceExpanded = true
     init(store: ProjectStore, item: SpectrumItem) {
@@ -1174,6 +1183,8 @@ struct SpectrumStyleAdjust: View {
         _generation = State(initialValue: store.generation)
         _draft = State(initialValue: SpectrumStyleDraft(item.style))
         _lastValidSwatch = State(initialValue: SpectrumPickerRGB.color((item.style.red, item.style.green, item.style.blue)))
+        let outside = item.style.resolvedOutsideRGB
+        _lastValidOutsideSwatch = State(initialValue: SpectrumPickerRGB.color((outside.red, outside.green, outside.blue)))
     }
     private var validation: String? {
         do { _ = try draft.style(from: item.style); return nil }
@@ -1184,21 +1195,20 @@ struct SpectrumStyleAdjust: View {
         store.spectrumSelectionRevision == selectionRevision && store.generation == generation &&
         store.gestureBase == nil && store.fileCommandsAvailable
     }
-    private var pickerColor: Binding<Color> {
-        let eventRevision = store.spectrumColorEventRevision
-        return Binding(get: {
-            SpectrumPickerRGB.channels(draft).map(SpectrumPickerRGB.color) ?? lastValidSwatch
-        }, set: { color in
-            guard pickerContextIsCurrent, eventRevision == store.spectrumColorEventRevision,
-                  SpectrumPickerRGB.channels(draft) != nil else { return }
-            guard let rgb = SpectrumPickerRGB.channels(color) else {
+    private func colorControl(_ target: SpectrumColorTarget) -> some View {
+        let outside = target == .outside
+        let channels = SpectrumPickerRGB.channels(draft, outside: outside)
+        let fallback = outside ? lastValidOutsideSwatch : lastValidSwatch
+        return SpectrumColorWell(store: store, id: item.id, target: target, project: project,
+            revision: selectionRevision, color: channels.map(SpectrumPickerRGB.color) ?? fallback,
+            canBegin: {
+                pickerActive && store.projectSession == project && store.selection == item.id &&
+                    store.spectrumSelectionRevision == selectionRevision && validation == nil
+            }, accepted: { syncNumericDraft(); feedback = nil }, invalid: {
                 feedback = "색상을 sRGB로 변환하지 못했거나 유효하지 않은 성분입니다. 다른 색상을 선택하세요."
-                return
-            }
-            draft.red = String(rgb.0); draft.green = String(rgb.1); draft.blue = String(rgb.2)
-            feedback = nil
-            commitLive(kind: "color")
-        })
+            })
+            .disabled(channels == nil)
+            .frame(minWidth: 72, idealHeight: 23)
     }
     private func commitLive(kind: String) {
         guard pickerContextIsCurrent, let current = store.timeline.spectrum(item.id) else { return }
@@ -1253,14 +1263,9 @@ struct SpectrumStyleAdjust: View {
                         }
                         Text("방향은 시작점→끝점 기준선의 수직 방향 기준이며, 화면 위·아래와 다를 수 있습니다.")
                             .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        property("색상") {
-                            ColorPicker("색상", selection: pickerColor, supportsOpacity: false)
-                                .labelsHidden().accessibilityLabel("색상")
-                                .id(store.spectrumColorEventRevision)
-                                .onAppear { NSColorPanel.shared.isContinuous = true }
-                                .disabled(SpectrumPickerRGB.channels(draft) == nil)
-                        }
-                        if SpectrumPickerRGB.channels(draft) == nil {
+                        property("안쪽 색상 (Inside)") { colorControl(.inside) }
+                        property("바깥 색상 (Outside)") { colorControl(.outside) }
+                        if SpectrumPickerRGB.channels(draft) == nil || SpectrumPickerRGB.channels(draft, outside: true) == nil {
                             Text("RGB 입력을 0–255 정수로 완성하면 색상 선택기를 사용할 수 있습니다.")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
@@ -1299,7 +1304,7 @@ struct SpectrumStyleAdjust: View {
         .onDisappear {
             pickerActive = false
             if let numericScrubToken { store.cancelSpectrumNumericScrub(numericScrubToken) }
-            if store.spectrumNumericScrubToken == nil, store.projectSession == project,
+            if store.spectrumNumericScrubToken == nil, store.spectrumColorEditToken == nil, store.projectSession == project,
                store.selection == item.id, store.spectrumSelectionRevision == selectionRevision { store.finishSpectrumLiveSession() }
         }
         .onChange(of: draft.sides) { _, _ in commitLive(kind: "discrete") }
@@ -1311,6 +1316,9 @@ struct SpectrumStyleAdjust: View {
         }
         .onChange(of: [draft.red, draft.green, draft.blue]) { _, _ in
             if let rgb = SpectrumPickerRGB.channels(draft) { lastValidSwatch = SpectrumPickerRGB.color(rgb) }
+        }
+        .onChange(of: [draft.outsideRed, draft.outsideGreen, draft.outsideBlue]) { _, _ in
+            if let rgb = SpectrumPickerRGB.channels(draft, outside: true) { lastValidOutsideSwatch = SpectrumPickerRGB.color(rgb) }
         }
     }
     private func field(_ number: SpectrumNumericProperty) -> some View {

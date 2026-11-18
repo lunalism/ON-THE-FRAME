@@ -542,6 +542,68 @@ final class SpectrumFrameCoordinatorTests: XCTestCase {
 }
 
 extension SpectrumFrameCoordinatorTests {
+    func testAppearanceOnlyEditsReuseBandsAndPCMAndRestore() async throws {
+        let (timeline, _, id, _) = try base(), pcm = TonePCM()
+        let c = coordinator(pcm), renderer = try SpectrumFrameRenderer(width: 1920, height: 1080)
+        defer { c.resetProject() }
+        c.update(timeline: timeline, media: [steady])
+        let first = await get(c, id, 65)
+        guard case let .ready(raw, originalFrame?) = first else { return XCTFail(Self.name(first)) }
+        let baseline = c.scheduler.statistics, original = timeline.spectra[0].style
+        var outside = original; outside.outsideRGB = .init(red: 0, green: 32, blue: 255)
+        var inside = outside; inside.red = 255; inside.green = 16; inside.blue = 0
+        for style in [outside, inside, original] {
+            let edited = try timeline.settingSpectrumStyle(id, style)
+            XCTAssertEqual(style.analysisSettings, original.analysisSettings)
+            XCTAssertEqual(edited.audioClips, timeline.audioClips)
+            XCTAssertEqual(edited.spectrumPieces(edited.spectra[0]), timeline.spectrumPieces(timeline.spectra[0]))
+            c.update(timeline: edited, media: [steady])
+            let result = await get(c, id, 65)
+            guard case let .ready(bands, actual?) = result else { return XCTFail(Self.name(result)) }
+            XCTAssertEqual(bands, raw)
+            let expected = try XCTUnwrap(renderer.render(bands: raw, style: style))
+            XCTAssertEqual(actual.drawRect, expected.drawRect)
+            XCTAssertEqual(SpectrumFrameRendererTests.bytes(actual.image), SpectrumFrameRendererTests.bytes(expected.image))
+            XCTAssertEqual(c.scheduler.statistics.analyses, baseline.analyses)
+            XCTAssertEqual(c.scheduler.statistics.decodes, baseline.decodes)
+            XCTAssertEqual(c.scheduler.statistics.bandCacheEntries, baseline.bandCacheEntries)
+            if style == original {
+                XCTAssertEqual(SpectrumFrameRendererTests.bytes(actual.image), SpectrumFrameRendererTests.bytes(originalFrame.image))
+            } else {
+                XCTAssertNotEqual(SpectrumFrameRendererTests.bytes(actual.image), SpectrumFrameRendererTests.bytes(originalFrame.image))
+            }
+        }
+    }
+
+    func testAppearanceEditsRejectOldRasterWithAndWithoutProactiveCancellation() async throws {
+        let (timeline, _, id, _) = try base()
+        var style = timeline.spectra[0].style; style.outsideRGB = .init(red: 0, green: 0, blue: 255)
+        let edited = try timeline.settingSpectrumStyle(id, style)
+        for proactive in [true, false] {
+            let pcm = TonePCM(gated: true), c = coordinator(pcm), log = Log()
+            defer { pcm.release(); c.resetProject() }
+            c.supersedeOnUpdate = proactive
+            c.update(timeline: timeline, media: [steady])
+            c.request(spectrum: id, frame: 65, canvasWidth: 1920, canvasHeight: 1080) { log.add("old", $0) }
+            let started = await until(5) { pcm.started > 0 }
+            guard started else { XCTFail("appearance decode gate not reached"); continue }
+            c.update(timeline: edited, media: [steady])
+            c.request(spectrum: id, frame: 65, canvasWidth: 1920, canvasHeight: 1080) { log.add("current", $0) }
+            _ = c.diagnostics
+            if !proactive { XCTAssertEqual(log.total, 0) }
+            pcm.release()
+            let completed = await until(5) { log.total == 2 }; XCTAssertTrue(completed)
+            XCTAssertEqual(log.all("old").map(Self.name), ["superseded"])
+            let result = try XCTUnwrap(log.all("current").first)
+            guard case let .ready(bands, actual?) = result else { XCTFail(Self.name(result)); continue }
+            let expected = try XCTUnwrap(SpectrumFrameRenderer(width: 1920, height: 1080).render(bands: bands, style: style))
+            XCTAssertEqual(actual.drawRect, expected.drawRect)
+            XCTAssertEqual(SpectrumFrameRendererTests.bytes(actual.image), SpectrumFrameRendererTests.bytes(expected.image))
+            let drained = await until(5) { c.scheduler.statistics.active == 0 && c.diagnostics.waiting == 0 }
+            XCTAssertTrue(drained); deliveries.sync {}; XCTAssertEqual(log.total, 2)
+        }
+    }
+
     func testReactionOnlyEditsReuseAnalysisAndPCM() async throws {
         let (timeline, _, id, _) = try base()
         let pcm = TonePCM(), coordinator = coordinator(pcm)

@@ -4,7 +4,7 @@ import os
 
 // 스펙트럼 그리기(2026-10-25, docs/SPECTRUM-DESIGN.md §13) — 엔진 안(package) API. 앱 프리뷰·내보내기·정보 패널·저장에 연결하지 않았다.
 // 시제품 ProtoSpectrumRenderer(시험 대상)의 기하·그리기 명령을 그대로 옮겼다(같은 입력 → 같은 바이트, 시험으로 확인).
-// 한 색만. 두 색·부드러움은 SP-2(D-S6), 기본값은 미정(D-S5) — 모양 값은 부르는 쪽이 명시한다.
+// FX-02B: 두 색은 기준선→Maximum Height의 선형광 RGB 공간 gradient. Hue·Softness는 구현하지 않는다.
 // 그리기는 다시 쓰는 전체 캔버스 문맥에 하고(프레임마다 0으로 비움), 기하로 계산한 범위의 행만 자막과 같은 tightCrop으로 자른다.
 // 범위만 그린 작은 문맥은 전체 캔버스 그림과 바이트가 달라(§12, 가장자리 최대 1/255) 쓰지 않는다.
 
@@ -15,12 +15,21 @@ package struct SpectrumStyle: Sendable, Equatable {
     package var start: CGPoint, end: CGPoint
     package var maxHeight: Double, thickness: Double
     package var mode: Mode, sides: Sides
-    /// 단색(sRGB 0~1, 미리 곱하지 않음)
+    /// Inside와 공통 alpha(sRGB 0~1, 미리 곱하지 않음). nil Outside는 현재 Inside를 따른다.
     package var red: Double, green: Double, blue: Double, alpha: Double
+    package var outsideRed: Double?, outsideGreen: Double?, outsideBlue: Double?
+    package var resolvedOutsideRed: Double { outsideRed ?? red }
+    package var resolvedOutsideGreen: Double { outsideGreen ?? green }
+    package var resolvedOutsideBlue: Double { outsideBlue ?? blue }
+    package var hasColorGradient: Bool {
+        red != resolvedOutsideRed || green != resolvedOutsideGreen || blue != resolvedOutsideBlue
+    }
     package init(start: CGPoint, end: CGPoint, maxHeight: Double, thickness: Double, mode: Mode, sides: Sides,
-                 red: Double = 1, green: Double = 1, blue: Double = 1, alpha: Double = 1) {
+                 red: Double = 1, green: Double = 1, blue: Double = 1, alpha: Double = 1,
+                 outsideRed: Double? = nil, outsideGreen: Double? = nil, outsideBlue: Double? = nil) {
         self.start = start; self.end = end; self.maxHeight = maxHeight; self.thickness = thickness; self.mode = mode; self.sides = sides
         self.red = red; self.green = green; self.blue = blue; self.alpha = alpha
+        self.outsideRed = outsideRed; self.outsideGreen = outsideGreen; self.outsideBlue = outsideBlue
     }
     /// 쓸 수 있는지(유한한 좌표 ±10000, 시작 ≠ 끝, 높이 0~1080, 두께 0.5~64, 색 0~1)
     package func validationError() -> String? {
@@ -29,7 +38,8 @@ package struct SpectrumStyle: Sendable, Equatable {
         guard hypot(end.x - start.x, end.y - start.y) >= 1 else { return "start = end" }
         guard maxHeight.isFinite, (0...1080).contains(maxHeight) else { return "maxHeight \(maxHeight)" }
         guard thickness.isFinite, (0.5...64).contains(thickness) else { return "thickness \(thickness)" }
-        guard [red, green, blue, alpha].allSatisfy({ $0.isFinite && (0...1).contains($0) }) else { return "color" }
+        guard [red, green, blue, alpha, resolvedOutsideRed, resolvedOutsideGreen, resolvedOutsideBlue]
+            .allSatisfy({ $0.isFinite && (0...1).contains($0) }) else { return "color" }
         return nil
     }
 }
@@ -96,6 +106,48 @@ package enum SpectrumGeometry {
     }
 }
 
+/// Recolor existing coverage in place; the field is independent of each band's height.
+/// Common alpha is already present in the white mask and is not applied a second time.
+private enum SpectrumColorField {
+    static func linear(_ s: Double) -> Double {
+        s <= 0.04045 ? s / 12.92 : pow((s + 0.055) / 1.055, 2.4)
+    }
+    static func sRGB(_ value: Double) -> Double {
+        let v = min(1, max(0, value))
+        return v <= 0.0031308 ? 12.92 * v : 1.055 * pow(v, 1 / 2.4) - 0.055
+    }
+    static func apply(style s: SpectrumStyle, canvas: CGSize, bounds: CGRect, into ctx: CGContext) {
+        let g = SpectrumGeometry.points(s, bands: 1, canvas: canvas)
+        let a = CGPoint(x: s.start.x * canvas.width / 1920, y: s.start.y * canvas.height / 1080)
+        let height = CGFloat(s.maxHeight) * g.scaleY
+        let inside = (linear(s.red), linear(s.green), linear(s.blue))
+        let outside = (linear(s.resolvedOutsideRed), linear(s.resolvedOutsideGreen), linear(s.resolvedOutsideBlue))
+        func color(_ distance: CGFloat) -> (Double, Double, Double) {
+            let t = height > 0 ? Double(min(1, max(0, abs(distance) / height))) : 0
+            return (sRGB(inside.0 + (outside.0 - inside.0) * t),
+                    sRGB(inside.1 + (outside.1 - inside.1) * t),
+                    sRGB(inside.2 + (outside.2 - inside.2) * t))
+        }
+        let x0 = Int(bounds.minX), x1 = Int(bounds.maxX)
+        let pixels = ctx.data!.assumingMemoryBound(to: UInt8.self)
+        for y in Int(bounds.minY)..<Int(bounds.maxY) {
+            let row = pixels + y * ctx.bytesPerRow
+            let distance = (CGFloat(x0) + 0.5 - a.x) * g.up.dx + (CGFloat(y) + 0.5 - a.y) * g.up.dy
+            // Horizontal baselines share a color across a row; avoid per-pixel powers.
+            let rowColor = g.up.dx == 0 ? color(distance) : nil
+            for x in x0..<x1 {
+                let pixel = row + x * 4, alpha = pixel[3]
+                guard alpha != 0 else { pixel[0] = 0; pixel[1] = 0; pixel[2] = 0; continue }
+                let c = rowColor ?? color(distance + CGFloat(x - x0) * g.up.dx)
+                func premultiplied(_ value: Double) -> UInt8 {
+                    UInt8(min(Int(alpha), max(0, Int((value * Double(alpha)).rounded()))))
+                }
+                pixel[0] = premultiplied(c.2); pixel[1] = premultiplied(c.1); pixel[2] = premultiplied(c.0)
+            }
+        }
+    }
+}
+
 /// 한 프레임의 칠한 부분(자막 발자국과 같은 모양: 미리 곱한 sRGB BGRA, 칠한 곳만 16 px 단위로 자름)
 package struct SpectrumFrameRaster {
     package let image: CGImage
@@ -136,7 +188,14 @@ package final class SpectrumCanvas {
         let canvas = CGSize(width: width, height: height)
         let b = SpectrumGeometry.bounds(v, style: s, canvas: canvas)
         guard !b.isNull, b.height > 0, b.width > 0 else { return nil }
-        SpectrumGeometry.draw(v, style: s, canvas: canvas, into: ctx)
+        if s.hasColorGradient {
+            var mask = s; mask.red = 1; mask.green = 1; mask.blue = 1
+            SpectrumGeometry.draw(v, style: mask, canvas: canvas, into: ctx)
+            SpectrumColorField.apply(style: s, canvas: canvas, bounds: b, into: ctx)
+        } else {
+            // Exact legacy path, including AA, overlapping primitives and common alpha.
+            SpectrumGeometry.draw(v, style: s, canvas: canvas, into: ctx)
+        }
         let rows = Int(b.minY)..<Int(b.maxY)
         let (img, box) = SubtitleRenderer.tightCrop(ctx, rows: rows)
         let draw = box.isNull ? CGRect(x: 0, y: rows.lowerBound, width: width, height: rows.count) : box.offsetBy(dx: 0, dy: CGFloat(rows.lowerBound))

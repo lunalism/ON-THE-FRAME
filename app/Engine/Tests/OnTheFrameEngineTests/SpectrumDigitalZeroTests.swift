@@ -16,9 +16,12 @@ final class SpectrumDigitalZeroTests: XCTestCase {
     private func pixel(_ f: SpectrumRenderedFrame, _ x: Int, _ y: Int) -> [UInt8] {
         let dx = x - Int(f.drawRect.minX), dy = y - Int(f.drawRect.minY)
         guard (0..<f.image.width).contains(dx), (0..<f.image.height).contains(dy) else { return [0, 0, 0, 0] }
-        let d = f.image.dataProvider!.data!, p = CFDataGetBytePtr(d)!
+        let d = f.image.dataProvider!.data!
         let o = dy * f.image.bytesPerRow + dx * 4
-        return (0..<4).map { p[o + $0] }
+        return withExtendedLifetime(d) {
+            let p = CFDataGetBytePtr(d)!
+            return (0..<4).map { p[o + $0] }
+        }
     }
     private func same(_ a: SpectrumRenderedFrame, _ b: SpectrumRenderedFrame,
                       file: StaticString = #filePath, line: UInt = #line) {
@@ -170,5 +173,34 @@ final class SpectrumDigitalZeroTests: XCTestCase {
         r = nil
         XCTAssertEqual(SpectrumCanvas.liveCount, before)
         XCTAssertEqual(SpectrumFrameRendererTests.bytes(kept.image), bytes, "owned frame survives canvas release")
+    }
+
+    func testAppearanceZeroDotsSampleTheSameFixedSpatialField() throws {
+        let r = try SpectrumFrameRenderer(width: 1920, height: 1080)
+        var previous: SpectrumRenderedFrame?
+        for side in SpectrumFrameRendererTests.sides {
+            var s = style(side); s.startYMilli = 540_500; s.endYMilli = 540_500
+            s.thicknessMilli = 16_000; s.red = 255; s.green = 0; s.blue = 0; s.alpha = 128
+            s.outsideRGB = .init(red: 0, green: 0, blue: 255)
+            let zero = [Float](repeating: 0, count: s.bands)
+            let f = try XCTUnwrap(r.render(bands: zero, style: s))
+            if let previous { same(f, previous) }; previous = f
+            XCTAssertEqual(pixel(f, 288, 540), [0, 0, 128, 128], "dot center uses Inside without an amplitude floor")
+            XCTAssertEqual(pixel(f, 288, 534), [16, 0, 127, 128], "6/400 spatial position, linear-light interpolation")
+            XCTAssertEqual(pixel(f, 384, 540), [0, 0, 0, 0], "no connecting baseline is introduced")
+            XCTAssertEqual(zero, [Float](repeating: 0, count: s.bands))
+        }
+    }
+
+    func testMaximumHeightZeroUsesInsideWithoutDivisionForBothModes() throws {
+        let r = try SpectrumFrameRenderer(width: 1920, height: 1080)
+        let input: [Float] = [0, 0.125, 0.25, 0.5, 0.75, 1, 0.5, 0]
+        for mode in SpectrumFrameRendererTests.modes { for side in SpectrumFrameRendererTests.sides {
+            var s = style(side); s.mode = mode; s.maxHeightMilli = 0
+            s.red = 255; s.green = 0; s.blue = 0; s.alpha = 128
+            let expected = try XCTUnwrap(r.render(bands: input, style: s))
+            s.outsideRGB = .init(red: 0, green: 0, blue: 255)
+            same(try XCTUnwrap(r.render(bands: input, style: s)), expected)
+        } }
     }
 }

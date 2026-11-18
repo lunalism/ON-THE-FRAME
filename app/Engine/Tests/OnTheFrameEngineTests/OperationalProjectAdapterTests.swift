@@ -195,4 +195,22 @@ final class OperationalProjectAdapterTests: XCTestCase {
             XCTAssertEqual(try A.model(A.decode(data)),try A.model(state))
         }
     }
+    func testAppearanceFormat11MixedAdapterKeepsLocationsAndEveryStyleField() async throws {
+        let original = try await mixed(), item = original.timeline.spectra[0]
+        var style = item.style
+        style.red = 12; style.green = 34; style.blue = 56; style.alpha = 173
+        style.outsideRGB = .init(red: 17, green: 31, blue: 47)
+        style.thicknessMilli = 3125; style.reactionPercent = 150
+        style.windowMs = 300; style.offsetMs = -500
+        let timeline = try original.timeline.settingSpectrumStyle(item.id, style)
+        let state = try A.State(timeline: timeline, projectID: original.projectID, settings: original.settings, locations: original.locations)
+        let data = try A.encode(state), restored = try A.decode(data)
+        XCTAssertTrue(timeline.mediaCatalog.compactMap(\.still).allSatisfy { $0.validationState == .probeValidated })
+        XCTAssertTrue(restored.timeline.mediaCatalog.compactMap(\.still).allSatisfy { $0.validationState == .unverified })
+        XCTAssertEqual(restored.locations, original.locations)
+        XCTAssertEqual(try A.model(restored), try A.model(state))
+        XCTAssertEqual(restored.timeline.spectra[0].style, style)
+        XCTAssertEqual((try JSONSerialization.jsonObject(with: data) as! [String:Any])["version"] as? Int, 11)
+        XCTAssertEqual(try A.encode(restored), data)
+    }
 }

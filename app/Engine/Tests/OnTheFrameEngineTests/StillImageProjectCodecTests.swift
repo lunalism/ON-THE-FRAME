@@ -12,7 +12,7 @@ final class StillImageProjectCodecTests: XCTestCase {
         let encoded=try C.encode(p),decoded=try C.decode(encoded)
         XCTAssertEqual(decoded,p);XCTAssertEqual(try C.encode(decoded),encoded)
         XCTAssertThrowsError(try ProjectFile.decode(encoded)) {XCTAssertEqual($0 as? ProjectFile.LoadError,.unsupportedVersion(9))}
-        XCTAssertEqual(ProjectFile.currentVersion,10)
+        XCTAssertEqual(ProjectFile.currentVersion,11)
         var unused=p;unused.videoClips=[];XCTAssertEqual(try C.version(for:unused),9)
         XCTAssertEqual(try C.decode(C.encode(unused)),unused)
         let raw=try json(p),ref=(raw["media"] as! [[String:Any]])[0]["ref"] as! [String:Any]
@@ -148,7 +148,12 @@ extension StillImageProjectCodecTests {
         style["reactionPercent"] = value; spectra[0]["style"] = style; raw["spectra"] = spectra
         return raw
     }
-    func testReactionFormat10ValuesAndMixedRoundTrip() async throws {
+    func changingAppearance(_ raw: [String:Any], _ value: Any?) -> [String:Any] {
+        var raw = raw, spectra = raw["spectra"] as! [[String:Any]], style = spectra[0]["style"] as! [String:Any]
+        style["appearance"] = value; spectra[0]["style"] = style; raw["spectra"] = spectra
+        return raw
+    }
+    func testReactionValuesSurviveAppearanceFormat11MixedRoundTrip() async throws {
         for image in [false, true] {
             let baseline = try await reactionProject(image: image)
             for value in [0, 1, 99, 100, 101, 199, 200] {
@@ -156,7 +161,7 @@ extension StillImageProjectCodecTests {
                 var updatedStyle = p.spectra![0].style; updatedStyle.reactionPercent = value
                 p.spectra![0] = p.spectra![0].with(style: updatedStyle)
                 let encoded = try C.encode(p), raw = try json(p)
-                XCTAssertEqual(raw["version"] as? Int, 10)
+                XCTAssertEqual(raw["version"] as? Int, 11)
                 let style = ((raw["spectra"] as! [[String:Any]])[0]["style"] as! [String:Any])
                 XCTAssertEqual(style["reactionPercent"] as? Int, value)
                 let back = try C.decode(encoded)
@@ -169,13 +174,13 @@ extension StillImageProjectCodecTests {
                 let portable = try OperationalProjectAdapter.decode(OperationalProjectAdapter.encode(state))
                 XCTAssertEqual(portable, state)
                 let project = try ProjectPersistence.decode(encoded)
-                XCTAssertEqual(project.version, 10)
+                XCTAssertEqual(project.version, 11)
                 XCTAssertEqual(project.timeline.spectra[0].style.reactionPercent, value)
                 let destination = URL(fileURLWithPath: "/generated/reaction.ontheframe")
                 let saved = try ProjectPersistence.encode(project, at: destination)
                 XCTAssertEqual(try ProjectPersistence.decode(saved).timeline, project.timeline)
                 let projection = try ProjectFile.decode(JSONEncoder().encode(p.temporalDocument()))
-                XCTAssertEqual(projection.document.version, 10)
+                XCTAssertEqual(projection.document.version, 11)
                 XCTAssertEqual(projection.timeline.spectra, p.spectra!)
                 if !image { XCTAssertEqual(try ProjectFile.decode(encoded).timeline.spectra, p.spectra!) }
             }
@@ -185,6 +190,7 @@ extension StillImageProjectCodecTests {
         for image in [false, true] {
             let p = try await reactionProject(image: image)
             var raw = changingReaction(try json(p), nil)
+            raw = changingAppearance(raw, nil)
             raw["version"] = image ? 9 : 8
             let legacy = try data(raw), original = legacy
             let dir = FileManager.default.temporaryDirectory.appendingPathComponent("reaction-legacy-" + UUID().uuidString)
@@ -197,7 +203,7 @@ extension StillImageProjectCodecTests {
             XCTAssertEqual(try Data(contentsOf: url), original)
             XCTAssertEqual(try C.decode(legacy), p)
             let upgraded = try ProjectPersistence.encode(decoded, at: url)
-            XCTAssertEqual(try ProjectPersistence.decode(upgraded).version, 10)
+            XCTAssertEqual(try ProjectPersistence.decode(upgraded).version, 11)
             XCTAssertEqual(try Data(contentsOf: url), original) // encoding is not saving
             XCTAssertThrowsError(try C.decode(data(changingReaction(raw, 100))))
         }
@@ -225,7 +231,7 @@ extension StillImageProjectCodecTests {
             }
             var unknown = raw; unknown["futureCapability"] = true
             XCTAssertThrowsError(try C.decode(data(unknown)))
-            for version in [11, 12, Int.max] {
+            for version in [12, 13, Int.max] {
                 var future = raw; future["version"] = version
                 XCTAssertThrowsError(try ProjectPersistence.decode(data(future)))
                 XCTAssertThrowsError(try C.decode(data(future)))
@@ -275,5 +281,278 @@ extension StillImageProjectCodecTests {
         try original.write(to: destination, options: .withoutOverwriting)
         XCTAssertThrowsError(try ProjectPersistence.make(timeline: invalid, projectID: p.projectID))
         XCTAssertEqual(try Data(contentsOf: destination), original)
+    }
+}
+
+extension StillImageProjectCodecTests {
+    func testAppearanceFormat11RoundTripAndLegacyFormat10Migration() async throws {
+        for image in [false, true] {
+            var p = try await reactionProject(image: image)
+            var style = p.spectra![0].style
+            style.red = 12; style.green = 34; style.blue = 56; style.alpha = 173
+            style.reactionPercent = 150; style.windowMs = 300; style.offsetMs = -500
+            style.outsideRGB = .init(red: 17, green: 31, blue: 47)
+            p.spectra![0] = p.spectra![0].with(style: style)
+            let encoded = try C.encode(p), raw = try json(p)
+            XCTAssertEqual(raw["version"] as? Int, 11)
+            let round = try C.decode(encoded)
+            XCTAssertEqual(round, p)
+            XCTAssertEqual(try C.encode(round), encoded)
+            let state = try OperationalProjectAdapter.decode(encoded)
+            XCTAssertEqual(state.timeline.spectra[0].style, style)
+            XCTAssertEqual(state.locations, try OperationalProjectAdapter.restore(p).locations)
+            var legacy = changingAppearance(raw, nil); legacy["version"] = 10
+            let legacyBytes = try data(legacy)
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("appearance-legacy-" + UUID().uuidString)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let url = dir.appendingPathComponent("legacy.ontheframe")
+            try legacyBytes.write(to: url, options: .withoutOverwriting)
+            let old = try ProjectPersistence.decode(Data(contentsOf: url))
+            let migrated = old.timeline.spectra[0].style
+            XCTAssertEqual(old.version, 10)
+            XCTAssertEqual(migrated.insideRGB, .init(red: 12, green: 34, blue: 56))
+            XCTAssertEqual(migrated.resolvedOutsideRGB, migrated.insideRGB)
+            XCTAssertEqual(migrated.alpha, 173)
+            XCTAssertEqual(migrated.reactionPercent, 150, "Format 11 support must not reset existing Format 10 strength")
+            XCTAssertEqual(migrated.windowMs, 300); XCTAssertEqual(migrated.offsetMs, -500)
+            XCTAssertEqual(migrated.thicknessMilli, 3125); XCTAssertEqual(migrated.startXMilli, 320123)
+            let upgraded = try ProjectPersistence.encode(old, at: url)
+            XCTAssertEqual(try ProjectPersistence.decode(upgraded).version, 11)
+            XCTAssertEqual(try ProjectPersistence.decode(upgraded).timeline, old.timeline)
+            XCTAssertEqual(try Data(contentsOf: url), legacyBytes, "Opening/encoding does not rewrite the source project")
+            if !image { XCTAssertEqual(try ProjectFile.decode(legacyBytes).timeline, old.timeline) }
+        }
+    }
+
+    func testAppearanceV1RejectsMalformedAndUnsupportedNestedData() async throws {
+        func color(_ red: Any, _ green: Any, _ blue: Any) -> [String:Any] { ["red": red, "green": green, "blue": blue] }
+        func envelope(_ version: Any, _ outside: Any) -> [String:Any] { ["contractVersion": version, "outsideRGB": outside] }
+        let rgb = color(17, 31, 47)
+        var alpha = color(0, 0, 0); alpha["alpha"] = 255
+        var hue = envelope(1, rgb); hue["hueSweepDegrees"] = 0
+        var softness = envelope(1, rgb); softness["softnessPercent"] = 0
+        var inside = envelope(1, rgb); inside["insideRGB"] = rgb
+        let invalid: [Any?] = [
+            nil, NSNull(), [Any](), "appearance",
+            envelope(0, rgb), envelope(2, rgb), envelope(3, rgb), envelope(true, rgb),
+            ["contractVersion": 1], ["outsideRGB": rgb],
+            envelope(1, NSNull()), envelope(1, color(-1, 0, 0)), envelope(1, color(256, 0, 0)),
+            envelope(1, color(0.5, 0, 0)), envelope(1, color(true, 0, 0)),
+            envelope(1, alpha), hue, softness, inside
+        ]
+        for image in [false, true] {
+            let project = try await reactionProject(image: image)
+            let raw = try json(project)
+            for appearance in invalid {
+                let bytes = try data(changingAppearance(raw, appearance))
+                XCTAssertThrowsError(try C.decode(bytes))
+                XCTAssertThrowsError(try ProjectPersistence.decode(bytes))
+                if !image { XCTAssertThrowsError(try ProjectFile.decode(bytes)) }
+            }
+        }
+        var style = SpectrumItemStyle.provisionalDefault
+        style.outsideRGB = .init(red: 17, green: 31, blue: 47)
+        let original = try JSONSerialization.jsonObject(with: JSONEncoder().encode(style)) as! [String:Any]
+        for appearance in invalid.dropFirst() {
+            var raw = original; raw["appearance"] = appearance
+            XCTAssertThrowsError(try JSONDecoder().decode(SpectrumItemStyle.self, from: data(raw)))
+        }
+    }
+
+    func testAppearanceStrictIntegerTokensDuplicatesAndEscapedKeys() async throws {
+        var p = try await reactionProject()
+        var style = p.spectra![0].style; style.outsideRGB = .init(red: 17, green: 31, blue: 47)
+        p.spectra![0] = p.spectra![0].with(style: style)
+        let text = String(decoding: try C.encode(p), as: UTF8.self)
+        for token in ["17.0", "1.7e1", "-0", "true", "\"17\"", "999999999999999999999999999999999"] {
+            let changed = text.replacingOccurrences(of: "\"red\" : 17", with: "\"red\" : " + token)
+            XCTAssertNotEqual(changed, text)
+            XCTAssertThrowsError(try C.decode(Data(changed.utf8)))
+        }
+        for replacement in ["\"contractVersion\" : 1.0", "\"contractVersion\" : 1, \"contractVersion\" : 1"] {
+            let changed = text.replacingOccurrences(of: "\"contractVersion\" : 1", with: replacement)
+            XCTAssertNotEqual(changed, text)
+            XCTAssertThrowsError(try C.decode(Data(changed.utf8)))
+        }
+        let duplicate = text.replacingOccurrences(of: "\"red\" : 17", with: "\"red\" : 17, \"red\" : 17")
+        XCTAssertThrowsError(try C.decode(Data(duplicate.utf8)))
+        let escaped = text.replacingOccurrences(of: "\"appearance\"", with: "\"\\u0061ppearance\"")
+        XCTAssertEqual(try C.decode(Data(escaped.utf8)), p)
+    }
+
+    func testAppearanceCannotBeInjectedIntoLegacyPathsAndOldReadersReject11() async throws {
+        let appearance: [String:Any] = ["contractVersion": 1, "outsideRGB": ["red": 17, "green": 31, "blue": 47]]
+        for image in [false, true] {
+            let p = try await reactionProject(image: image)
+            for version in (image ? [9, 10] : [8, 10]) {
+                var legacy = changingAppearance(try json(p), nil); legacy["version"] = version
+                if version < 10 { legacy = changingReaction(legacy, nil) }
+                XCTAssertNoThrow(try C.decode(data(legacy)), "A genuine legacy file still opens")
+                let injected = try data(changingAppearance(legacy, appearance))
+                XCTAssertThrowsError(try C.decode(injected))
+                XCTAssertThrowsError(try ProjectPersistence.decode(injected))
+                if !image { XCTAssertThrowsError(try ProjectFile.decode(injected)) }
+            }
+        }
+        let empty = try ProjectFile.encode(Timeline(), projectID: UUID(), settings: .m1, bookmarks: [:], projectURL: nil)
+        for version in 1...10 {
+            var raw = try JSONSerialization.jsonObject(with: empty) as! [String:Any]
+            raw["version"] = version; raw["appearance"] = appearance
+            let bytes = try data(raw)
+            XCTAssertThrowsError(try ProjectPersistence.decode(bytes))
+            XCTAssertThrowsError(try C.decode(bytes))
+            XCTAssertThrowsError(try ProjectFile.decode(bytes))
+        }
+        // Freeze only the previous reader's actual header admission boundary,
+        // not an unexecuted old-app UI/save implementation.
+        struct PreviousHeader: Decodable { let format: String; let version: Int }
+        func previousBoundary(_ bytes: Data) throws {
+            let header = try JSONDecoder().decode(PreviousHeader.self, from: bytes)
+            if header.format == ProjectFile.format, header.version > 10 { throw ProjectPersistence.Failure.futureVersion(header.version) }
+        }
+        var p = try await reactionProject()
+        XCTAssertThrowsError(try previousBoundary(C.encode(p)))
+        p.spectra = nil
+        XCTAssertEqual(try C.version(for: p), 8, "Empty Spectrum lane/lineage keeps its established format")
+        let image = try await reactionProject(image: true)
+        var without = image; without.spectra = nil
+        XCTAssertEqual(try C.version(for: without), 9)
+    }
+}
+
+extension StillImageProjectCodecTests {
+    // Keep wire spellings (including duplicate keys and integer lexemes) intact.
+    // The fixture is independent of the project encoder and needs no media access.
+    private func spectrumJSON(version: Int, image: Bool, styleFields: [String]) -> String {
+        let media = image ? """
+            {"ref":{"kind":"stillImage","id":"00000000-0000-4000-8000-000000000006",
+            "name":"테스트.png","path":"/generated/image.png","size":120,"modifiedNs":42,
+            "image":{"contractVersion":1,"encoding":"png","width":2,"height":3,"orientation":1,
+            "componentBitDepth":8,"encodedSampleBitDepth":8,"colorModel":"RGB",
+            "profileDisposition":"assumed-sRGB","alphaCapability":false}}}
+            """ : ""
+        let extra = styleFields.map { "," + $0 }.joined()
+        return """
+            {"format":"dev.ontheframe.project","version":\(version),"projectID":"00000000-0000-4000-8000-000000000001",
+            "settings":{"width":1920,"height":1080,"fps":30},"durationFrames":100,"lanes":[
+            {"id":"00000000-0000-4000-8000-000000000002","kind":"spectrum","name":"색상 🎵"},
+            {"id":"00000000-0000-4000-8000-000000000003","kind":"video","name":"V"},
+            {"id":"00000000-0000-4000-8000-000000000004","kind":"audio","name":"A"}],
+            "media":[\(media)],"videoClips":[],"audioClips":[],"spectra":[{
+            "id":"00000000-0000-4000-8000-000000000005","lane":"00000000-0000-4000-8000-000000000002",
+            "start":0,"length":100,"style":{"mode":"digital","sides":"mirrored","startXMilli":320123,
+            "startYMilli":540000,"endXMilli":1728000,"endYMilli":540000,"maxHeightMilli":480000,
+            "thicknessMilli":3125,"red":12,"green":34,"blue":56,"alpha":173,"bands":64,"lowHz":20,
+            "highHz":2000,"windowMs":300,"offsetMs":-500,"floorDB":-60\(extra)}}]}
+            """
+    }
+
+    private var appearanceField: String {
+        #""appearance":{"contractVersion":1,"outsideRGB":{"red":17,"green":31,"blue":47}}"#
+    }
+
+    private func encodedFixtures(_ json: String) throws -> [(name: String, bytes: Data)] {
+        let encodings: [(String, String.Encoding, [UInt8])] = [
+            ("UTF-8", .utf8, [0xEF, 0xBB, 0xBF]),
+            ("UTF-16LE", .utf16LittleEndian, [0xFF, 0xFE]),
+            ("UTF-16BE", .utf16BigEndian, [0xFE, 0xFF]),
+            ("UTF-32LE", .utf32LittleEndian, [0xFF, 0xFE, 0x00, 0x00]),
+            ("UTF-32BE", .utf32BigEndian, [0x00, 0x00, 0xFE, 0xFF])
+        ]
+        var fixtures: [(String, Data)] = []
+        for (name, encoding, mark) in encodings {
+            let bytes = try XCTUnwrap(json.data(using: encoding))
+            fixtures.append((name, bytes))
+            if encoding != .utf32LittleEndian {
+                fixtures.append((name + " BOM", Data(mark) + bytes))
+            }
+        }
+        return fixtures
+    }
+
+    func testUTF32LEWithBOMFollowsFoundationHeaderAdmission() throws {
+        struct Header: Decodable { let format: String; let version: Int }
+        func bytes(_ fields: [String]) throws -> Data {
+            let json = spectrumJSON(version: 8, image: false, styleFields: fields)
+            return Data([0xFF, 0xFE, 0x00, 0x00]) + (try XCTUnwrap(json.data(using: .utf32LittleEndian)))
+        }
+        let singleColor = try bytes([])
+        if let header = try? JSONDecoder().decode(Header.self, from: singleColor) {
+            XCTAssertEqual(header.format, ProjectFile.format)
+            XCTAssertEqual(header.version, 8)
+            let raw = try ProjectFile.decode(singleColor)
+            let app = try ProjectPersistence.decode(singleColor)
+            XCTAssertEqual(app.version, 8)
+            XCTAssertEqual(raw.timeline.spectra, app.timeline.spectra)
+            let style = try XCTUnwrap(app.timeline.spectra.first?.style)
+            XCTAssertEqual(style.resolvedOutsideRGB, style.insideRGB)
+        } else {
+            XCTAssertThrowsError(try ProjectFile.decode(singleColor))
+            XCTAssertThrowsError(try ProjectPersistence.decode(singleColor))
+        }
+        let forbidden = try bytes([appearanceField])
+        XCTAssertThrowsError(try ProjectFile.decode(forbidden))
+        XCTAssertThrowsError(try ProjectPersistence.decode(forbidden))
+    }
+
+    func testSpectrumColorAndReactionRoundTripAcrossJSONEncodings() throws {
+        for image in [false, true] {
+            for version in [image ? 9 : 8, 10, 11] {
+                var fields: [String] = []
+                if version >= 10 { fields.append(#""reactionPercent":150"#) }
+                if version == 11 { fields.append(appearanceField) }
+                let json = spectrumJSON(version: version, image: image, styleFields: fields)
+                for (encoding, bytes) in try encodedFixtures(json) {
+                    let label = "Format \(version), \(encoding), image \(image)"
+                    let opened = try ProjectPersistence.decode(bytes)
+                    let style = try XCTUnwrap(opened.timeline.spectra.first?.style, label)
+                    XCTAssertEqual(opened.version, version, label)
+                    XCTAssertEqual(opened.timeline.lanes.first?.name, "색상 🎵", label)
+                    XCTAssertEqual(style.insideRGB, .init(red: 12, green: 34, blue: 56), label)
+                    XCTAssertEqual(style.resolvedOutsideRGB, version == 11 ? .init(red: 17, green: 31, blue: 47) : style.insideRGB, label)
+                    XCTAssertEqual(style.alpha, 173, label)
+                    XCTAssertEqual(style.thicknessMilli, 3125, label)
+                    XCTAssertEqual(style.startXMilli, 320123, label)
+                    XCTAssertEqual(style.reactionPercent, version >= 10 ? 150 : 100, label)
+                    if image {
+                        XCTAssertThrowsError(try ProjectFile.decode(bytes), label)
+                    } else {
+                        XCTAssertEqual(try ProjectFile.decode(bytes).timeline.spectra, opened.timeline.spectra, label)
+                    }
+                    let saved = try ProjectPersistence.encode(opened, at: URL(fileURLWithPath: "/generated/colors.ontheframe"))
+                    let reopened = try ProjectPersistence.decode(saved)
+                    XCTAssertEqual(reopened.version, 11, label)
+                    XCTAssertEqual(reopened.timeline, opened.timeline, label)
+                }
+            }
+        }
+    }
+
+    func testForbiddenAndMalformedSpectrumFieldsAcrossJSONEncodings() throws {
+        let reaction = #""reactionPercent":150"#
+        let badAppearance = [
+            appearanceField.replacingOccurrences(of: #""contractVersion":1"#, with: #""contractVersion":2"#),
+            appearanceField.replacingOccurrences(of: #""red":17"#, with: #""red":17,"extra":0"#),
+            appearanceField.replacingOccurrences(of: #""red":17"#, with: #""red":17,"\u0072ed":17"#),
+            appearanceField.replacingOccurrences(of: #""red":17"#, with: #""red":17.0"#),
+            appearanceField.replacingOccurrences(of: #""red":17"#, with: #""red":256"#)
+        ]
+        for image in [false, true] {
+            let legacy = image ? 9 : 8
+            var invalid: [(Int, [String])] = [
+                (legacy, [appearanceField]), (legacy, [reaction]), (10, [reaction, appearanceField]),
+                (10, [#""reactionPercent":150.0"#]), (11, [reaction, reaction, appearanceField]),
+                (11, [reaction, appearanceField, appearanceField])
+            ]
+            invalid += badAppearance.map { (11, [reaction, $0]) }
+            for (version, fields) in invalid {
+                let json = spectrumJSON(version: version, image: image, styleFields: fields)
+                for (encoding, bytes) in try encodedFixtures(json) {
+                    let label = "Format \(version), \(encoding), image \(image), \(fields)"
+                    XCTAssertThrowsError(try ProjectPersistence.decode(bytes), label)
+                    if !image { XCTAssertThrowsError(try ProjectFile.decode(bytes), label) }
+                }
+            }
+        }
     }
 }

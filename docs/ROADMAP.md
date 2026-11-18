@@ -2,6 +2,10 @@
 
 ## 현행 기능과 검증 경계
 
+**2026-11-18 · SPECTRUM-FX-02B-CLOSE-02.** Inside/Outside Color와 Format 11 appearance v1 구현을 완료했다. 소유자는 호환성 정정 이전의 서명된 Debug 앱에서 두 색의 독립 편집, Preview 그라데이션, 두 색의 Undo/Redo, 저장 후 두 색과 그라데이션 복원을 확인했다(핵심 6/6 PASS). 후속 COMPAT-01에서 Format 8의 금지된 색상 필드가 UTF-16에서 열리던 문제를 정정했다. 당시 최종 코덱 검사 19개와 별도 엔진 회귀 11개가 통과했다. 정정본의 물리 수락은 미검증이다. [수락 범위와 호환성 검증 이력](DECISIONS.md#2026-11-18-spectrum-fx-02b-close-02-핵심-수락과-호환성-정정)
+
+다음 제품 구현 제안은 FX-02C Hue Interpolation, 그다음은 FX-02D Softness다. 에이전트 작업 절차 문서 점검·정리는 별도로 계획한다. UX-02는 계획된 v1.1로 유보하며 공개 Spectrum Export는 비활성이다. 아래 FX-01C-CLOSE-01·FX-01B-CLOSE-01·DOC-ALIGN-01 요약은 당시 이력이다.
+
 **2026-11-18 · SPECTRUM-FX-01C-CLOSE-01 구현 완료·소유자 핵심 수락:** `feature/spectrum-effects` @ `6f4de7908fa38457c41469e65105485c575d75c3` 위의 Analysis Window·Audio Offset 구현에 대해 소유자가 실제 Mac에서 확인한 **핵심 직접 관찰 9항목 PASS**를 기록한다. 이전 자동 8개 앱/helper 그룹의 1230 PASS와 엔진 fixture 정정 이력은 별도 증거이며 이번 CLOSE에서 빌드·제품 검사를 재실행하지 않는다. 수락 범위·물리 미시험 경계는 [아래 기록](#spectrum-fx-01c-핵심-수락과-다음-제안), 로컬 커밋 승인은 [결정 기록](DECISIONS.md#2026-11-18-spectrum-fx-01c-close-01-핵심-수락과-로컬-체크포인트)을 따른다. 원격 push·merge와 FX-02 구현 승인은 없으며 아래 FX-01B-CLOSE-01·DOC-ALIGN-01 문단은 당시 이력이다.
 
 **2026-11-18 · SPECTRUM-FX-01B-CLOSE-01 현재 상태:** `feature/spectrum-effects`는 통합 main `90ce4db48ea07e216afe709a5f920628f005eb2a`에서 시작했다. 시작/끝 주파수·밴드 수 세 Inspector 필드는 구현 완료이며, 이전 RECOVERY의 **763 PASS / 0 FAIL / 0 SKIP**와 소유자가 직접 확인한 **핵심 관찰 10항목 PASS**를 구분한다. 이번 CLOSE-01에서는 빌드·제품 검사를 재실행하지 않는다. 최초 memory-pressure 중지와 별도 승인 복구 성공 이력, 수동 미시험 항목은 [아래 수락 범위](#spectrum-fx-01b-핵심-수락과-다음-단계)에 남긴다. 이번 승인은 로컬 체크포인트 범위이며 원격 게시·merge 승인이 아니다. 아래 DOC-ALIGN-01 Git 표와 과거 실행 수치는 당시 이력이다. UX-02는 planned v1.1 deferred WIP·미수락이며 현재 FX 브랜치에 없다([수락·체크포인트 경계](DECISIONS.md#2026-11-18-spectrum-fx-01b-close-01-핵심-수락과-로컬-체크포인트)).
@@ -34,7 +38,7 @@
 | Spectrum 숫자 | 기존7개와 FX-01B 주파수/밴드3개·FX-01C 창/오프셋2개 필드의 정수 UI·숫자 자체 mouse scrub·live Preview·한 gesture Undo·취소 구현. FX-01B 이전 자동763 PASS·소유자 핵심10관찰, FX-01C 이전 자동1230 PASS·소유자 핵심9관찰을 구분. Escape·deactivation 등 물리 미시험 경계는 아래 기록을 따름. untouched legacy milli를 몰래 정수화하지 않음. 기존 slider·ColorPicker 유지 |
 | Digital / Analog | Digital 양수 막대와 Analog 유지. 유효하게 완료된 정확한0높이 Digital은 기존 중심·밴드 수·두께·색·알파의 독립 점. missing/pending/stale·비활성 구간을 가짜 무음으로 바꾸지 않음 |
 | Seek·이미지 playback | temporary timing nil에서 eligible Spectrum 작업 보존, exact PTS/token/source/generation/revision/epoch 검증 유지. 이미지 재구성 중 Play는 session/generation/item/readiness/seek 확인 뒤1회 소비, Pause·무효화로 취소 |
-| 저장·열기 | 앱 persistence·image-aware codec·raw ProjectFile의 범위를 구분. [현행 형식 표](PRODUCT.md#현행-프로젝트-형식과-기능-경계)를 따르며 일괄 Format10 저장/모든 decoder의1–10 호환으로 설명하지 않음 |
+| 저장·열기 | FX-02B에서 실제 Spectrum 항목은 Format 11 appearance v1로 저장한다. 지원되는 레거시 형식을 읽으며 Spectrum 없는 파일은 기존 형식 선택을 사용한다. 앱 persistence·image-aware codec·raw ProjectFile의 범위를 구분. 기존 codec 경계는 [Format 10 기준 형식 표](PRODUCT.md#현행-프로젝트-형식과-기능-경계)를 참고하고 현행 Spectrum 저장은 [FX-02B 결정](DECISIONS.md#2026-11-18-spectrum-fx-02b-안쪽과-바깥쪽-색상)을 따름 |
 | Export | 일반 자막 포함 FHD30 SDR H.264/AAC 경로와 gated 내부 이미지·Spectrum 검증을 구분. **공개 Spectrum Export 비활성**. 내부 shared renderer 증거로 전체 parity를 선언하지 않음 |
 
 01C의 기존 실제 실행 보고: engine85·실제 내장 overlay61·zero Preview23·playback146·image intent130·scrub138·Draft/Store223 각각 PASS/0 FAIL/0 SKIP, Seek18/18 캡처·raster66/66 일치. Native Inspector는138 PASS/7 FAIL/4 SKIP이며 같은 기준선 실패가 남는다. 실제 내장 결과와 이전 진단 복사본·초기 실행기 오류·소유자 수락을 구분한 원본 기록은 아래에 보존한다. Preview/내부 Export의5프레임 비교·31프레임 prepare·120프레임 checkpoint는 한정된 증거다.

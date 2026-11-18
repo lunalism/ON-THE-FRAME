@@ -195,6 +195,10 @@ final class PausedSpectrumOverlay {
                           store.spectrumPreview.epoch == epoch, store.spectrumPreview.revision == revision,
                           !store.isPlaying, store.gestureBase == nil, !view.isShowingStill, store.appliedGeneration == store.generation,
                           let item, store.player.currentItem === item, let layer = self.layers[entry.id] else { return }
+                    // A coalesced style edit can change the model before the next
+                    // session revision. Keep the installed image until the new
+                    // batch is ready, and let this completed request drain.
+                    guard !retainingStyleFrame || store.timeline.spectrum(entry.id) == entry else { return }
                     let updateStart = ProcessInfo.processInfo.systemUptime
                     CATransaction.begin(); CATransaction.setDisableActions(true)
                     switch accepted {

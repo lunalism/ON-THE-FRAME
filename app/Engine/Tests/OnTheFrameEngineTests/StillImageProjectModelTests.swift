@@ -33,7 +33,7 @@ enum ImageModelFixture {
 
 final class StillImageProjectModelTests: XCTestCase {
     typealias M = StillImageProjectModel
-    func testDisplayP3ProfilePersistsInExistingFormat10Fields() async throws {
+    func testDisplayP3ProfilePersistsUnchangedAcrossLegacy10AndAppearance11() async throws {
         let generated=try await ImageModelFixture.image("jpg"),url=generated.url.deletingLastPathComponent().appendingPathComponent("p3-generated.jpg")
         try autoreleasepool {
             let context=try XCTUnwrap(CGContext(data:nil,width:4,height:2,bitsPerComponent:8,bytesPerRow:16,space:CGColorSpace(name:CGColorSpace.displayP3)!,bitmapInfo:CGImageAlphaInfo.noneSkipLast.rawValue))
@@ -52,9 +52,16 @@ final class StillImageProjectModelTests: XCTestCase {
         var style=SpectrumItemStyle.provisionalDefault;style.reactionPercent=150
         project.spectra=[SpectrumItem(lane:lane,start:0,length:300,sourceKey:origin,style:style)]
         try project.validate()
-        XCTAssertEqual(try StillImageProjectCodec.version(for:project),10)
+        XCTAssertEqual(try StillImageProjectCodec.version(for:project),11)
         let encoded=try StillImageProjectCodec.encode(project),decoded=try StillImageProjectCodec.decode(encoded)
         XCTAssertEqual(decoded,project)
+        var legacy = try JSONSerialization.jsonObject(with: encoded) as! [String:Any]
+        legacy["version"] = 10
+        var spectra = legacy["spectra"] as! [[String:Any]], legacyStyle = spectra[0]["style"] as! [String:Any]
+        legacyStyle.removeValue(forKey: "appearance"); spectra[0]["style"] = legacyStyle; legacy["spectra"] = spectra
+        let legacyDecoded = try StillImageProjectCodec.decode(JSONSerialization.data(withJSONObject: legacy))
+        XCTAssertEqual(legacyDecoded, project)
+        XCTAssertEqual(legacyDecoded.spectra?.first?.style.reactionPercent, 150)
         XCTAssertEqual(decoded.media[0].ref.still?.image.profileDisposition,"embedded-Display-P3-ICC")
         XCTAssertEqual(decoded.media[0].ref.still?.image.profileSHA256,source.descriptor.profileSHA256)
         let text=String(decoding:encoded,as:UTF8.self)

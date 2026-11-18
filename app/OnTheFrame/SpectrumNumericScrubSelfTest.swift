@@ -440,7 +440,7 @@ import OnTheFrameEngine
                   x.store.history.undoDepth == 1 && !x.store.isDirty && x.store.timeline == saved, "")
             x.mouse(.leftMouseUp, 600)
             let decoded = try ProjectPersistence.decode(Data(contentsOf: url))
-            check(property.rawValue + ".Format10 saved", decoded.version == 10 && decoded.timeline.spectrum(x.id)?.style == candidate, "")
+            check(property.rawValue + ".Format11 saved", decoded.version == 11 && decoded.timeline.spectrum(x.id)?.style == candidate, "")
             x.store.undo()
             check(property.rawValue + ".undo after save dirty", x.style == legacy && x.store.isDirty, "")
             x.store.redo()
