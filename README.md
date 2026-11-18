@@ -23,13 +23,13 @@ ON THE FRAME은 음악을 중심으로 이미지·영상·오디오를 배치하
 
 ## 현재 상태
 
-**2026-11-17 확인:** 게시된 `feature/subtitles` 기준은 `f2b80444b439ad59a3870da3350a1385d388552a`다. 문서 정렬 브랜치 `docs/audit-alignment-20261117`은 그 커밋에서 시작했으며 문서 변경은 아직 미커밋이다. [현행 기능·검증 상태](docs/ROADMAP.md#현행-기능과-검증-경계), [인계](docs/HANDOFF.md), [형식·기능 경계](docs/PRODUCT.md#현행-프로젝트-형식과-기능-경계)를 구분해 읽는다.
+**2026-11-18 게시된 main 기준:** `90ce4db48ea07e216afe709a5f920628f005eb2a`에 Spectrum 체크포인트와 문서 정렬이 통합됐다. 아래 기능 설명은 이 게시본 기준이다. 로컬 개발 브랜치의 구현·수락 범위는 [날짜별 인계](docs/HANDOFF.md), 기능별 검증 기록은 [로드맵](docs/ROADMAP.md#현행-기능과-검증-경계), 저장·읽기 경계는 [형식 표](docs/PRODUCT.md#현행-프로젝트-형식과-기능-경계)를 참조한다.
 
 - **편집기([app/](app/)):** 영상·오디오 가져오기, 여러 레인·연결·트림·분할·이동·복사/붙여넣기·Undo/Redo, 영상 변형·오디오 gain/mute/fade, 자막·효과·자막 포함 FHD 30 fps SDR H.264/AAC MP4 내보내기, 프로젝트 저장/열기·재연결이 구현돼 있다. `.ontheframe`은 콘텐츠와 경로에 따라 형식을 선택하며 현재 앱 persistence 경계는 Format 10이다.
 - **이미지:** 사용자 정의 Debug 빌드 조건과 명시적 실행 인수가 필요한 내부 경로다. 한정된 고해상도·Display P3 입력을 허용하고 Preview 표현을 sRGB로 정규화하지만, 임의 해상도·모든 이미지·공개 Release 지원을 뜻하지 않는다.
 - **Spectrum:** 생성은 Debug 전용이며 기존 항목 편집·소스 계보·Digital/Analog·정수 숫자와 직접 mouse scrubbing·live Preview·Undo/Redo가 구현돼 있다. 유효하게 완료된 Digital 0높이 분석은 밴드별 최소 점을 그린다. Seek 연속성과 이미지 재구성 중 playback intent 수정도 게시됐다. **공개 Spectrum Export는 비활성**이며 내부 공유 렌더링 검증과 구분한다.
 - **수락과 게시:** scrubbing과 ZERO의 소유자 수락은 각각 시험한 조건의 **6/6 PASS**이며 관련 체크포인트는 feature에 게시됐다. 이전 자동 검증·소유자 수락·커밋/푸시는 서로 다른 상태다. 이번 문서 작업에서 제품 검사를 재실행하지 않았다.
-- **다음 개발 제안 순서:** `SPECTRUM-UX-02 → SPECTRUM-FX-01 → SPECTRUM-FX-02 → SPECTRUM-SHADOW-01`. 모두 미구현 계획이며 구체적 FX 파라미터·구성 의미는 후속 승인 전까지 열린 상태다.
+- **후속 개발:** 2026-11-17에 제안한 순서는 `SPECTRUM-UX-02 → SPECTRUM-FX-01 → SPECTRUM-FX-02 → SPECTRUM-SHADOW-01`이었다. 이후의 UX-02 유보와 로컬 FX 진행 상태는 인계에 기록했다.
 - **실험:** E1(짧은 FHD)과 E3-1(10분 FHD)은 각 실험 범위에서 완료, E2(짧은 4K)는 원본 프레임 불일치로 미완료다. E3-2 이후는 시작하지 않았고 과거 실험의 통과가 현재 제품 전체의 수락은 아니다.
 - **지원 목표:** 최대 3시간 프로젝트와 4K는 받아들인 지원 목표이며 아직 입증되지 않았다.
 - **미정:** 기술 스택 확정, 최소 macOS 버전, 입출력 포맷 정책, 성능 기준, 배포 방식, 라이선스. 상업 배포는 개인 사용이 성공한 뒤에만 검토하고, 활성화·결제·라이선스 인프라는 개인 사용 단계에 넣지 않는다.
@@ -50,7 +50,9 @@ ON THE FRAME은 음악을 중심으로 이미지·영상·오디오를 배치하
 - [experiments/e1-fhd/README.md](experiments/e1-fhd/README.md) — E1 실험 재현 명령, 결과, 소유자 관찰 체크리스트, 한계
 - [experiments/e3-fhd-10min/README.md](experiments/e3-fhd-10min/README.md) — E3-1 실험(10분 FHD) 재현 명령, 결과, 메모리·디스크 측정, 소유자 확인, 한계
 - [experiments/e2-4k/README.md](experiments/e2-4k/README.md) — E2 실험(짧은 4K 컷 편집) 재현 명령, 결과, 열린 결함, 소유자 관찰 체크리스트, 한계
-- [CLAUDE.md](CLAUDE.md) — 코딩 에이전트 작업 규칙
+- [AGENTS.md](AGENTS.md) — Codex 시작 지침과 필수 읽기 순서
+- [CLAUDE.md](CLAUDE.md) — 프로젝트별 승인·작업 규칙
+- [공통 작업 절차](docs/AGENT-WORKFLOW.md) — Git 사전 확인, 작업별 권한, 소유자 데이터, 검증과 작업 프롬프트
 
 ## 라이선스
 
