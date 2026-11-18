@@ -1,5 +1,24 @@
 # 인계 요약 — ON THE FRAME
 
+## 2026-11-18 현행 인계 · AGENT-WORKFLOW-02
+
+아래는 문서 브랜치를 만든 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치와 HEAD를 조회한다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 게시된 main | `90ce4db48ea07e216afe709a5f920628f005eb2a`. PR #2로 Digital zero까지의 기능, PR #3으로 문서 정렬을 통합했다. 앱 저장·읽기는 [Format 10 기준 표](PRODUCT.md#현행-프로젝트-형식과-기능-경계)를 따른다. |
+| 이번 문서 브랜치 | `docs/agent-workflow`를 위 main에서 생성했다. 공통 작업 지침과 진입점이 이번 검토 대상이다. |
+| 로컬 FX 개발 | `feature/spectrum-effects`의 `6f4de79`(주파수·밴드 수), `5fb95d2`(분석 창·오디오 오프셋), `e80742f`(Inside/Outside Color·Format 11)은 로컬 체크포인트다. 게시된 main에는 이 세 커밋이 없다. |
+| 보류된 UX-02 | `feature/spectrum-preview-controls`의 `8c84134`에 WIP를 보존했다. Preview 직접 선택은 소유자 물리 시험에서 실패했고 Start/End 가이드 수락은 미완료다. v1.1로 유보했다. |
+
+**수락과 미검증 범위.** 게시된 Seek는 5개, image playback·숫자 scrubbing·Digital zero는 각각 6개 시나리오에서 소유자 수락을 받았다. FX 브랜치의 FX-01B와 FX-01C는 소유자가 각각 핵심 10항목과 9항목을 확인했다. FX-02B의 두 색은 호환성 정정 **전** 서명본에서 6/6 수락됐다. 이후 Format 8 UTF-16 읽기 정정에서 코덱 19개와 엔진 회귀 11개가 통과했고 정정본의 물리 수락은 미검증이다. 상세 근거는 해당 브랜치의 `docs/ROADMAP.md`와 `docs/DECISIONS.md`에 있다.
+
+**열린 문제.** Native Inspector 7 FAIL / 4 SKIP, 내부 Undo/Redo Seek 지연 조사가 남아 있다. 장시간 성능·다른 하드웨어·전체 Preview/Export 일치는 미검증이며 공개 Spectrum Export는 비활성이다. 기존 A-010 등은 [로드맵의 열린 문제](ROADMAP.md#s6-프로젝트-보호안정화-단계-6--열린-문제-목록)를 따른다.
+
+**다음 승인.** 현재 승인은 AGENT-WORKFLOW-02의 문서 5개 작성과 검증까지다. 다음은 소유자 문서 검토이며, 문서 커밋과 PR은 별도 승인을 기다린다. FX-02C Hue Interpolation과 FX-02D Softness는 후속 제품 제안이다.
+
+이 아래의 ‘현행’과 ‘다음’은 각 기록을 작성한 날짜를 기준으로 읽는다.
+
 ## 현행 인계 — 2026-11-17 DOC-ALIGN-01
 
 소유자가 확정한 방향은 macOS **Composition-first Music Visual Editor**다. 음악 중심의 이미지·영상·오디오 구성, 자막·오디오 반응형 Spectrum, Preview·최종 영상 내보내기를 우선한다. After Effects는 편집 개념·Spectrum 속성·숫자 조작의 참고이며 완전한 Composition 시스템이나 전체 AE 기능을 구현했다는 뜻이 아니다. 고급 전환은 유보한다.
