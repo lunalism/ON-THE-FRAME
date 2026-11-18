@@ -9,7 +9,8 @@ import OnTheFrameEngine
 enum SpectrumPlaybackEndSelfTest {
     struct Failure: Error { let check: String }
 
-    static func run(store: ProjectStore, active: URL, early: URL, empty: URL, relink: URL) async throws {
+    static func run(store: ProjectStore, active: URL, early: URL, empty: URL, relink: URL,
+                    expectedLayoutSuite: String = "dev.ontheframe.spectrumfx02c.playbackend01.end-check") async throws {
         func check(_ result: Bool, _ name: String) throws {
             print(result ? "PASS" : "FAIL", name)
             if !result { throw Failure(check: name) }
@@ -23,7 +24,7 @@ enum SpectrumPlaybackEndSelfTest {
             try check(opened && installed && store.missingMedia.isEmpty, "opened generated " + url.lastPathComponent)
         }
         try check(store.projectURL == nil && !store.isDirty && store.recentProjects.isEmpty &&
-                  EditorLayout.shared.suiteName == "dev.ontheframe.spectrumfx02c.playbackend01.end-check",
+                  expectedLayoutSuite.hasSuffix(".end-check") && EditorLayout.shared.suiteName == expectedLayoutSuite,
                   "fresh isolated editor")
         guard let host = store.previewHost, host.window?.isVisible == true else { throw Failure(check: "visible editor") }
         let overlay = host.spectrumOverlay
@@ -185,6 +186,74 @@ enum SpectrumPlaybackEndSelfTest {
         // item guard. All positive endpoint tests above used native transport.
         NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: initialItem)
         try check(store.playhead == 12 && !store.isPlaying && blank(), "obsolete item cannot complete the new project")
+        try await startingFrameChecks(audio: relink, check: check)
+    }
+
+    private static func startingFrameChecks(audio: URL, check: (Bool, String) throws -> Void) async throws {
+        let copy = audio.deletingLastPathComponent().appendingPathComponent("startup-" + UUID().uuidString + ".wav")
+        try Data(contentsOf: audio).write(to: copy, options: .withoutOverwriting)
+        let asset = try await MediaProbe.inspect(copy)
+        var timeline = try Timeline().registering(asset).placing(media: asset.id, at: 0, videoLane: nil, audioLane: Lane.audioID)
+        timeline = try timeline.addingSpectrum(fromAudioClip: timeline.audioClips[0].id, newLaneName: "Spectrum")
+        let id = timeline.spectra[0].id, session = SpectrumPreviewSession(), controller = session.playback
+        session.update(timeline: timeline, media: [asset])
+        let gate = SpectrumOverlaySelfTest.Gate()
+        defer { gate.release(); session.transformOutcomeForTest = nil; session.resetProject() }
+        func prepare(_ frame: Int) async throws {
+            controller.stop()
+            controller.prepareStartingFrame(frame, timeline: timeline)
+            let ready = await LaneSelfTest.waitUntil(8) { controller.pendingCount == 0 && controller.retainedBytes > 0 }
+            try check(ready && controller.currentFrame == nil && controller.currentOutcome(spectrum: id, frame: frame) == nil,
+                      "preparation alone cannot authorize a playback image")
+        }
+        var firstRaster: CGImage?, firstRequests = 0
+        session.transformOutcomeForTest = { _, frame, outcome in
+            if frame == 20, case let .ready(_, raster?) = outcome {
+                firstRaster = raster.image
+                firstRequests += 1
+            }
+            return outcome
+        }
+        try await prepare(20)
+        controller.advance(frame: 20, timeline: timeline)
+        let installed = await LaneSelfTest.waitUntil(8) {
+            if case let .ready(_, raster?)? = controller.currentOutcome(spectrum: id, frame: 20) {
+                return raster.image === firstRaster
+            }
+            return false
+        }
+        try check(installed && firstRequests == 1 && controller.metrics.sourceRevalidations > 0,
+                  "exact first PTS releases the same revalidated raster without another request")
+        session.transformOutcomeForTest = nil
+        try await prepare(30)
+        controller.advance(frame: 31, timeline: timeline)
+        try check(controller.currentOutcome(spectrum: id, frame: 30) == nil && controller.currentOutcome(spectrum: id, frame: 31) == nil,
+                  "a different first playback PTS cannot display the prepared image")
+
+        try await prepare(40)
+        // Replace the contents of this test's private copy after the first access
+        // check. A retained startup raster must pass current source validation.
+        let handle = try FileHandle(forWritingTo: copy)
+        try handle.seekToEnd(); try handle.write(contentsOf: Data([0])); try handle.close()
+        controller.advance(frame: 40, timeline: timeline)
+        let rejected = await LaneSelfTest.waitUntil(8) {
+            if case .mediaUnavailable(let media)? = controller.currentOutcome(spectrum: id, frame: 40) { return media == asset.id }
+            return false
+        }
+        try check(rejected && controller.metrics.sourceRejections > 0, "matching PTS cannot revive a prepared raster after source replacement")
+
+        session.update(timeline: timeline, media: [asset])
+        session.transformOutcomeForTest = { _, frame, result in
+            if frame == 50 { await gate.wait() }
+            return result
+        }
+        controller.prepareStartingFrame(50, timeline: timeline)
+        try check(await LaneSelfTest.waitUntil(8) { gate.entered }, "startup delivery pending before project reset")
+        session.resetProject()
+        gate.release()
+        let drained = await LaneSelfTest.waitUntil(8) { controller.pendingCount == 0 }
+        try check(drained && controller.currentFrame == nil && controller.retainedBytes == 0 &&
+                  controller.currentOutcome(spectrum: id, frame: 50) == nil, "late preparation cannot enter a new project")
     }
 }
 #endif

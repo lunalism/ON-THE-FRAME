@@ -199,6 +199,29 @@ final class PlaybackSpectrumController {
         timing.attach(item, view: view)
         timing.invalidateApproval()
     }
+
+    /// Schedule the confirmed paused position as a candidate in the ordinary
+    /// playback budget. Only a later display tick can assign currentFrame.
+    func prepareStartingFrame(_ frame: Int, timeline: Timeline) {
+        guard let session, currentFrame == nil, desired.isEmpty,
+              (0..<timeline.durationFrames).contains(frame) else { return }
+        synchronizePlan(session, timeline: timeline)
+        for item in timeline.spectra where item.visible(atFrame: frame) &&
+            SpectrumPlaybackTiming.hasActiveSource(item, at: frame, timeline: timeline) {
+            desired.append(Key(spectrum: item.id, frame: frame))
+            if desired.count == Self.pendingLimit { break }
+        }
+        // A source can change while the player waits for its first display PTS.
+        needsSourceValidation.formUnion(desired)
+        pump(preparing: frame)
+    }
+
+    private func synchronizePlan(_ session: SpectrumPreviewSession, timeline: Timeline) {
+        if epoch != session.epoch || revision != session.revision {
+            stop(detachTiming: false); epoch = session.epoch; revision = session.revision
+            firstVideoFrame = timeline.clips.lazy.map(\.start).min() ?? Int.max
+        }
+    }
     private func cancelObsolete() {
         for key in pending.keys {
             guard var p = pending[key], !p.cancelled, !desired.contains(key) else { continue }
@@ -219,10 +242,7 @@ final class PlaybackSpectrumController {
             metrics.ticks += 1; metrics.tickSeconds += elapsed; metrics.maxTickSeconds = max(metrics.maxTickSeconds, elapsed)
         }
         guard let session else { stop(); return }
-        if epoch != session.epoch || revision != session.revision {
-            stop(detachTiming: false); epoch = session.epoch; revision = session.revision
-            firstVideoFrame = timeline.clips.lazy.map(\.start).min() ?? Int.max
-        }
+        synchronizePlan(session, timeline: timeline)
         guard let frame else {
             if currentFrame != nil {
                 // Timing permission is absent, but this seek/session's work can
@@ -267,8 +287,9 @@ final class PlaybackSpectrumController {
         }
         cancelObsolete(); validateCurrentRetained(); pump()
     }
-    private func pump() {
-        guard let session, currentFrame != nil, epoch == session.epoch, revision == session.revision else { return }
+    private func pump(preparing frame: Int? = nil) {
+        guard let session, let priorityFrame = currentFrame ?? frame,
+              epoch == session.epoch, revision == session.revision else { return }
         for key in desired {
             guard pending.count < Self.pendingLimit else { break }
             guard pending[key] == nil else { continue }
@@ -287,7 +308,7 @@ final class PlaybackSpectrumController {
             let captureID: UUID? = nil
             #endif
             let ticket = session.request(spectrum: key.spectrum, frame: key.frame,
-                                         priority: key.frame == currentFrame ? 0 : 1, checkPlaybackMedia: true,
+                                         priority: key.frame == priorityFrame ? 0 : 1, checkPlaybackMedia: true,
                                          traceRequestID: traceRequest) { [weak self] outcome in
                 #if DEBUG
                 if captureID == SpectrumContinuityTrace.ownerCaptureID {

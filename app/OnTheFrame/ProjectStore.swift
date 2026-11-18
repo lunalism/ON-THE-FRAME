@@ -1984,7 +1984,8 @@ final class ProjectStore {
 
     /// MainActor-only, no disk work. Renewal retains only the original unexpired lease.
     /// The caller separately enforces playing, pending-seek and visual coverage rules.
-    func imagePlaybackAccessIsCurrent(for item: AVPlayerItem, allowProactiveRenewal: Bool = false) -> Bool {
+    func imagePlaybackAccessIsCurrent(for item: AVPlayerItem, allowProactiveRenewal: Bool = false,
+                                      onGrant: (@MainActor () -> Void)? = nil) -> Bool {
         let eligibility = imagePreviewEligibility(for: item, session: projectSession, generation: generation)
         guard eligibility == .validatedAtInstallation, let proof = appliedImagePreview else {
             #if DEBUG
@@ -2117,6 +2118,7 @@ final class ProjectStore {
             #endif
             if valid && publishedAt < now + 1 {
                 self.imagePlaybackAccessUntil = now + 1
+                onGrant?()
             } else {
                 self.imagePlaybackAccessUntil = 0
                 self.clearImagePlaybackSpectrum()
@@ -2506,7 +2508,29 @@ final class ProjectStore {
     private func startPlayback() {
         if playhead >= timeline.durationFrames { seek(to: 0) }
         if let item = player.currentItem { observeEnd(item, allowEndPreview: true) }
+        let pausedFrame = previewHost?.spectrumOverlay.confirmedFrame
         player.play(); setPlaying(true)
+        guard let frame = pausedFrame, frame == playhead, let host = previewHost,
+              host.window != nil, !host.isShowingStill, !host.hasPendingSpectrumSeek,
+              gestureBase == nil, !relinkInProgress, appliedGeneration == generation,
+              let item = player.currentItem, item.status == .readyToPlay,
+              timeline.spectra.contains(where: { $0.visible(atFrame: frame) }) else { return }
+        let run = endObservationSerial, token = seekToken, g = generation
+        let epoch = spectrumPreview.epoch, revision = spectrumPreview.revision
+        let prepare: @MainActor () -> Void = { [weak self, weak host, weak item] in
+            guard let self, let host, let item, self.isPlaying, run == self.endObservationSerial,
+                  token == self.seekToken, g == self.generation, self.player.currentItem === item,
+                  self.spectrumPreview.epoch == epoch, self.spectrumPreview.revision == revision,
+                  self.previewHost === host, host.window != nil, !host.hasPendingSpectrumSeek,
+                  !host.isShowingStill, self.gestureBase == nil, !self.relinkInProgress,
+                  SpectrumPlaybackTiming.frame(item.currentTime(), duration: self.timeline.durationFrames) == frame else { return }
+            self.spectrumPreview.playback.prepareStartingFrame(frame, timeline: self.timeline)
+        }
+        // An image project with a cold access lease can prepare on grant, even
+        // before the first display tick. The worker never blocks audio transport.
+        if !InternalImagePreview.containsImages(timeline) || imagePlaybackAccessIsCurrent(for: item, onGrant: prepare) {
+            prepare()
+        }
     }
     func pause() {
         #if DEBUG
