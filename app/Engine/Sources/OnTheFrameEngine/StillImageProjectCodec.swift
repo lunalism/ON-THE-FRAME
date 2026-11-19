@@ -2,7 +2,7 @@ import Foundation
 
 extension StillImageDescriptor.Encoding: Codable {}
 
-/// Image-aware codec: legacy 1–8, images in 9, reaction-bearing Spectrum in 10.
+/// Image-aware codec: legacy 1–8, images in 9, Spectrum reaction in 10 and appearance in 11.
 enum StillImageProjectCodec {
     typealias Model = StillImageProjectModel
     private struct Entry: Codable {
@@ -176,8 +176,11 @@ enum StillImageProjectCodec {
                 .union(version >= ProjectFile.appearanceVersion ? ["appearance"] : [])
             try keys(spectrum["style"], allowed)
             if let style = spectrum["style"] as? [String:Any], let appearance = style["appearance"] {
-                try keys(appearance, ["contractVersion", "outsideRGB", "hueInterpolationDegrees"])
-                if let object = appearance as? [String:Any] { try keys(object["outsideRGB"], ["red", "green", "blue"]) }
+                guard let object = appearance as? [String:Any], let contract = object["contractVersion"] as? Int,
+                      let required = SpectrumItemStyle.appearanceFields(for: contract), Set(object.keys) == required else {
+                    throw Model.Failure.invalid("unsupported or malformed Spectrum appearance contract")
+                }
+                try keys(object["outsideRGB"], ["red", "green", "blue"])
             }
         }
         for entry in entries {

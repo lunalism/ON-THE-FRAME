@@ -129,6 +129,7 @@ public final class SpectrumFrameCoordinator: @unchecked Sendable {   // 가변 �
         var schedulerID: SpectrumRequestID?
         #if DEBUG
         var playbackObserver: PlaybackObserver?
+        var timing: SpectrumRequestTiming?
         #endif
     }
 
@@ -151,6 +152,18 @@ public final class SpectrumFrameCoordinator: @unchecked Sendable {   // 가변 �
         fps = Int(settings.fps); self.deliveryQueue = deliveryQueue; self.opener = opener
         scheduler = SpectrumAnalysisScheduler(limits: limits, callbackQueue: queue)
     }
+
+    #if DEBUG
+    private var digitalSoftnessPreviewPilot = false
+
+    /// Set once when the opted-in Debug Preview session creates its coordinator.
+    public convenience init(settings: RenderSettings = .m1, limits: SpectrumSchedulerLimits = .init(),
+                            deliveryQueue: DispatchQueue, digitalSoftnessPreviewPilot: Bool,
+                            opener: @escaping SourceOpener = SpectrumFrameCoordinator.fileOpener) {
+        self.init(settings: settings, limits: limits, deliveryQueue: deliveryQueue, opener: opener)
+        self.digitalSoftnessPreviewPilot = digitalSoftnessPreviewPilot
+    }
+    #endif
 
     // MARK: 공개 API(어느 스레드에서나 — 큐에 넣고 바로 돌아옴, 같은 스레드에서 부른 차례대로 처리)
 
@@ -190,15 +203,23 @@ public final class SpectrumFrameCoordinator: @unchecked Sendable {   // 가변 �
     public typealias PlaybackObserver = @Sendable (SpectrumPlaybackStage, Int64, Int64) -> Void
 
     public func request(spectrum id: UUID, frame n: Int, canvasWidth: Int, canvasHeight: Int, priority: Int,
-                        playbackObserver: @escaping PlaybackObserver, completion: @escaping Completion) -> SpectrumFrameTicket {
+                        playbackObserver: PlaybackObserver?, timing: SpectrumRequestTiming? = nil,
+                        completion: @escaping Completion) -> SpectrumFrameTicket {
         var w = Waiting(item: id, frame: n, width: canvasWidth, height: canvasHeight, priority: priority, completion: completion)
         w.playbackObserver = playbackObserver
+        w.timing = timing
         return enqueue(w)
     }
     #endif
     private func enqueue(_ w: Waiting) -> SpectrumFrameTicket {
         let raw = nextTicket.withLock { $0 += 1; return $0 }
+        #if DEBUG
+        w.timing?.mark(.coordinatorEnqueued)
+        #endif
         queue.async { [self] in
+            #if DEBUG
+            w.timing?.mark(.coordinatorStarted)
+            #endif
             waiting[raw] = w
             start(raw)
         }
@@ -280,10 +301,12 @@ public final class SpectrumFrameCoordinator: @unchecked Sendable {   // 가변 �
         // 완료는 이 큐에서 비동기로 온다(일정의 deliver) — 아래에서 schedulerID를 넣은 뒤에 처리된다
         #if DEBUG
         let observer = w.playbackObserver
+        let timing = w.timing
         observer?(.analysisRequested, Int64(w.priority), 0)
         #endif
-        let id = scheduler.request(r, from: provider, priority: w.priority) { [weak self] res in
+        let completion: SpectrumAnalysisScheduler.Completion = { [weak self] res in
             #if DEBUG
+            timing?.mark(.analysisCallbackStarted)
             if let observer {
                 switch res {
                 case let .success(bands): observer(.analysisReturned, 0, Int64(bands.count))
@@ -294,6 +317,12 @@ public final class SpectrumFrameCoordinator: @unchecked Sendable {   // 가변 �
             #endif
             self?.analyzed(raw, p, res)
         }
+        #if DEBUG
+        timing?.mark(.analysisSubmitted)
+        let id = scheduler.request(r, from: provider, priority: w.priority, timing: timing, completion: completion)
+        #else
+        let id = scheduler.request(r, from: provider, priority: w.priority, completion: completion)
+        #endif
         waiting[raw]?.schedulerID = id
     }
     private func analyzed(_ raw: UInt64, _ p: Plan, _ r: Result<[Float], SpectrumAnalysisError>) {
@@ -309,16 +338,23 @@ public final class SpectrumFrameCoordinator: @unchecked Sendable {   // 가변 �
         case let .success(bands):
             do {
                 #if DEBUG
+                w.timing?.mark(.rasterStarted)
                 w.playbackObserver?(.rasterStarted, Int64(w.width), Int64(w.height))
                 #endif
                 if renderer?.width != w.width || renderer?.height != w.height { renderer = nil; renderer = try SpectrumFrameRenderer(width: w.width, height: w.height) }
-                let f = try renderer!.render(bands: bands, style: p.style)
                 #if DEBUG
+                renderer?.requestTiming = w.timing
+                defer { renderer?.requestTiming = nil }
+                #endif
+                let f = try render(bands, style: p.style, using: renderer!)
+                #if DEBUG
+                w.timing?.mark(.rasterFinished)
                 w.playbackObserver?(.rasterReturned, f == nil ? 2 : 1, f.map { Int64(Int(bitPattern: ObjectIdentifier($0.image))) } ?? 0)
                 #endif
                 finish(raw, .ready(bands: bands, frame: f))
             } catch let e as SpectrumRenderError {
                 #if DEBUG
+                w.timing?.mark(.rasterFinished)
                 if let observer = w.playbackObserver {
                     switch e {
                     case .invalidStyle: observer(.rasterReturned, 3, 0)
@@ -330,6 +366,7 @@ public final class SpectrumFrameCoordinator: @unchecked Sendable {   // 가변 �
                 finish(raw, .failed(.render(e)))
             } catch {
                 #if DEBUG
+                w.timing?.mark(.rasterFinished)
                 w.playbackObserver?(.rasterReturned, 6, 0)
                 #endif
                 finish(raw, .failed(.render(.invalidCanvas("\(error)"))))
@@ -340,10 +377,23 @@ public final class SpectrumFrameCoordinator: @unchecked Sendable {   // 가변 �
         case let .failure(e): finish(raw, .failed(.analysis(e)))
         }
     }
+
+    private func render(_ bands: [Float], style: SpectrumItemStyle,
+                        using renderer: SpectrumFrameRenderer) throws -> SpectrumRenderedFrame? {
+        #if DEBUG
+        if digitalSoftnessPreviewPilot, style.mode == .digital {
+            return try renderer.render(bands: bands, style: style, experimentalSoftnessPercent: style.softnessPercent)
+        }
+        #endif
+        return try renderer.render(bands: bands, style: style)
+    }
+
     /// 정확히 한 번: 기다림에서 빼고 deliveryQueue에서 알린다
     private func finish(_ raw: UInt64, _ o: SpectrumFrameOutcome) {
         guard let w = waiting.removeValue(forKey: raw) else { return }
         #if DEBUG
+        if case .cancelled = o { w.timing?.mark(.coordinatorCancelled) }
+        w.timing?.mark(.coordinatorFinished, outcome: o.playbackTraceCode)
         w.playbackObserver?(.coordinatorFinished, o.playbackTraceCode, 0)
         #endif
         deliveryQueue.async { w.completion(o) }

@@ -272,6 +272,9 @@ import os
         let traceValidated = traceEnabled ? SpectrumContinuityTrace.validate() : false
         if traceEnabled { SpectrumContinuityTrace.begin() }
         let s = ProjectStore.shared
+        let timingRequested = ProcessInfo.processInfo.arguments.contains("-OTFSpectrumRequestTiming")
+        let requestTimings = SpectrumRequestTimingCapture.enabled(arguments: ProcessInfo.processInfo.arguments)
+            ? SpectrumRequestTimingCapture() : nil
         var rows = [[String: Any]](), checks = [String: Bool]()
         func wait(_ predicate: () -> Bool) async -> Bool {
             let end = Date().addingTimeInterval(15)
@@ -279,6 +282,22 @@ import os
             return predicate()
         }
         defer {
+            if timingRequested {
+                if let requestTimings {
+                    requestTimings.endSelection()
+                    s.spectrumPreview.requestTimings = nil
+                    do {
+                        let report = requestTimings.report()
+                        let data = try report.encoded()
+                        try data.write(to: folder.appendingPathComponent("spectrum-request-timing.json"), options: .withoutOverwriting)
+                        checks["request timing complete"] = report.complete
+                    } catch {
+                        checks["request timing saved"] = false
+                    }
+                } else {
+                    checks["request timing compatible flags"] = false
+                }
+            }
             let result: [String: Any] = ["checks": checks, "rows": rows]
             try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
                 .write(to: folder.appendingPathComponent("image-spectrum.json"))
@@ -324,6 +343,7 @@ import os
             }.value
             s.seek(to: 0)
             _ = await wait { !view.hasPendingSpectrumSeek }
+            s.spectrumPreview.requestTimings = requestTimings
             s.play()
             var sampled = Set<Int>(), good = [0, 0, 0], pixels = [0, 0, 0], subtitles = [0, 0, 0]
             let end = Date().addingTimeInterval(17)
@@ -372,6 +392,7 @@ import os
                 }
                 try? await Task.sleep(nanoseconds: 3_000_000)
             }
+            requestTimings?.endSelection()
             // Compare diagnostic output pixels with independent source decoding.
             let context = CIContext()
             for target in [60, 119, 120, 180, 239, 240, 270, 357] {

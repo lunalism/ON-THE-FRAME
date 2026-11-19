@@ -2,7 +2,7 @@ import Foundation
 
 // 스펙트럼 클립 모델(2026-10-25, SP-1A 1단계 — docs/SPECTRUM-DESIGN.md §1·§15): 스펙트럼 레인의 독립 항목, 소스 오디오 계보 참조, 상태 판정.
 // 이 단계는 엔진 모델·편집·저장(형식 8)·판정까지다. 앱 UI·프리뷰·내보내기 그리기는 다음 단계(§15)다.
-// 기본값은 잠정(D-S5). Format 11 appearance v1은 두 RGB를 기록하고, v2는 정적 색상 회전 각도도 기록한다.
+// 기본값은 잠정(D-S5). Format 11 appearance v1은 두 RGB, v2는 색조 보간, v3는 안쪽 페더 강도도 기록한다.
 
 /// 스펙트럼 모양·분석 값(저장 단위: 정수 — 위치·높이·두께는 1920×1080 기준 화소의 1/1000, 색 0–255, 주파수 Hz, 시간 ms).
 public struct SpectrumItemStyle: Sendable, Equatable, Codable {
@@ -21,6 +21,9 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
             guard isValid else { throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "RGB outside 0...255")) }
         }
         public func encode(to encoder: Encoder) throws {
+            guard isValid else {
+                throw EncodingError.invalidValue(self, .init(codingPath: encoder.codingPath, debugDescription: "RGB outside 0...255"))
+            }
             var c = encoder.container(keyedBy: WireKey.self)
             try c.encode(red, forKey: WireKey("red")); try c.encode(green, forKey: WireKey("green")); try c.encode(blue, forKey: WireKey("blue"))
         }
@@ -32,42 +35,58 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
         init?(stringValue: String) { self.init(stringValue) }
         init?(intValue: Int) { return nil }
     }
+    static func appearanceFields(for version: Int) -> Set<String>? {
+        switch version {
+        case 1: return ["contractVersion", "outsideRGB"]
+        case 2: return ["contractVersion", "outsideRGB", "hueInterpolationDegrees"]
+        case 3: return ["contractVersion", "outsideRGB", "hueInterpolationDegrees", "softnessPercent"]
+        default: return nil
+        }
+    }
     /// Inside RGB stays in the original style fields. Each appearance version
     /// requires its exact set of keys so unsupported effects cannot silently disappear.
     private struct Appearance: Codable {
         let outsideRGB: RGB
         let hueInterpolationDegrees: Int
-        init(outsideRGB: RGB, hueInterpolationDegrees: Int) {
+        let softnessPercent: Int
+        init(outsideRGB: RGB, hueInterpolationDegrees: Int, softnessPercent: Int) {
             self.outsideRGB = outsideRGB
             self.hueInterpolationDegrees = hueInterpolationDegrees
+            self.softnessPercent = softnessPercent
         }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: WireKey.self)
             let version = try c.decode(Int.self, forKey: WireKey("contractVersion"))
-            let keys = Set(c.allKeys.map(\.stringValue))
-            switch version {
-            case 1 where keys == ["contractVersion", "outsideRGB"]:
-                hueInterpolationDegrees = 0
-            case 2 where keys == ["contractVersion", "outsideRGB", "hueInterpolationDegrees"]:
-                hueInterpolationDegrees = try c.decode(Int.self, forKey: WireKey("hueInterpolationDegrees"))
-                guard SpectrumItemStyle.hueInterpolationRange.contains(hueInterpolationDegrees) else {
-                    throw DecodingError.dataCorruptedError(forKey: WireKey("hueInterpolationDegrees"), in: c,
-                                                           debugDescription: "Hue outside 0...360 degrees")
-                }
-            default:
+            guard let fields = SpectrumItemStyle.appearanceFields(for: version),
+                  Set(c.allKeys.map(\.stringValue)) == fields else {
                 throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "unsupported or malformed Spectrum appearance contract"))
             }
             outsideRGB = try c.decode(RGB.self, forKey: WireKey("outsideRGB"))
+            hueInterpolationDegrees = version >= 2 ? try c.decode(Int.self, forKey: WireKey("hueInterpolationDegrees")) : 0
+            softnessPercent = version == 3 ? try c.decode(Int.self, forKey: WireKey("softnessPercent")) : 0
+            guard SpectrumItemStyle.hueInterpolationRange.contains(hueInterpolationDegrees) else {
+                throw DecodingError.dataCorruptedError(forKey: WireKey("hueInterpolationDegrees"), in: c,
+                                                       debugDescription: "Hue outside 0...360 degrees")
+            }
+            guard SpectrumItemStyle.softnessRange.contains(softnessPercent) else {
+                throw DecodingError.dataCorruptedError(forKey: WireKey("softnessPercent"), in: c,
+                                                       debugDescription: "Softness outside 0...100 percent")
+            }
         }
         func encode(to encoder: Encoder) throws {
             guard SpectrumItemStyle.hueInterpolationRange.contains(hueInterpolationDegrees) else {
                 throw EncodingError.invalidValue(hueInterpolationDegrees, .init(codingPath: encoder.codingPath,
                                                                                  debugDescription: "Hue outside 0...360 degrees"))
             }
+            guard SpectrumItemStyle.softnessRange.contains(softnessPercent) else {
+                throw EncodingError.invalidValue(softnessPercent, .init(codingPath: encoder.codingPath,
+                                                                       debugDescription: "Softness outside 0...100 percent"))
+            }
             var c = encoder.container(keyedBy: WireKey.self)
-            try c.encode(2, forKey: WireKey("contractVersion"))
+            try c.encode(softnessPercent == 0 ? 2 : 3, forKey: WireKey("contractVersion"))
             try c.encode(outsideRGB, forKey: WireKey("outsideRGB"))
             try c.encode(hueInterpolationDegrees, forKey: WireKey("hueInterpolationDegrees"))
+            if softnessPercent != 0 { try c.encode(softnessPercent, forKey: WireKey("softnessPercent")) }
         }
     }
     public var mode: Mode
@@ -83,16 +102,19 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
     public var resolvedOutsideRGB: RGB { outsideRGB ?? insideRGB }
     public static let hueInterpolationRange = 0...360
     public var hueInterpolationDegrees: Int
+    public static let softnessRange = 0...100
+    public var softnessPercent: Int
     public var reactionPercent: Int
     public var bands: Int, lowHz: Int, highHz: Int, windowMs: Int, offsetMs: Int, floorDB: Int
     public init(mode: Mode, sides: Sides, startXMilli: Int, startYMilli: Int, endXMilli: Int, endYMilli: Int, maxHeightMilli: Int, thicknessMilli: Int,
-                red: Int, green: Int, blue: Int, alpha: Int, bands: Int, lowHz: Int, highHz: Int, windowMs: Int, offsetMs: Int, floorDB: Int, reactionPercent: Int = 100, outsideRGB: RGB? = nil, hueInterpolationDegrees: Int = 0) {
+                red: Int, green: Int, blue: Int, alpha: Int, bands: Int, lowHz: Int, highHz: Int, windowMs: Int, offsetMs: Int, floorDB: Int, reactionPercent: Int = 100, outsideRGB: RGB? = nil, hueInterpolationDegrees: Int = 0, softnessPercent: Int = 0) {
         self.mode = mode; self.sides = sides; self.reactionPercent = reactionPercent
         self.startXMilli = startXMilli; self.startYMilli = startYMilli; self.endXMilli = endXMilli; self.endYMilli = endYMilli
         self.maxHeightMilli = maxHeightMilli; self.thicknessMilli = thicknessMilli
         self.red = red; self.green = green; self.blue = blue; self.alpha = alpha
         self.outsideRGB = outsideRGB
         self.hueInterpolationDegrees = hueInterpolationDegrees
+        self.softnessPercent = softnessPercent
         self.bands = bands; self.lowHz = lowHz; self.highHz = highHz; self.windowMs = windowMs; self.offsetMs = offsetMs; self.floorDB = floorDB
     }
     private enum CodingKeys: String, CodingKey {
@@ -100,6 +122,10 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
         case red, green, blue, alpha, reactionPercent, bands, lowHz, highHz, windowMs, offsetMs, floorDB, appearance
     }
     public init(from decoder: Decoder) throws {
+        let fields = try decoder.container(keyedBy: WireKey.self)
+        guard fields.allKeys.allSatisfy({ CodingKeys(rawValue: $0.stringValue) != nil }) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "unknown Spectrum style field"))
+        }
         let c = try decoder.container(keyedBy: CodingKeys.self)
         mode = try c.decode(Mode.self, forKey: .mode); sides = try c.decode(Sides.self, forKey: .sides)
         startXMilli = try c.decode(Int.self, forKey: .startXMilli); startYMilli = try c.decode(Int.self, forKey: .startYMilli)
@@ -114,12 +140,20 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
             let outside = appearance.outsideRGB
             outsideRGB = outside == RGB(red: red, green: green, blue: blue) ? nil : outside
             hueInterpolationDegrees = appearance.hueInterpolationDegrees
+            softnessPercent = appearance.softnessPercent
         } else {
             outsideRGB = nil
             hueInterpolationDegrees = 0
+            softnessPercent = 0
+        }
+        guard insideRGB.isValid && (0...255).contains(alpha) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Inside RGB or alpha outside 0...255"))
         }
     }
     public func encode(to encoder: Encoder) throws {
+        guard insideRGB.isValid && (0...255).contains(alpha) else {
+            throw EncodingError.invalidValue(self, .init(codingPath: encoder.codingPath, debugDescription: "Inside RGB or alpha outside 0...255"))
+        }
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(mode, forKey: .mode); try c.encode(sides, forKey: .sides)
         try c.encode(startXMilli, forKey: .startXMilli); try c.encode(startYMilli, forKey: .startYMilli)
@@ -129,7 +163,8 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
         try c.encode(reactionPercent, forKey: .reactionPercent); try c.encode(bands, forKey: .bands)
         try c.encode(lowHz, forKey: .lowHz); try c.encode(highHz, forKey: .highHz)
         try c.encode(windowMs, forKey: .windowMs); try c.encode(offsetMs, forKey: .offsetMs); try c.encode(floorDB, forKey: .floorDB)
-        try c.encode(Appearance(outsideRGB: resolvedOutsideRGB, hueInterpolationDegrees: hueInterpolationDegrees), forKey: .appearance)
+        try c.encode(Appearance(outsideRGB: resolvedOutsideRGB, hueInterpolationDegrees: hueInterpolationDegrees,
+                                softnessPercent: softnessPercent), forKey: .appearance)
     }
     public static func == (lhs: Self, rhs: Self) -> Bool {
         guard lhs.mode == rhs.mode, lhs.sides == rhs.sides, lhs.startXMilli == rhs.startXMilli, lhs.startYMilli == rhs.startYMilli,
@@ -137,7 +172,8 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
               lhs.thicknessMilli == rhs.thicknessMilli, lhs.red == rhs.red, lhs.green == rhs.green, lhs.blue == rhs.blue,
               lhs.alpha == rhs.alpha, lhs.reactionPercent == rhs.reactionPercent, lhs.bands == rhs.bands,
               lhs.lowHz == rhs.lowHz, lhs.highHz == rhs.highHz, lhs.windowMs == rhs.windowMs, lhs.offsetMs == rhs.offsetMs,
-              lhs.floorDB == rhs.floorDB, lhs.hueInterpolationDegrees == rhs.hueInterpolationDegrees else { return false }
+              lhs.floorDB == rhs.floorDB, lhs.hueInterpolationDegrees == rhs.hueInterpolationDegrees,
+              lhs.softnessPercent == rhs.softnessPercent else { return false }
         return lhs.resolvedOutsideRGB == rhs.resolvedOutsideRGB
     }
     /// 잠정 기본값(D-S5 미확정, 참고 그림 값 중 한 색 단계에 쓰는 것): 시작/끝 (192,540)/(1728,540), 최대 높이 480, 두께 3, 디지털, 위아래 대칭,
@@ -147,7 +183,7 @@ public struct SpectrumItemStyle: Sendable, Equatable, Codable {
                                                               bands: 64, lowHz: 20, highHz: 2000, windowMs: 90, offsetMs: 0, floorDB: -60)
     /// 분석 표본율(엔진 분석 기본 48 kHz)에서 쓸 수 있는가
     public var isValid: Bool {
-        guard (0...200).contains(reactionPercent) else { return false }
+        guard (0...200).contains(reactionPercent), Self.softnessRange.contains(softnessPercent) else { return false }
         guard [red, green, blue, alpha].allSatisfy({ (0...255).contains($0) }) else { return false }
         guard resolvedOutsideRGB.isValid else { return false }
         guard renderStyle.validationError() == nil else { return false }

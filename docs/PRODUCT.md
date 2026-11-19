@@ -12,16 +12,16 @@
 
 **기준:** feature/subtitles의 게시 체크포인트 `f2b80444b439ad59a3870da3350a1385d388552a`. 문서 브랜치는 이 기준에서 시작한다. 아래는 현재 소스 경계의 설명이며 이번 문서 작업에서 새 빌드·제품 테스트를 실행한 결과가 아니다. 구현·과거 자동 검증·owner manual acceptance·게시 상태는 [ROADMAP의 현행 표](ROADMAP.md#현행-기능과-검증-경계)에서 구분한다.
 
-`.ontheframe`은 D-023의 버전 있는 JSON이며 **지원 경로의 최대 형식은 10**이다. 모든 저장을 10으로 올리거나 모든 decoder가 모든 1–10 파일을 연다는 뜻이 아니다.
+`.ontheframe`은 D-023의 버전 있는 JSON이다. 아래 형식 표에는 FX 브랜치의 Format 11 Spectrum 저장 계약을 반영했다. [Softness 계약](DECISIONS.md#2026-11-19-spectrum-softness-모델과-저장-계약)
 
 | 경로/내용 | 현행 동작 | 경계 |
 |---|---|---|
-| 앱 열기 | `ProjectStore` → `ProjectPersistence.decode` → `OperationalProjectAdapter` → image-aware codec. 유효한 legacy 1–8과 형식 9/10을 해당 schema에 따라 복원한다 | 지원 렌더 설정·형식별 구조/값 검사와 원본 접근 확인을 거친다. 저장된 이미지 metadata는 현재 접근/렌더 승인 증거가 아니며, 파일을 읽는 능력이 이미지 gate나 public Export를 켜지 않는다 |
-| 앱 저장: 실제 Spectrum 항목 있음 | 이미지 유무와 무관하게 10, `reactionPercent` 명시 | 정수 UI와 별개로 기존 milli 정밀도를 보존한다 |
+| 앱 열기 | `ProjectStore` → `ProjectPersistence.decode` → `OperationalProjectAdapter` → image-aware codec. 유효한 legacy 1–8과 형식 9–11을 해당 schema에 따라 복원한다 | 지원 렌더 설정·형식별 구조/값 검사와 원본 접근 확인을 거친다. 저장된 이미지 metadata는 현재 접근/렌더 승인 증거가 아니며, 파일을 읽는 능력이 이미지 gate나 public Export를 켜지 않는다 |
+| 앱 저장·실제 Spectrum 항목 있음 | 이미지 유무와 무관하게 Format 11. Softness 0은 appearance v2, 1–100은 v3 | Inside RGB, 공통 alpha, Outside RGB, Hue, 반응 강도와 기존 milli 정밀도를 보존한다 |
 | 앱 저장: 이미지 catalog 있음, 실제 Spectrum 항목 없음 | 9 | 이미지 원본 참조·종류/metadata를 보존한다. 이미지마다 가짜 duration/frameCount/영상 트랙을 저장하지 않는다 |
 | 앱 저장: 이미지도 실제 Spectrum 항목도 없음 | 빈 Spectrum 레인 또는 소리 계보가 있으면 8, 그 밖은 켜진 자막 효과 7 / 자막·자막 레인 6 / 자막 없음 5 | 콘텐츠에 맞는 형식을 고르며, 새 스키마 값이 있는 문서를 더 낮은 형식으로 조용히 저장하지 않는다 |
-| raw `ProjectFile.decode` | temporal 문서의 1–8과 조건에 맞는 10을 읽는다 | **9를 거부**하며, 10이라도 이미지 `kind`/`image`가 있는 문서는 `ProjectPersistence`를 요구한다. image-aware codec을 대신하는 보편적 1–10 reader가 아니다 |
-| raw `ProjectFile.encode` | 지원되는 temporal Timeline의 내용에 따라 5/6/7/8/10 선택 | 이미지 catalog의 저장은 위 application persistence/image-aware 경로를 사용한다 |
+| raw `ProjectFile.decode` | temporal 문서의 1–8과 조건에 맞는 10·11을 읽는다 | 형식 9와 이미지 `kind`/`image`를 가진 문서는 이미지 인식 경로를 사용한다 |
+| raw `ProjectFile.encode` | 지원되는 temporal Timeline의 내용에 따라 5/6/7/8/11 선택 | 이미지 catalog의 저장은 위 application persistence/image-aware 경로를 사용한다 |
 
 근거 소스: [ProjectPersistence](../app/Engine/Sources/OnTheFrameEngine/ProjectPersistence.swift), [ProjectFile](../app/Engine/Sources/OnTheFrameEngine/ProjectFile.swift), [OperationalProjectAdapter](../app/Engine/Sources/OnTheFrameEngine/OperationalProjectAdapter.swift), [StillImageProjectCodec](../app/Engine/Sources/OnTheFrameEngine/StillImageProjectCodec.swift). 형식 5/6/7/8/9의 과거 결정·검증 기록은 각각의 도입 이정표로 보존한다. legacy 파일의 의미를 복원하는 것과 이전 앱이 최신 문서를 읽는 것은 다르다. 임의의 파일·렌더 설정·원본 상태까지 호환된다고 보장하지 않는다.
 

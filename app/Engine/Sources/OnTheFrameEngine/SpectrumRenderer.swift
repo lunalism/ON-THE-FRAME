@@ -3,6 +3,17 @@ import CoreGraphics
 import Foundation
 import os
 
+#if DEBUG
+extension SpectrumRequestTiming {
+    // An optional receiver at the call site keeps the clock idle without a timed request.
+    func rasterClock() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
+
+    func recordRasterTime(_ stage: Stage, since start: UInt64?) {
+        if let start { add(stage, nanoseconds: rasterClock() - start) }
+    }
+}
+#endif
+
 // 스펙트럼 그리기(2026-10-25, docs/SPECTRUM-DESIGN.md §13) — 엔진 안(package) API. 앱 프리뷰·내보내기·정보 패널·저장에 연결하지 않았다.
 // 시제품 ProtoSpectrumRenderer(시험 대상)의 기하·그리기 명령을 그대로 옮겼다(같은 입력 → 같은 바이트, 시험으로 확인).
 // 두 색은 주파수축에서 정적으로 Hue를 회전한 뒤 기준선→Maximum Height 방향으로 선형광 RGB 보간한다.
@@ -312,6 +323,10 @@ package struct SpectrumFrameRaster {
 package final class SpectrumCanvas {
     package let width: Int, height: Int
     private let ctx: CGContext
+    #if DEBUG
+    var requestTiming: SpectrumRequestTiming?
+    #endif
+    private(set) var experimentalFeatherScratchPeakBytes = 0
     private static let live = OSAllocatedUnfairLock(initialState: 0)
     /// 살아 있는 캔버스 수(취소·실패 뒤 놓였는지 시험용)
     package static var liveCount: Int { live.withLock { $0 } }
@@ -329,23 +344,53 @@ package final class SpectrumCanvas {
     package var allocatedBytes: Int { width * height * 4 }
 
     /// 그 밴드 값(0~1, 1~1024개)을 그려 칠한 부분만 자른 래스터. 칠한 곳이 없으면 nil(캔버스는 비어 있음).
-    package func render(_ v: [Float], style s: SpectrumStyle) throws -> SpectrumFrameRaster? {
+    package func render(_ v: [Float], style s: SpectrumStyle, experimentalSoftnessPercent: Int = 0) throws -> SpectrumFrameRaster? {
         if let e = s.validationError() { throw SpectrumRenderError.invalidStyle(e) }
+        guard (0...100).contains(experimentalSoftnessPercent) else { throw SpectrumRenderError.invalidStyle("experimentalSoftnessPercent") }
         guard (1...1024).contains(v.count), v.allSatisfy({ $0.isFinite && $0 >= 0 && $0 <= 1 }) else { throw SpectrumRenderError.invalidValues("count \(v.count) or value out of 0…1") }
+        experimentalFeatherScratchPeakBytes = 0
         memset(ctx.data!, 0, allocatedBytes)
         let canvas = CGSize(width: width, height: height)
         let b = SpectrumGeometry.bounds(v, style: s, canvas: canvas)
         guard !b.isNull, b.height > 0, b.width > 0 else { return nil }
+        #if DEBUG
+        let geometryStart = requestTiming?.rasterClock()
+        #endif
         if s.hasColorGradient || s.hasHueSweep(bands: v.count) {
             var mask = s; mask.red = 1; mask.green = 1; mask.blue = 1
             SpectrumGeometry.draw(v, style: mask, canvas: canvas, into: ctx)
+            #if DEBUG
+            requestTiming?.recordRasterTime(.baseGeometry, since: geometryStart)
+            let colorStart = requestTiming?.rasterClock()
+            #endif
             SpectrumColorField.apply(style: s, bands: v.count, canvas: canvas, bounds: b, into: ctx)
+            #if DEBUG
+            requestTiming?.recordRasterTime(.baseColor, since: colorStart)
+            #endif
         } else {
             // Exact legacy path, including AA, overlapping primitives and common alpha.
             SpectrumGeometry.draw(v, style: s, canvas: canvas, into: ctx)
+            #if DEBUG
+            requestTiming?.recordRasterTime(.baseGeometry, since: geometryStart)
+            #endif
+        }
+        if experimentalSoftnessPercent > 0, s.alpha > 0 {
+            #if DEBUG
+            let feather = SpectrumInsideEdgeFeather(timing: requestTiming)
+            #else
+            let feather = SpectrumInsideEdgeFeather()
+            #endif
+            experimentalFeatherScratchPeakBytes = try feather.apply(
+                percent: experimentalSoftnessPercent, bands: v, style: s, canvas: canvas, bounds: b, into: ctx)
         }
         let rows = Int(b.minY)..<Int(b.maxY)
+        #if DEBUG
+        let cropStart = requestTiming?.rasterClock()
+        #endif
         let (img, box) = SubtitleRenderer.tightCrop(ctx, rows: rows)
+        #if DEBUG
+        requestTiming?.recordRasterTime(.tightCrop, since: cropStart)
+        #endif
         let draw = box.isNull ? CGRect(x: 0, y: rows.lowerBound, width: width, height: rows.count) : box.offsetBy(dx: 0, dy: CGFloat(rows.lowerBound))
         return SpectrumFrameRaster(image: img, drawRect: draw, bounds: b, canvas: canvas)
     }
@@ -388,6 +433,14 @@ public struct SpectrumRenderedFrame: @unchecked Sendable {   // CGImage는 불�
 /// 돌려준 SpectrumRenderedFrame은 그 뒤로 이 그리기와 무관하다: 다른 스레드로 넘기거나 오래 들고 있어도 된다. 이 객체는 지난 프레임을 붙잡지 않는다.
 public final class SpectrumFrameRenderer {
     private let canvas: SpectrumCanvas
+    #if DEBUG
+    var requestTiming: SpectrumRequestTiming? {
+        get { canvas.requestTiming }
+        set { canvas.requestTiming = newValue }
+    }
+    #endif
+    /// Peak simultaneous, explicitly allocated feather mask and distance-buffer payload for the last render.
+    package var experimentalFeatherScratchPeakBytes: Int { canvas.experimentalFeatherScratchPeakBytes }
     public var width: Int { canvas.width }
     public var height: Int { canvas.height }
     public init(width: Int, height: Int) throws { canvas = try SpectrumCanvas(width: width, height: height) }
@@ -397,6 +450,11 @@ public final class SpectrumFrameRenderer {
     /// 결과(내부 SpectrumCanvas.render 의미 그대로): 그릴 범위가 캔버스 밖 전체면 nil. 범위는 있으나 칠한 화소가 없으면
     /// (알파 0, 아날로그 밴드 1개 등) 투명 1×1 프레임. 그 밖에는 칠한 부분을 16 px 단위로 자른 프레임.
     public func render(bands v: [Float], style: SpectrumItemStyle) throws -> SpectrumRenderedFrame? {
+        try render(bands: v, style: style, experimentalSoftnessPercent: 0)
+    }
+
+    /// Renderer-only experiment. All product callers use the public zero-softness entry point.
+    package func render(bands v: [Float], style: SpectrumItemStyle, experimentalSoftnessPercent: Int) throws -> SpectrumRenderedFrame? {
         guard v.count == style.bands else { throw SpectrumRenderError.invalidValues("count \(v.count) ≠ style bands \(style.bands)") }
         guard (0...200).contains(style.reactionPercent) else { throw SpectrumRenderError.invalidStyle("reactionPercent") }
         guard v.allSatisfy({ $0.isFinite && (0...1).contains($0) }) else { throw SpectrumRenderError.invalidValues("value out of 0…1") }
@@ -404,7 +462,7 @@ public final class SpectrumFrameRenderer {
         let adjusted: [Float] = style.reactionPercent == 100 ? v : v.map {
             min(1, max(0, $0 * (Float(style.reactionPercent) / 100)))
         }
-        guard let r = try canvas.render(adjusted, style: style.renderStyle) else { return nil }
+        guard let r = try canvas.render(adjusted, style: style.renderStyle, experimentalSoftnessPercent: experimentalSoftnessPercent) else { return nil }
         // 화소는 내부 그림(r.image)에서 꺼내지 않고 방금 그린 캔버스에서 drawRect 부분을 직접 복사한다. 내부 그림은 보통 따로 자른 비트맵이지만
         // 비트맵을 얻지 못하면 캔버스 makeImage().cropping(행 띠)이고, 그 공급자 데이터의 원점·행 간격은 문서로 보장되지 않는다(2026-10-26 검토).
         // drawRect가 내부 그림을 그대로 설명할 때만(같은 크기, 정수, 캔버스 안) 복사하고, 아니면 실패한다.
@@ -412,6 +470,10 @@ public final class SpectrumFrameRenderer {
         guard d.integral == d, r.image.width == Int(d.width), r.image.height == Int(d.height) else {
             throw SpectrumRenderError.invalidCanvas("frame rect \(d) vs image \(r.image.width)x\(r.image.height)")
         }
+        #if DEBUG
+        let copyStart = requestTiming?.rasterClock()
+        defer { requestTiming?.recordRasterTime(.ownedImage, since: copyStart) }
+        #endif
         return SpectrumRenderedFrame(image: try canvas.ownedImage(d), drawRect: d, canvasWidth: width, canvasHeight: height)
     }
 

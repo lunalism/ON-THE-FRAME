@@ -144,6 +144,7 @@ final class PlaybackSpectrumController {
         #if DEBUG
         var traceRequest: Int64 = 0
         var traceCaptureID: UUID?
+        var requestTiming: SpectrumRequestTiming?
         #endif
     }
     struct Stored { let outcome: SpectrumFrameOutcome; let bytes: Int }
@@ -227,6 +228,7 @@ final class PlaybackSpectrumController {
             guard var p = pending[key], !p.cancelled, !desired.contains(key) else { continue }
             p.cancelled = true; pending[key] = p; metrics.cancelled += 1
             #if DEBUG
+            p.requestTiming?.mark(.cancellationRequested)
             if p.traceCaptureID == SpectrumContinuityTrace.ownerCaptureID {
                 SpectrumContinuityTrace.record(35, p.traceRequest, Int64(key.frame), Int64(p.serial), Int64(key.spectrum.hashValue))
             }
@@ -300,7 +302,9 @@ final class PlaybackSpectrumController {
             }
             let requestSerial = serial, start = ProcessInfo.processInfo.systemUptime
             #if DEBUG
-            let traceRequest = SpectrumContinuityTrace.next()
+            let requestTiming = session.requestTimings?.begin(frame: key.frame, priority: key.frame == priorityFrame ? 0 : 1,
+                                                             serial: requestSerial, epoch: epoch, revision: revision)
+            let traceRequest = requestTiming?.id ?? SpectrumContinuityTrace.next()
             let captureID = SpectrumContinuityTrace.ownerCaptureID
             SpectrumContinuityTrace.record(32, traceRequest, Int64(key.frame), Int64(requestSerial), Int64(epoch), Int64(revision), Int64(key.spectrum.hashValue))
             #else
@@ -311,6 +315,7 @@ final class PlaybackSpectrumController {
                                          priority: key.frame == priorityFrame ? 0 : 1, checkPlaybackMedia: true,
                                          traceRequestID: traceRequest) { [weak self] outcome in
                 #if DEBUG
+                requestTiming?.mark(.controllerCallback, outcome: outcome.playbackTraceCode)
                 if captureID == SpectrumContinuityTrace.ownerCaptureID {
                     SpectrumContinuityTrace.record(33, traceRequest, Int64(key.frame), Int64(requestSerial), SpectrumContinuityTrace.outcome(outcome))
                 }
@@ -319,6 +324,7 @@ final class PlaybackSpectrumController {
             }
             pending[key] = Pending(ticket: ticket, serial: requestSerial, start: start)
             #if DEBUG
+            pending[key]?.requestTiming = requestTiming
             pending[key]?.traceRequest = traceRequest
             pending[key]?.traceCaptureID = captureID
             #endif
@@ -335,6 +341,9 @@ final class PlaybackSpectrumController {
             metrics.stale += 1; return
         }
         pending[key] = nil
+        #if DEBUG
+        p.requestTiming?.mark(.slotReleased)
+        #endif
         guard let session, !p.cancelled, serial == requestSerial, epoch == session.epoch,
               revision == session.revision, desired.contains(key) else {
             #if DEBUG

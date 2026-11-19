@@ -92,7 +92,13 @@ public final class SpectrumAnalysisScheduler: Sendable {
         var running = false
         var waiters: Set<UInt64> = []
     }
-    struct Waiter { let key: BandKey; let completion: Completion }
+    struct Subscriber: Sendable {
+        let completion: Completion
+        #if DEBUG
+        var timing: SpectrumRequestTiming?
+        #endif
+    }
+    struct Waiter { let key: BandKey; let completion: Subscriber }
     struct State {
         var session = 0, nextID: UInt64 = 0, nextSeq: UInt64 = 0
         /// 진행 중 디코딩 작업 손잡이(무효로 할 때 취소), 도는 분석(seq → 세션)
@@ -106,7 +112,7 @@ public final class SpectrumAnalysisScheduler: Sendable {
         var stats = SpectrumSchedulerStatistics()
         var pendingCount: Int { jobs.values.filter { !$0.running }.count }
     }
-    typealias Delivery = (Completion, Result<[Float], SpectrumAnalysisError>)
+    typealias Delivery = (Subscriber, Result<[Float], SpectrumAnalysisError>)
     enum Start { case decode(any SpectrumPCMProvider, ChunkKey, Int), analyze(Job) }
 
     static func bytes(_ d: [[Float]]) -> Int { d.reduce(0) { $0 + $1.count * MemoryLayout<Float>.size } }
@@ -123,6 +129,18 @@ public final class SpectrumAnalysisScheduler: Sendable {
     /// 프레임 밴드 값을 요청한다. priority: 작을수록 먼저(예: 재생 헤드와의 거리). 완료 처리기는 정확히 한 번 callbackQueue에서 불린다.
     @discardableResult
     public func request(_ r: SpectrumFrameRequest, from provider: any SpectrumPCMProvider, priority: Int = 0, completion: @escaping Completion) -> SpectrumRequestID {
+        submit(r, from: provider, priority: priority, completion: Subscriber(completion: completion))
+    }
+
+    #if DEBUG
+    func request(_ r: SpectrumFrameRequest, from provider: any SpectrumPCMProvider, priority: Int,
+                 timing: SpectrumRequestTiming?, completion: @escaping Completion) -> SpectrumRequestID {
+        submit(r, from: provider, priority: priority, completion: Subscriber(completion: completion, timing: timing))
+    }
+    #endif
+
+    private func submit(_ r: SpectrumFrameRequest, from provider: any SpectrumPCMProvider, priority: Int,
+                        completion: Subscriber) -> SpectrumRequestID {
         let prepared: (BandKey, [SpectrumSourcePiece], [Int])?, early: SpectrumAnalysisError?
         do { prepared = try Self.key(r, provider); early = nil } catch let e as SpectrumAnalysisError { prepared = nil; early = e } catch { prepared = nil; early = .invalidSettings("\(error)") }
         let (id, out): (SpectrumRequestID, [Delivery]) = state.withLock { s in
@@ -222,7 +240,14 @@ public final class SpectrumAnalysisScheduler: Sendable {
         guard let j = s.jobs.removeValue(forKey: key) else { return [] }
         return j.waiters.compactMap { s.waiters.removeValue(forKey: $0).map { ($0.completion, r) } }
     }
-    private func deliver(_ xs: [Delivery]) { for (c, r) in xs { callbackQueue.async { c(r) } } }
+    private func deliver(_ xs: [Delivery]) {
+        for (subscriber, result) in xs {
+            #if DEBUG
+            subscriber.timing?.mark(.analysisReady)
+            #endif
+            callbackQueue.async { subscriber.completion(result) }
+        }
+    }
 
     /// 빈 자리만큼 일을 시작한다: 우선순위 순으로, 덩어리가 다 있는 작업은 분석, 아니면 아직 진행 중이 아닌 빠진 덩어리를 디코딩.
     private func pump() {

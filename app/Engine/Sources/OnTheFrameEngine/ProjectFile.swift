@@ -28,7 +28,7 @@ public enum ProjectFile {
     /// 그 값들은 형식 8에만 둔다). 이전 파일의 조각 사이 계보는 추측해 만들지 않는다(소유자 결정 2026-10-25).
     /// Format 10: actual Spectrum items persist an explicit reactionPercent.
     /// Empty Spectrum lanes / lineage retain format 8; images use the image-aware codec.
-    /// Format 11: Spectrum items read appearance v1/v2 and save v2.
+    /// Format 11: Spectrum items read appearance v1–v3 and save v2 at zero Softness, otherwise v3.
     public static let currentVersion = 11
     public static let appearanceVersion = 11
     public static let reactionVersion = 10
@@ -243,6 +243,70 @@ extension ProjectFile {
         return text
     }
 
+    private enum SpectrumWireScope {
+        case document, spectra, item, style, appearance, outsideRGB, other
+    }
+
+    /// Foundation collapses duplicate object keys and accepts integral floats as Int.
+    /// Inspect the original spellings only after JSONSerialization has validated the JSON structure.
+    private static func validateSpectrumTokens(_ data: Data, version: Int) throws {
+        let text = try jsonSourceText(data)
+        let expression = try NSRegularExpression(pattern: #""(?:[^"\\]|\\.)*"|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null|[{}\[\]:,]"#)
+        let ns = text as NSString
+        let tokens = expression.matches(in: text, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range) }
+        var containers: [(scope: SpectrumWireScope, keys: Set<String>)] = []
+        var nextScope = SpectrumWireScope.document
+        for i in tokens.indices {
+            let token = tokens[i]
+            if token == "{" || token == "[" {
+                let scope = containers.last?.scope == .spectra && token == "{" ? .item : nextScope
+                containers.append((scope, []))
+                nextScope = .other
+                continue
+            }
+            if token == "}" || token == "]" {
+                guard containers.popLast() != nil else { throw LoadError.malformed("JSON container") }
+                continue
+            }
+            guard token.hasPrefix("\""), i + 2 < tokens.count, tokens[i + 1] == ":" else { continue }
+            let field = try JSONDecoder().decode(String.self, from: Data(token.utf8))
+            guard let index = containers.indices.last else { throw LoadError.malformed("JSON field outside object") }
+            let scope = containers[index].scope
+            switch (scope, field) {
+            case (.document, "spectra"): nextScope = .spectra
+            case (.item, "style"): nextScope = .style
+            case (.style, "appearance"): nextScope = .appearance
+            case (.appearance, "outsideRGB"): nextScope = .outsideRGB
+            default: nextScope = .other
+            }
+            // Cover duplicate parents as well as individual appearance/RGB members.
+            if nextScope != .other || scope == .appearance || scope == .outsideRGB ||
+                (scope == .style && (version >= appearanceVersion || field == "reactionPercent")) {
+                guard containers[index].keys.insert(field).inserted else { throw LoadError.invalid("duplicate Spectrum field: \(field)") }
+            }
+            let value = tokens[i + 2]
+            if field == "appearance" {
+                guard version >= appearanceVersion, nextScope == .appearance, value == "{" else {
+                    throw LoadError.invalid("Spectrum appearance requires format 11 and an object")
+                }
+            }
+            if field == "softnessPercent", scope != .appearance {
+                throw LoadError.invalid("softnessPercent requires Spectrum appearance v3")
+            }
+            let insideComponent = scope == .style && version >= appearanceVersion && ["red", "green", "blue", "alpha"].contains(field)
+            if insideComponent || scope == .outsideRGB || (scope == .appearance && field != "outsideRGB") || field == "reactionPercent" {
+                guard value.utf8.allSatisfy({ (48...57).contains($0) }), let integer = Int(value) else {
+                    throw LoadError.invalid("Spectrum \(field) requires an unsigned integer token")
+                }
+                if field == "reactionPercent" {
+                    guard scope == .style, version >= reactionVersion, (0...200).contains(integer) else {
+                        throw LoadError.invalid("reactionPercent requires format 10 or later and an integer in 0...200")
+                    }
+                }
+            }
+        }
+    }
+
     /// Version-aware wire validation. Legacy defaults are injected only after rejecting
     /// contradictory fields. This creates temporary bytes; it never writes a source file.
     static func reactionDocument(_ data: Data, version: Int) throws -> Data {
@@ -261,52 +325,9 @@ extension ProjectFile {
                 }
             }
         }
-        // JSONDecoder accepts e.g. 100.0 as Int. Check original JSON tokens so the
-        // new field's wire contract is an integer, including escaped JSON key names.
-        let text = try jsonSourceText(data)
-        let expression = try NSRegularExpression(pattern: #""(?:[^"\\]|\\.)*"|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null|[{}\[\]:,]"#)
-        let ns = text as NSString
-        let tokens = expression.matches(in: text, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range) }
-        var count = 0, appearanceCount = 0
-        for i in tokens.indices where tokens[i].hasPrefix("\"") && i + 2 < tokens.count && tokens[i + 1] == ":" {
-            let key = try? JSONDecoder().decode(String.self, from: Data(tokens[i].utf8))
-            if key == "appearance" {
-                guard version >= appearanceVersion, tokens[i + 2] == "{" else {
-                    throw LoadError.invalid("Spectrum appearance requires format 11 and an object")
-                }
-                var end = i + 2, depth = 0
-                repeat {
-                    if tokens[end] == "{" { depth += 1 }
-                    if tokens[end] == "}" { depth -= 1 }
-                    end += 1
-                } while end < tokens.count && depth > 0
-                guard depth == 0 else { throw LoadError.invalid("appearance object") }
-                // Codable checks the exact versioned object shape and ranges.
-                // Check the source spelling here before Foundation merges duplicate
-                // keys or accepts integral floats as Int.
-                var keys = Set<String>()
-                for j in (i + 3)..<end where tokens[j].hasPrefix("\"") && j + 2 < end && tokens[j + 1] == ":" {
-                    let name = try JSONDecoder().decode(String.self, from: Data(tokens[j].utf8))
-                    guard keys.insert(name).inserted else { throw LoadError.invalid("duplicate appearance field") }
-                    guard name != "outsideRGB" else { continue }
-                    guard tokens[j + 2].range(of: #"^(0|[1-9][0-9]*)$"#, options: .regularExpression) != nil else {
-                        throw LoadError.invalid("appearance values must be valid integer tokens")
-                    }
-                }
-                appearanceCount += 1
-            }
-            guard key == "reactionPercent" else { continue }
-            guard version >= reactionVersion else { throw LoadError.invalid("reactionPercent requires format 10 or later") }
-            let token = tokens[i + 2]
-            guard token.range(of: #"^(0|[1-9][0-9]*)$"#, options: .regularExpression) != nil,
-                  let value = Int(token), (0...200).contains(value) else {
-                throw LoadError.invalid("reactionPercent must be an integer in 0...200")
-            }
-            count += 1
-        }
+        try validateSpectrumTokens(data, version: version)
         if version >= reactionVersion {
             try StillImageProjectCodec.validateSchema(raw, version: version)
-            guard count == spectra.count else { throw LoadError.invalid("required reactionPercent / duplicate field") }
             for spectrum in spectra {
                 guard let style = spectrum["style"] as? [String:Any], style["reactionPercent"] != nil else {
                     throw LoadError.invalid("missing reactionPercent")
@@ -314,9 +335,6 @@ extension ProjectFile {
                 if version >= appearanceVersion, !(style["appearance"] is [String:Any]) {
                     throw LoadError.invalid("missing Spectrum appearance")
                 }
-            }
-            if version >= appearanceVersion, appearanceCount != spectra.count {
-                throw LoadError.invalid("required appearance / duplicate field")
             }
             return data
         }

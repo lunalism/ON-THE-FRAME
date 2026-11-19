@@ -14,12 +14,19 @@ final class SpectrumPreviewSession {
     private(set) var epoch = 0
     private(set) var revision = 0
     #if DEBUG
+    var requestTimings: SpectrumRequestTimingCapture?
     /// Hold an already produced outcome to test the app-side fence independently of engine cancellation.
     var transformOutcomeForTest: ((UUID, Int, SpectrumFrameOutcome) async -> SpectrumFrameOutcome)?
     var beforeDeliveryForTest: ((SpectrumFrameOutcome) async -> Void)?
     #endif
 
     init(coordinator: SpectrumFrameCoordinator? = nil) {
+        #if DEBUG
+        if coordinator == nil, ProcessInfo.processInfo.arguments.contains("-OTFEnableDigitalSoftnessPreview") {
+            self.coordinator = SpectrumFrameCoordinator(settings: .m1, deliveryQueue: .main, digitalSoftnessPreviewPilot: true)
+            return
+        }
+        #endif
         self.coordinator = coordinator ?? SpectrumFrameCoordinator(settings: .m1, deliveryQueue: .main)
     }
 
@@ -47,9 +54,16 @@ final class SpectrumPreviewSession {
         let requestedEpoch = epoch, requestedRevision = revision
         #if DEBUG
         let capture = checkPlaybackMedia && traceRequestID > 0 ? SpectrumContinuityTrace.ownerCaptureID : nil
+        let timing = checkPlaybackMedia ? requestTimings?.request(id: traceRequestID) : nil
         #endif
         let receive: SpectrumFrameCoordinator.Completion = { [weak self] outcome in
+            #if DEBUG
+            timing?.mark(.deliveryInvoked)
+            #endif
             Task { @MainActor [weak self] in
+                #if DEBUG
+                timing?.mark(.sessionReceived)
+                #endif
                 guard let self else { return }
                 #if DEBUG
                 if let capture { SpectrumContinuityTrace.recordOwner(capture, 157, traceRequestID, Int64(frame), outcome.playbackTraceCode) }
@@ -93,6 +107,10 @@ final class SpectrumPreviewSession {
             }
         }
         #if DEBUG
+        if let timing {
+            return coordinator.request(spectrum: spectrum, frame: frame, canvasWidth: 1920, canvasHeight: 1080,
+                                       priority: priority, playbackObserver: nil, timing: timing, completion: receive)
+        }
         if let capture {
             return coordinator.request(spectrum: spectrum, frame: frame, canvasWidth: 1920, canvasHeight: 1080, priority: priority, playbackObserver: { stage, detail, value in
                 SpectrumContinuityTrace.recordOwner(capture, stage.rawValue, traceRequestID, Int64(frame), detail, value)
