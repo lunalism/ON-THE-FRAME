@@ -45,7 +45,9 @@ macOS의 Xcode/Swift 도구를 사용하며, 실행할 SDK·컴파일러·대상
 
 `scripts/build.sh` 단독 실행, bare `swift test`, Xcode의 일반 실행은 아래 자원 guard를 자동 보장하지 않는다. 현재 요구를 모두 강제하는 **검증된 공용 한 줄 실행 명령은 확인되지 않았다. 빌드·테스트 전에 해당 작업에 승인된 실행 절차를 선택하고 guard 적용을 확인해야 한다.** 이 절과 뒤 이력의 명령은 기존 인터페이스를 설명하는 예이며, 그 자체가 실행 승인이나 안전한 runner는 아니다.
 
-SPECTRUM-ZERO-01C에서 검증한 절차는 기존 전용 내부 APFS 빌드 위치, 단일 작업, 작업별 명령·전체 로그·소스 fingerprint·서명 기록, 새로 시작한 작업 소유 프로세스의 PID/UID/시작 시각을 확인하는 자원 감시를 결합했다. 그때의 작업 전용 실행기와 출력 위치를 그대로 재사용하는 공용 절차가 승인된 것은 아니다. 이전 진단 문서의 당시 한도나 성공한 과거 빌드만으로 현재 guard를 대체하지 않는다.
+**빌드 위치(2026-11-21 소유자 정책, [결정](../docs/DECISIONS.md#2026-11-21-빌드-산출물을-외부-apfs-볼륨으로)).** 새 빌드 산출물은 외부 APFS 볼륨에 둔다. DerivedData는 `/Volumes/Data/ON-THE-FRAME-Builds/DerivedData/<작업별 이름>`, 빌드 결과·로그·xcresult·검증 산출물은 `/Volumes/Data/ON-THE-FRAME-Builds/Results/<작업별 이름>`, 보관본은 `/Volumes/Data/ON-THE-FRAME-Archives/`다. 내부 `~/Library/Developer/ON-THE-FRAME/`을 새 빌드의 기본 위치로 쓰지 않는다. [derived-data.sh](scripts/derived-data.sh)는 `/Volumes/Data`가 APFS로 마운트됐고 `ON-THE-FRAME-Builds`가 쓸 수 있는 실제 디렉터리인지, `OTF_DERIVED_DATA`가 그 아래 같은 볼륨에 있는지 확인하고, 아니면 source 단계에서 실패해 호출 스크립트를 멈춘다. 내부 디스크로 자동 대체하지 않고 디렉터리를 만들지 않으며 전역 Xcode 설정을 바꾸지 않는다. 기본값은 `DerivedData/scripts-default`이고 소유자 감독 실행은 `OTF_DERIVED_DATA` 또는 `-derivedDataPath`로 새 고유 경로를 쓴다. 2026-11-21 FX-02C 재생 안정화 빌드들은 단일 작업 직접 `xcodebuild`(`-jobs 1`, `-j1`, batch mode 끔, index store 끔, 고유 `-derivedDataPath`·`-resultBundlePath`)를 소유자 감독 아래 1회씩 실행했다. 이 기록도 공용 실행 승인이 아니며 아래 한도는 그대로다. 2026-10-24의 내부 APFS 위치는 당시 데이터 볼륨이 HFS+였기 때문이며 이력으로 보존한다.
+
+SPECTRUM-ZERO-01C에서 검증한 절차는 당시 전용 내부 APFS 빌드 위치, 단일 작업, 작업별 명령·전체 로그·소스 fingerprint·서명 기록, 새로 시작한 작업 소유 프로세스의 PID/UID/시작 시각을 확인하는 자원 감시를 결합했다. 그때의 작업 전용 실행기와 출력 위치를 그대로 재사용하는 공용 절차가 승인된 것은 아니다. 이전 진단 문서의 당시 한도나 성공한 과거 빌드만으로 현재 guard를 대체하지 않는다.
 
 | 현재 중지 조건 | 유지할 값·동작 |
 | --- | --- |
@@ -53,10 +55,10 @@ SPECTRUM-ZERO-01C에서 검증한 절차는 기존 전용 내부 APFS 빌드 위
 | 개별 컴파일러 RSS | 조기 중지 1280 MiB, hard 중지 2 GiB |
 | 작업 프로세스 aggregate RSS | 기존 조기 중지 약 2.7 GiB, hard 중지 3 GiB |
 | 예측·메모리 압력 | 기존 RSS 증가 예측 guard(0.2초 예측 1536 MiB)와 memory pressure 중지 조건을 유지한다. 관측을 잃으면 계속 실행하지 않는다. |
-| 관리 산출물 디스크 | 조기 중지 19.25 GiB, hard 중지 20 GiB. 기존 작업별 증가량·여유 공간 중지 조건도 유지한다. |
+| 관리 산출물 디스크 | 조기 중지 19.25 GiB, hard 중지 20 GiB. 기존 작업별 증가량·여유 공간 중지 조건도 유지한다. 합산 대상은 아래 문단을 따른다. |
 | 보존·중지 | 작업 소유와 프로세스 정체를 확인한 자식만 중지한다. 소유자 앱·프로젝트와 기존 signed Debug 앱·검증 증거를 종료·덮어쓰기·삭제하지 않는다. 실패·중지 빌드를 자동 재시도하거나 한도를 높이지 않는다. |
 
-실행 전에는 앱·엔진 빌드, 검증 작업, 기존 실험과 전용 개발 출력 등 **현재 관리 중인 산출물의 할당 디스크 사용량을 합산**하고 실행 중에도 감시한다. 논리 파일 크기나 새 출력 폴더만 세거나 과거 측정치를 현재 여유 공간으로 대신하지 않는다. 샘플링 중지 조건은 OS가 할당을 강제로 제한한다는 보장이 아니며, 예측 guard를 비활성화해 실제 hard 값에 도달할 때까지 기다리지 않는다. 고유 증거를 지워 예산을 맞추지 않는다.
+실행 전에는 앱·엔진 빌드, 검증 작업, 기존 실험과 전용 개발 출력 등 **현재 관리 중인 산출물의 할당 디스크 사용량을 합산**하고 실행 중에도 감시한다. 2026-11-21부터 합산 대상은 `app/.build/`, `app/Engine/.build/`, `app/selftest-work/`, `experiments/*/artifacts`·`.build`, 외부 `/Volumes/Data/ON-THE-FRAME-Builds/DerivedData/`와 `/Volumes/Data/ON-THE-FRAME-Builds/Results/`, 그리고 내부 `~/Library/Developer/ON-THE-FRAME/`에 남은 것이 있으면 그것이다. `/Volumes/Data/ON-THE-FRAME-Archives/`는 보존 보관본(2026-11-21 측정 약 50.2 GiB, 대부분 이전 내부 DerivedData 보관본)이라 20 GiB 빌드 예산에 넣지 않고 따로 측정해 보고하며, 예산을 맞추려고 지우지 않는다. 새 보관본은 소유자 승인을 받는다. 외부 볼륨의 여유 공간 조건은 그 볼륨에서 잰다. 논리 파일 크기나 새 출력 폴더만 세거나 과거 측정치를 현재 여유 공간으로 대신하지 않는다. 샘플링 중지 조건은 OS가 할당을 강제로 제한한다는 보장이 아니며, 예측 guard를 비활성화해 실제 hard 값에 도달할 때까지 기다리지 않는다. 고유 증거를 지워 예산을 맞추지 않는다.
 
 현재 [build.sh](scripts/build.sh)의 `xcodebuild` 호출에는 단일 작업 옵션·위 자원 감시가 없고, 출력 필터 뒤 `|| true`가 실패를 가릴 수 있다. **스크립트 exit 0이나 마지막 `app:` 출력만으로 빌드 성공을 판정하지 않는다.** 승인된 절차에서 원래 `xcodebuild`/Swift 명령의 종료 상태와 전체 빌드 로그, 성공 표식, 자원 중지 여부를 각각 보존·확인하고, 실행할 앱이 검증한 소스·구성·서명과 맞는지 확인한다. 필터의 종료 상태를 원래 빌드 종료 상태로 대신하지 않는다. 이 문서 정렬 작업에서는 빌드 스크립트를 수정하거나 새 실행기를 만들지 않았다.
 
@@ -67,8 +69,8 @@ SPECTRUM-ZERO-01C에서 검증한 절차는 기존 전용 내부 APFS 빌드 위
 ```sh
 # 기존 인터페이스 예시: 실행 전 승인된 자원 감시 절차가 필요하다.
 cd app
-scripts/build.sh            # Debug 빌드 → $HOME/Library/Developer/ON-THE-FRAME/DerivedData/Build/Products/Debug/OnTheFrame.app(scripts/derived-data.sh, 2026-10-24부터; 이전 기록의 .build/DerivedData는 옛 위치)
-open ~/Library/Developer/ON-THE-FRAME/DerivedData/Build/Products/Debug/OnTheFrame.app
+scripts/build.sh            # Debug 빌드 → /Volumes/Data/ON-THE-FRAME-Builds/DerivedData/scripts-default/Build/Products/Debug/OnTheFrame.app(scripts/derived-data.sh, 2026-11-21부터; 2026-10-24~11-20은 내부 ~/Library/Developer/ON-THE-FRAME/DerivedData, 그 전 기록의 .build/DerivedData는 옛 위치)
+open /Volumes/Data/ON-THE-FRAME-Builds/DerivedData/scripts-default/Build/Products/Debug/OnTheFrame.app
 ```
 
 - Xcode 프로젝트의 기존 진입점은 `app/OnTheFrame.xcodeproj`와 OnTheFrame 스킴이다. 일반 ⌘R도 현재 자원 guard를 보장하는 실행 절차는 아니다.
@@ -99,7 +101,7 @@ cd app && scripts/transform-test.sh  # 영상 크기·위치 자체 검사(Debug
 
 `scripts/selftest.sh`의 결과는 `app/selftest-work/last-verify-result.json`에 남는다.
 
-빌드·검증 산출물은 모두 Git에서 무시한다: `app/.build/`, `app/Engine/.build/`, `app/selftest-work/`, 그리고 저장소 밖 내부 APFS의 앱 DerivedData `$HOME/Library/Developer/ON-THE-FRAME/DerivedData`(2026-10-24부터). 이 산출물은 실험 산출물과 함께 20 GiB 관리 예산 안에서 관리한다(2026-10-24 소유자 승인, 이전 4 GiB).
+빌드·검증 산출물은 모두 Git에서 무시한다: `app/.build/`, `app/Engine/.build/`, `app/selftest-work/`, 그리고 저장소 밖 외부 APFS의 `/Volumes/Data/ON-THE-FRAME-Builds/DerivedData/`·`Results/`(2026-11-21부터, 이전 2026-10-24~11-20은 내부 `$HOME/Library/Developer/ON-THE-FRAME/DerivedData`). 이 산출물은 실험 산출물과 함께 20 GiB 관리 예산 안에서 관리한다(2026-10-24 소유자 승인, 이전 4 GiB). 보관본 `/Volumes/Data/ON-THE-FRAME-Archives/`는 [자원 안전](#현재-실행-승인과-자원-안전)대로 따로 센다.
 
 ## 2. 화면과 연결된 작업 흐름
 

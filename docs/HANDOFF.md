@@ -1,5 +1,23 @@
 # 인계 요약 — ON THE FRAME
 
+## 2026-11-21 현행 인계 · FX02C-CHECKPOINT-01
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 그 아래 2026-11-20 이하의 ‘현행’은 각 작성 날짜 기준이다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 구현 체크포인트 | `feature/spectrum-effects` @ `7c4c7bbf8dbb395916015df9aa0afb7f689f6ffe`(부모 `3af76fc`). FX-02C 재생 안정화 코드와 회귀 검사 9개 파일. 이 인계를 담은 문서·빌드 위치 정책 커밋이 그 위에 온다. |
+| 게시 | 소유자가 두 커밋의 `origin/feature/spectrum-effects` fast-forward push를 승인했다(FX02C-CHECKPOINT-01). 실제 게시 결과는 그 작업 보고와 원격 조회로 확인한다. |
+| 빌드·시험 | 마지막 빌드는 외부 Debug `FX02C-EditListCadence-20261121-01`(소유자 감독 1회). Claude Code 자동 검증 79/79·실제 MP4 16/16 PASS, 빈 Spectrum tick 0/5023. 체크포인트 작업 자체는 빌드·시험을 실행하지 않았다. |
+
+**수락 범위.** 소유자가 같은 빌드에서 실제 MP4로 0초 시작, 8·16·24·32초 구간, 33.4초·66.8초 반복 프레임, 자연 종료, Pause·Seek를 **PASS**로 확인했다. 이미지 없는 영상 기반 프로젝트와 시험한 MP4 한 종류(29.97 fps, 단일 1배속 편집 목록)에 한한다. [수락 기록](DECISIONS.md#2026-11-21-fx-02c-재생-안정화-실제-mp4-수락)
+
+**열린 문제.** 이미지 기반 Spectrum 재생 깜박임, 다른 영상 형식(여러·앞쪽 자르기 편집 목록, VFR, 24/25 fps)의 반복 프레임 처리, Native Inspector 7 FAIL / 4 SKIP, 내부 Undo/Redo Seek 지연, 기본(공개) Spectrum Export 미완료, Softness v1.1 유보, 새로 관찰한 [Digital Hue 저진폭 점](DECISIONS.md#2026-11-21-digital-spectrum-hue-보간의-저진폭-점open)(유보한 시각 품질, 재생 깜박임·Softness와 별개). 장시간·다른 하드웨어·화면 주사율은 미검증이다.
+
+**빌드 위치.** 새 빌드는 `/Volumes/Data/ON-THE-FRAME-Builds/DerivedData/<작업별 이름>`과 `Results/<작업별 이름>`, 보관본은 `/Volumes/Data/ON-THE-FRAME-Archives/`다. `app/scripts/derived-data.sh`는 볼륨이 없거나 쓸 수 없으면 내부 디스크로 대체하지 않고 멈춘다. [정책](DECISIONS.md#2026-11-21-빌드-산출물을-외부-apfs-볼륨으로) 아래 이전 인계의 내부 DerivedData 경로는 당시 기록이다.
+
+**다음 승인.** 다음 구현·빌드·시험은 소유자가 범위를 정해 승인한다.
+
 ## 2026-11-20 현행 인계 · SOFTNESS-V11-DEFERRAL
 
 아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치와 HEAD를 다시 조회한다. 그 아래 2026-11-18 이하의 ‘현행’은 각 작성 날짜 기준이다.

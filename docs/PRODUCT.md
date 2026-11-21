@@ -47,6 +47,8 @@
 | v1.1로 유보 | Softness 정수 0–100, Digital 안쪽 feather, Analog 바깥 feather 재검토, 성능 최적화, Inspector 통합, Preview·Export 일치, 저장 호환 검증. 앞서 유보한 UX-02도 계획된 v1.1이다 |
 | 향후 후보 | SPECTRUM-SHADOW-01 등 기존 미승인 제안. 이 결정으로 승인되지 않는다 |
 
+**2026-11-21 재생 안정화 경계.** v1.0의 "안정적인 기본 Spectrum Preview" 중 이미지 없는 영상 기반 프로젝트의 재생 시작·반복 영상 프레임·자연 종료는 소유자 실제 MP4 한 종류에서 수락됐다([기록](DECISIONS.md#2026-11-21-fx-02c-재생-안정화-실제-mp4-수락)). 모든 영상 형식(여러·앞쪽 자르기 편집 목록, VFR, 24/25 fps 등)이나 이미지 기반 Spectrum 재생 깜박임의 해결을 뜻하지 않는다. Digital Hue 보간의 저진폭 점은 별도 OPEN 시각 품질 문제다([기록](DECISIONS.md#2026-11-21-digital-spectrum-hue-보간의-저진폭-점open)).
+
 v1.0에서 저장된 양수 Softness는 보이지 않게 보존되며, 이후 Softness가 켜지면 렌더 결과를 바꿀 수 있다. 이는 활성화 단계의 호환·UX 검토 사항이며 현재 동작을 바꾸는 승인이 아니다.
 
 ## 1. 개요
