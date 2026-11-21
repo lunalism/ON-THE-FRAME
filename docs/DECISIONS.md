@@ -1172,6 +1172,8 @@ TRANSITION-FIX-01은 재생을 시작한 뒤 첫 프레임 후보를 기존 Prev
 
 Spectrum 항목의 프로젝트 형식은 11이다. Softness 0은 appearance v2로, 1–100은 v3로 저장한다. v3의 필수 키는 `contractVersion`, `outsideRGB`, `hueInterpolationDegrees`, `softnessPercent`다. Inside RGB와 공통 alpha는 기존 스타일 필드에 둔다. 레거시 단색 및 v1·v2는 Softness 0으로 읽는다. 명시적 v3의 0도 유효하며 다시 저장하면 v2가 된다. v2까지만 지원하는 reader는 v3 문서를 거부한다.
 
+**후속 amendment:** 이 저장 계약은 유지한 채 Softness 기능 완성은 v1.1 목표로 유보했다([2026-11-20 Softness v1.1 유보](#2026-11-20-spectrum-softness-v11-유보)).
+
 ### 2026-11-20 개발 시험 실행의 컴파일러 동시성 정의
 
 소유자는 guard를 적용한 개발 시험 실행에서 [앱 README의 "컴파일 동시성"](../app/README.md#현재-실행-승인과-자원-안전) 조건을 다음과 같이 판정하도록 승인했다(COMPILER-CONCURRENCY-POLICY-01). 개별·합계 RSS, 증가 예측, 메모리 압력, 관리 디스크, 작업 소유 확인과 종료 안전, 자동 재시도 금지는 바꾸지 않는다.
@@ -1183,3 +1185,18 @@ Spectrum 항목의 프로젝트 형식은 11이다. Softness 0은 appearance v2�
 - **표본 한계:** 표본 간격(약 50 ms)보다 짧은 겹침은 관측하지 못하며, 이 정의는 그 부재를 증명하지 않는다.
 
 이 정의는 FINAL-GUARD-RACE-01에서 승인한 "종료 행의 컴파일러 지정을 보수적으로 집계"를 실행 중 개수 판정에 한해 대체한다. 해당 행의 RSS 합산은 유지한다. 이 결정은 빌드·XCTest 실행 승인이 아니며, 각 실행은 별도 승인을 받는다.
+
+### 2026-11-20 Spectrum Softness v1.1 유보
+
+소유자는 2026-11-20(KST) Audio Spectrum Softness를 **v1.1 목표로 유보**했다(SOFTNESS-V11-DEFERRAL). 기능 취소가 아니라 범위 유보이며, Softness 개발을 v1.0(첫 릴리스)에서 계속한다는 이전 계획을 대체한다. [2026-11-19 모델과 저장 계약](#2026-11-19-spectrum-softness-모델과-저장-계약)과 FX-02 범위(R-FX02)의 당시 기록은 그대로 보존한다. v1.1은 목표이며 출시 약속이 아니다.
+
+- **v1.0 범위:** 기존 Digital·Analog Spectrum, 색상·Hue 컨트롤, 위치·크기 컨트롤, 오디오 반응, 정확한 오디오 동기화, 안정적인 기본 Spectrum Preview, 기본 Spectrum Export 통합, 핵심 편집기 완성. 이 목록은 우선순위이며 공개 Spectrum Export 활성화 등 개별 구현의 승인은 각 작업에서 따로 받는다.
+- **v1.1 목표:** Softness 정수 0–100, Digital 안쪽 feather, Analog 바깥 feather 재검토, 성능 최적화, Inspector 통합, Preview·Export 일치, 저장 호환 검증.
+- **v1.0 기능 수락에서 제외:** Softness의 시각 강도·성능·pixel 정확도 수락은 v1.0 완료 조건이 아니다.
+- **소스와 증거 보존:** 기존 Softness 소스, Feather 최적화와 보존된 scalar 원본, oracle·모델·저장·pilot·timing 시험, 진단 증거를 삭제하거나 되돌리지 않는다. f208e2c 이전 소스로 되돌리는 방식은 appearance v3를 읽지 못하므로 쓰지 않는다.
+- **저장 계약 유지:** Format 11과 appearance v1–v3 읽기, Softness 0의 v2 저장, 1–100의 v3 저장을 유지한다. 형식 변경은 없다. v1.0이 그리지 않는다는 이유로 저장된 양수 Softness를 지우거나 0으로 정규화하지 않는다.
+- **렌더 경계:** v1.0의 일반 Preview·Export renderer는 Softness 0 경로를 계속 쓴다. 양수 Softness를 그리는 Digital Preview pilot은 DEBUG 빌드와 명시적 실행 인수가 모두 필요한 실험이며 제품 기능이 아니다. 요청 시간 계측도 DEBUG 전용이다.
+- **향후 활성화:** Softness를 Inspector·일반 Preview·Export에서 켜려면 새 성능·pixel 정확도·Preview/Export·저장 검증과 별도 소유자 승인이 필요하다. 최적화 이전 구현의 Digital 50% Preview 측정(300프레임 중 11프레임 설치)은 당시 기록이며 현재 최적화 구현의 측정이 아니다.
+- **호환·UX 고려(제안 아님, 현재 동작 변경 승인 아님):** v1.0에서 보이지 않게 보존된 양수 값은 이후 버전에서 Softness가 켜지면 렌더 결과를 바꿀 수 있다. 활성화 단계에서 이 값의 표시·안내 방식을 검토한다.
+
+**검증 경계:** 위의 일반 경로 Softness 0, Inspector 미노출, pilot gate, Export 차단, 앱 편집 경로의 양수 값 보존은 SOFTNESS-V11-DEFERRAL-01의 **정적 소스 검토** 결론이다. f208e2c는 컴파일·시험하지 않았다. Release 컴파일, Softness 0의 바이트 동일성, 실제 앱의 열기·편집·저장·재열기에서 양수 값 보존, Preview/Export 통합, 기존 FX-02C 재생 회귀는 미검증이다. 빌드·시험 실행은 별도 승인을 받는다.

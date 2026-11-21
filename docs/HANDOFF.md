@@ -1,5 +1,23 @@
 # 인계 요약 — ON THE FRAME
 
+## 2026-11-20 현행 인계 · SOFTNESS-V11-DEFERRAL
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치와 HEAD를 다시 조회한다. 그 아래 2026-11-18 이하의 ‘현행’은 각 작성 날짜 기준이다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 기술 체크포인트 | `feature/spectrum-effects` @ `f208e2ced260555c74083df9019d2769cdbafb8b`(부모 `871ff58`). Softness Preview pilot, 요청 시간 계측, Digital Feather 최적화 A, oracle 시험과 관련 엔진·앱 변경, 컴파일러 동시성 정의 문서를 담았다. |
+| 게시 | 소유자가 `origin/feature/spectrum-effects`로 push와 upstream 설정을 보고했다. 로컬 추적 참조도 같은 커밋을 가리키지만, fetch 없이 본 로컬 참조는 실시간 원격 상태의 독립 확인이 아니다. |
+| 빌드·시험 | **컴파일·시험하지 않았다.** 보고된 마지막 guard 적용 빌드 시도(STAGE1-BUILD-01)는 Engine 컴파일 전에 중지됐고 XCTest는 0개 실행됐다. 빌드·시험은 [실행 승인과 자원 안전](../app/README.md#현재-실행-승인과-자원-안전)과 별도 실행 승인이 있을 때만 한다. |
+
+**Softness v1.1 유보.** 소유자 결정(2026-11-20 KST)으로 Softness 완성은 v1.1 목표이며 v1.0 기능 수락에서 빠진다. 기존 소스·시험·보존 원본·진단 증거는 유지한다. [유보 결정](DECISIONS.md#2026-11-20-spectrum-softness-v11-유보)
+
+**렌더와 저장 경계(정적 소스 검토, 실행 미검증).** 일반 Preview·Export는 Softness 0 경로를 쓰고 Inspector에는 Softness가 없다. 양수 Preview는 DEBUG 빌드와 `-OTFEnableDigitalSoftnessPreview` 실행 인수가 모두 필요한 Digital pilot에서만 그리며 Analog은 0으로 그린다. 요청 시간 계측은 DEBUG 전용이다. 공개 Spectrum Export는 비활성이고 DEBUG 내부 Export slice는 0 경로 renderer를 쓴다. Format 11과 appearance v1–v3 읽기, 0은 v2·양수는 v3 저장을 유지하며 저장된 양수 값을 지우거나 0으로 정규화하지 않는다. f208e2c 이전 소스는 v3를 읽지 못하므로 되돌리지 않는다.
+
+**v1.0 우선순위와 열린 문제.** 재생 시작·자연 종료 Spectrum 깜박임, Native Inspector 7 FAIL / 4 SKIP, 내부 Undo/Redo Seek 지연, 기본 Spectrum Preview 검증, 기본 Spectrum Export 통합, f208e2c의 Release 컴파일과 회귀 시험(Softness 0 바이트 동일성, 앱 열기·편집·저장·재열기의 양수 값 보존 포함), 남은 편집기 기능, end-to-end 회귀 검증. 상세는 [로드맵 현행 표](ROADMAP.md#현행-기능과-검증-경계)를 따른다.
+
+**다음 승인.** 이 인계 갱신은 문서 변경만이며 커밋·push는 별도 승인을 기다린다. 다음 구현·빌드·시험은 소유자가 범위를 정해 승인한다.
+
 ## 2026-11-18 현행 인계 · AGENT-WORKFLOW-02
 
 아래는 문서 브랜치를 만든 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치와 HEAD를 조회한다.

@@ -17,7 +17,7 @@
 | 경로/내용 | 현행 동작 | 경계 |
 |---|---|---|
 | 앱 열기 | `ProjectStore` → `ProjectPersistence.decode` → `OperationalProjectAdapter` → image-aware codec. 유효한 legacy 1–8과 형식 9–11을 해당 schema에 따라 복원한다 | 지원 렌더 설정·형식별 구조/값 검사와 원본 접근 확인을 거친다. 저장된 이미지 metadata는 현재 접근/렌더 승인 증거가 아니며, 파일을 읽는 능력이 이미지 gate나 public Export를 켜지 않는다 |
-| 앱 저장·실제 Spectrum 항목 있음 | 이미지 유무와 무관하게 Format 11. Softness 0은 appearance v2, 1–100은 v3 | Inside RGB, 공통 alpha, Outside RGB, Hue, 반응 강도와 기존 milli 정밀도를 보존한다 |
+| 앱 저장·실제 Spectrum 항목 있음 | 이미지 유무와 무관하게 Format 11. Softness 0은 appearance v2, 1–100은 v3 | Inside RGB, 공통 alpha, Outside RGB, Hue, 반응 강도와 기존 milli 정밀도를 보존한다. Softness 기능은 v1.1로 유보돼도 저장된 양수 값을 지우지 않는다 |
 | 앱 저장: 이미지 catalog 있음, 실제 Spectrum 항목 없음 | 9 | 이미지 원본 참조·종류/metadata를 보존한다. 이미지마다 가짜 duration/frameCount/영상 트랙을 저장하지 않는다 |
 | 앱 저장: 이미지도 실제 Spectrum 항목도 없음 | 빈 Spectrum 레인 또는 소리 계보가 있으면 8, 그 밖은 켜진 자막 효과 7 / 자막·자막 레인 6 / 자막 없음 5 | 콘텐츠에 맞는 형식을 고르며, 새 스키마 값이 있는 문서를 더 낮은 형식으로 조용히 저장하지 않는다 |
 | raw `ProjectFile.decode` | temporal 문서의 1–8과 조건에 맞는 10·11을 읽는다 | 형식 9와 이미지 `kind`/`image`를 가진 문서는 이미지 인식 경로를 사용한다 |
@@ -35,6 +35,19 @@
 | Export | 일반 영상/소리/자막 Export, gate가 켜진 제한된 내부 이미지 Export, 내부 Debug Spectrum slice는 서로 다른 경로다. **public Spectrum Export는 비활성**이며 내부 공유 renderer·제한된 래스터 비교가 전체 parity나 공개 지원을 뜻하지 않는다. 소리 파일만의 Preview가 일반 검정 영상 Export 지원 승인인 것도 아니다 |
 
 근거: [ProjectStore](../app/OnTheFrame/ProjectStore.swift), [Spectrum numeric control](../app/OnTheFrame/SpectrumNumericField.swift), [shared Spectrum renderer](../app/Engine/Sources/OnTheFrameEngine/SpectrumRenderer.swift), [ExportService](../app/Engine/Sources/OnTheFrameEngine/ExportService.swift). 공개 여부는 데이터 형식만으로 판단하지 않는다. Native Inspector **7 FAIL/4 SKIP**, 내부 Undo/Redo Seek 지연 조사, 장시간·다른 하드웨어·전체 Preview/Export parity 미검증과 public Spectrum Export 비활성은 유지한다.
+
+### Spectrum 버전 범위 (소유자 결정, 2026-11-20)
+
+[Softness v1.1 유보 결정](DECISIONS.md#2026-11-20-spectrum-softness-v11-유보)에 따른 구분이다. v1.1은 목표이며 출시 약속이 아니다.
+
+| 구분 | 내용 |
+|---|---|
+| v1.0 필요 | 기존 Digital·Analog Spectrum, 색상·Hue, 위치·크기, 오디오 반응, 정확한 오디오 동기화, 안정적인 기본 Spectrum Preview, 기본 Spectrum Export 통합, 핵심 편집기 완성. **기본 Spectrum Export는 미완료**(공개 Export 비활성) |
+| 구현됐으나 미검증 | `feature/spectrum-effects`의 `f208e2c`: Softness 모델·Format 11 appearance v3 저장, DEBUG 전용 Digital Softness Preview pilot, DEBUG 전용 요청 시간 계측, Feather 최적화 A와 oracle 시험. 컴파일·시험하지 않았고 pilot은 제품 기능이 아니다 |
+| v1.1로 유보 | Softness 정수 0–100, Digital 안쪽 feather, Analog 바깥 feather 재검토, 성능 최적화, Inspector 통합, Preview·Export 일치, 저장 호환 검증. 앞서 유보한 UX-02도 계획된 v1.1이다 |
+| 향후 후보 | SPECTRUM-SHADOW-01 등 기존 미승인 제안. 이 결정으로 승인되지 않는다 |
+
+v1.0에서 저장된 양수 Softness는 보이지 않게 보존되며, 이후 Softness가 켜지면 렌더 결과를 바꿀 수 있다. 이는 활성화 단계의 호환·UX 검토 사항이며 현재 동작을 바꾸는 승인이 아니다.
 
 ## 1. 개요
 

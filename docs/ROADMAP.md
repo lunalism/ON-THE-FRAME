@@ -2,6 +2,10 @@
 
 ## 현행 기능과 검증 경계
 
+**2026-11-20 · Softness v1.1 유보.** 소유자 결정으로 Softness 완성 작업(정수 0–100, Digital 안쪽 feather, Analog 바깥 feather 재검토, 성능, Inspector, Preview·Export 일치, 저장 호환 검증)은 **v1.1 목표**로 옮겼다. v1.1은 출시 약속이 아니다. `feature/spectrum-effects`의 `f208e2c`(Softness Preview pilot·요청 시간 계측·Feather 최적화 A·oracle 시험)는 **컴파일·시험하지 않았고** 구현 완료나 성능 검증 완료가 아니다. 정적 소스 검토 기준으로 일반 Preview·Export는 Softness 0 경로이고, Inspector에 Softness가 없으며, 양수 Preview는 DEBUG 빌드와 실행 인수가 모두 필요한 Digital pilot에서만 그린다. Format 11·appearance v3와 저장된 양수 값은 유지한다. [유보 결정](DECISIONS.md#2026-11-20-spectrum-softness-v11-유보)
+
+**v1.0 Spectrum의 남은 작업:** 재생 시작·자연 종료 Spectrum 깜박임(소유자 FAIL), Native Inspector 7 FAIL/4 SKIP, 내부 Undo/Redo Seek 지연, 기본 Spectrum Preview 검증, 기본 Spectrum Export 통합(공개 Export 비활성), `f208e2c`의 Release 컴파일·회귀 시험, 남은 편집기 기능, end-to-end 회귀 검증. 빌드·시험 실행은 별도 승인을 받는다.
+
 **2026-11-19 · SPECTRUM-FX-02D-1B.** Softness 0–100을 Spectrum 스타일에 보존한다. 양수는 Format 11 appearance v3로 저장하며 일반 Preview의 양수 적용, Inspector 편집, 소유자 Mac의 시각 강도 수락은 후속 범위다. 실제 음악의 FHD 직렬 진단에서 1024밴드 대각선 Digital 100%의 p95는 두 구간 각각 111.76ms와 112.27ms였다. [저장 계약](DECISIONS.md#2026-11-19-spectrum-softness-모델과-저장-계약)
 
 **2026-11-18 · Spectrum 재생 전환.** 소유자 실기에서 지속 재생의 오디오 반응과 자연 종료 후 끝 위치·최종 정지 Spectrum 복원은 **PASS**, 시작 깜박임과 자연 종료 깜박임은 각각 **FAIL**이었다. 시작 프레임 사전 준비는 합성 검사에서 시작 레이어 공백 중앙값을 44.5ms에서 38.6ms로 줄인 성능 최적화다. 수동 끝점 Seek는 당시 요청 프레임과 화면 결과가 확인되지 않아 별도 미해결이다. [종료 표시 결정과 소유자 확인](DECISIONS.md#2026-11-18-spectrum-자연-재생-종료)
@@ -44,7 +48,7 @@ UX-02는 계획된 v1.1로 유보하며 공개 Spectrum Export는 비활성이�
 | Spectrum 숫자 | 기존7개와 FX-01B 주파수/밴드3개·FX-01C 창/오프셋2개·FX-02C 색조 보간 필드의 정수 UI·숫자 자체 mouse scrub·live Preview·한 gesture Undo·취소 구현. FX-01B 이전 자동763 PASS·소유자 핵심10관찰, FX-01C 이전 자동1230 PASS·소유자 핵심9관찰을 구분. Escape·deactivation 등 물리 미시험 경계는 아래 기록을 따름. untouched legacy milli를 몰래 정수화하지 않음. 기존 slider·ColorPicker 유지 |
 | Digital / Analog | Digital 양수 막대와 Analog 유지. 유효하게 완료된 정확한0높이 Digital은 기존 중심·밴드 수·두께·색·알파의 독립 점. missing/pending/stale·비활성 구간을 가짜 무음으로 바꾸지 않음 |
 | Seek·이미지 playback | temporary timing nil에서 eligible Spectrum 작업 보존, exact PTS/token/source/generation/revision/epoch 검증 유지. 이미지 재구성 중 Play는 session/generation/item/readiness/seek 확인 뒤1회 소비, Pause·무효화로 취소 |
-| 저장·열기 | 실제 Spectrum 항목은 Format 11에서 Softness가 0이면 appearance v2, 양수면 v3로 저장한다. v1·v2와 지원되는 레거시 단색은 Softness 0으로 읽는다. Spectrum이 없는 파일은 콘텐츠에 맞는 형식을 사용한다. [앱·이미지·raw 경로별 형식](PRODUCT.md#현행-프로젝트-형식과-기능-경계) |
+| 저장·열기 | 실제 Spectrum 항목은 Format 11에서 Softness가 0이면 appearance v2, 양수면 v3로 저장한다. v1·v2와 지원되는 레거시 단색은 Softness 0으로 읽는다. Softness가 v1.1로 유보돼도 v3 읽기·쓰기와 저장된 양수 값을 유지한다(앱 경로 보존은 정적 검토, 실행 미검증). Spectrum이 없는 파일은 콘텐츠에 맞는 형식을 사용한다. [앱·이미지·raw 경로별 형식](PRODUCT.md#현행-프로젝트-형식과-기능-경계) |
 | Export | 일반 자막 포함 FHD30 SDR H.264/AAC 경로와 gated 내부 이미지·Spectrum 검증을 구분. **공개 Spectrum Export 비활성**. 내부 shared renderer 증거로 전체 parity를 선언하지 않음 |
 
 01C의 기존 실제 실행 보고: engine85·실제 내장 overlay61·zero Preview23·playback146·image intent130·scrub138·Draft/Store223 각각 PASS/0 FAIL/0 SKIP, Seek18/18 캡처·raster66/66 일치. Native Inspector는138 PASS/7 FAIL/4 SKIP이며 같은 기준선 실패가 남는다. 실제 내장 결과와 이전 진단 복사본·초기 실행기 오류·소유자 수락을 구분한 원본 기록은 아래에 보존한다. Preview/내부 Export의5프레임 비교·31프레임 prepare·120프레임 checkpoint는 한정된 증거다.
