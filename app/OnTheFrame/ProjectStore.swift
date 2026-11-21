@@ -2461,13 +2461,15 @@ final class ProjectStore {
                 let position = item.currentTime(), itemEnd = item.duration
                 if self.player.rate != 0, position.isNumeric, itemEnd.isNumeric, position < itemEnd { return }
                 let end = self.timeline.durationFrames
-                self.setPlaying(false)
-                self.playhead = end
                 // Transport still stops normally for a shorter/unsupported composition.
                 // Only an item that finished at the exact project boundary can authorize a raster.
-                if allowEndPreview, position == self.settings.time(end), itemEnd == self.settings.time(end) {
+                let authorizesEnd = allowEndPreview && position == self.settings.time(end) && itemEnd == self.settings.time(end)
+                self.setPlaying(false, retainingNaturalEnd: authorizesEnd)
+                self.playhead = end
+                if authorizesEnd {
                     self.previewHost?.spectrumOverlay.naturalPlaybackEnded(item: item)
                 }
+                self.previewHost?.spectrumOverlay.releaseUnclaimedNaturalEnd()
             }
         }
     }
@@ -2509,7 +2511,7 @@ final class ProjectStore {
         if playhead >= timeline.durationFrames { seek(to: 0) }
         if let item = player.currentItem { observeEnd(item, allowEndPreview: true) }
         let pausedFrame = previewHost?.spectrumOverlay.confirmedFrame
-        player.play(); setPlaying(true)
+        player.play(); setPlaying(true, startFrame: pausedFrame == playhead ? pausedFrame : nil)
         guard let frame = pausedFrame, frame == playhead, let host = previewHost,
               host.window != nil, !host.isShowingStill, !host.hasPendingSpectrumSeek,
               gestureBase == nil, !relinkInProgress, appliedGeneration == generation,
@@ -2584,13 +2586,19 @@ final class ProjectStore {
     }
 
     /// 재생 중에만 디스플레이 유휴 절전을 막는다(E3-1: 디스플레이가 꺼지면 화면 표시가 멈춤).
-    private func setPlaying(_ p: Bool) {
+    /// `startFrame` and `retainingNaturalEnd` only let the overlay keep an exactly matching
+    /// presentation across this edge. Every other transition clears it as before.
+    private func setPlaying(_ p: Bool, startFrame: Int? = nil, retainingNaturalEnd: Bool = false) {
         if !p { pendingImagePlay = nil }
         if p { previewHost?.spectrumOverlay.flushPendingStyleBeforeTransition() }
         if let host = previewHost, host.window != nil, let item = player.currentItem {
             spectrumPreview.playback.prepareForTransition(item: item, view: host)
         } else { spectrumPreview.playback.stop() }
-        if p || isPlaying { previewHost?.spectrumOverlay.invalidate(forgetFrame: true) }
+        if p || isPlaying {
+            if p { previewHost?.spectrumOverlay.beginPlaybackTransition(at: startFrame) }
+            else if retainingNaturalEnd { previewHost?.spectrumOverlay.suspendForNaturalEnd() }
+            else { previewHost?.spectrumOverlay.invalidate(forgetFrame: true) }
+        }
         isPlaying = p
         previewHost?.spectrumOverlay.updatePlaybackLink()
         #if DEBUG
@@ -2977,6 +2985,7 @@ extension ProjectStore {
         if missing != missingMedia { missingMedia = missing }
         previewHost?.spectrumOverlay.invalidate()
         spectrumPreview.update(timeline: timeline, media: assets)
+        VideoCadenceIndex.shared.preload(assets) // REAL-MEDIA-FIX-01: sample tables for repeated-image timing
         previewHost?.spectrumOverlay.updatePlaybackLink()
         if refreshSpectrum { previewHost?.spectrumOverlay.refresh() }
     }

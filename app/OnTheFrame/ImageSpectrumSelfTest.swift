@@ -226,7 +226,7 @@ import os
         "12": "access worker return: lease,valid,cancelled", "13": "access published: lease,deadlineUS",
         "14": "access rejected: lease", "15": "lease identity: lease,item,composition", "16": "lease invalidated: lease,serial,accessRevision,session,generation",
         "20": "display tick: id,targetHostUS,playhead", "21": "tick guard: tick,reason(1 player/2 access),context",
-        "22": "selected: tick,frame,lease", "23": "video timing: tick,requestedUS,displayUS,requestedFrame,selectedFrame,reason(1 invalid/uncovered/2 no buffer/3 copy failed/4 select completed),lastFrame,displayFrame",
+        "22": "selected: tick,frame,lease", "23": "video timing: tick,requestedUS,displayUS,requestedFrame,selectedFrame,reason(1 invalid/uncovered/2 no buffer/3 copy failed/4 select completed/5 startup regression reused start frame/6 sample-table repeated image advanced one frame),lastFrame,displayFrame",
         "24": "fallback: tick,itemUS,itemFrame,selectedFrame,timeControlStatus,covered",
         "30": "clear: oldFrame,serial,tick", "31": "set: frame,serial,tick", "32": "request: id,frame,serial,epoch,revision,spectrum",
         "33": "delivery: id,frame,serial,outcome", "34": "accepted: id,frame,serial,outcome,image,spectrum",

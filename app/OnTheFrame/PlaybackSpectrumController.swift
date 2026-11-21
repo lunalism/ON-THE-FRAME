@@ -1,5 +1,6 @@
 import AVFoundation
 import OnTheFrameEngine
+import QuartzCore
 
 /// Output timing is a proxy for media available for display, not AVPlayerLayer scan-out proof.
 /// The preview display link supplies target host timestamps.
@@ -8,6 +9,18 @@ final class SpectrumPlaybackTiming {
     private(set) weak var item: AVPlayerItem?
     private(set) var output: AVPlayerItemVideoOutput?
     private var lastFrame: Int?
+    /// VIDEO-TIMING-FIX-01: armed only by `armStartupRegression` for one exact playback start.
+    /// Any approval invalidation (Pause, Seek, session revision, item/output change, transport guard)
+    /// disarms it; forward progress past the start frame or the deadline ends it.
+    private var startupRegression: (frame: Int, item: ObjectIdentifier, deadline: CFTimeInterval)?
+    /// Same bound as the overlay's playback-start transition (PausedSpectrumOverlay.transitionLimit).
+    static let startupRegressionLimit: CFTimeInterval = 0.25
+    /// About the bound in composition frames; a deeper regression is not a startup preroll.
+    static let startupRegressionFrames = 8
+    #if DEBUG
+    private(set) var startupRegressionReusesForTest = 0
+    private(set) var repeatedImageAdvancesForTest = 0
+    #endif
 
     private weak var previewView: PlayerNSView?
 
@@ -33,10 +46,34 @@ final class SpectrumPlaybackTiming {
     /// Clearing this evidence never substitutes the previous frame for a seek target.
     func invalidateApproval() {
         lastFrame = nil
+        startupRegression = nil
         #if DEBUG
         confirmedPTSForTest = .invalid
         #endif
     }
+    /// Called by the playback controller when it prepares the confirmed paused frame of an
+    /// image-free playback start. At startup the video output can map display host times to item
+    /// times slightly before the start position (FX02C-TIMING-CAPTURE-01: 342 approved, then
+    /// requests for 340–341 for ~55 ms with no new buffer). Only that pattern may reuse the start
+    /// frame; see `sample(requested:...)`.
+    func armStartupRegression(frame: Int, now: CFTimeInterval = CACurrentMediaTime()) {
+        guard let item, lastFrame == nil else { startupRegression = nil; return }
+        startupRegression = (frame, ObjectIdentifier(item), now + Self.startupRegressionLimit)
+    }
+
+    /// The exact start frame was approved from a real buffer in this transport run, the same item is
+    /// attached, no newer buffer exists, the request lies at most `startupRegressionFrames` before the
+    /// start frame (it may be negative only for a start at 0), and the bound has not expired.
+    private func startupRegressionReuse(requested: CMTime, hasNewBuffer: () -> Bool, now: CFTimeInterval?) -> Int? {
+        guard let armed = startupRegression, let last = lastFrame, last == armed.frame,
+              let item, ObjectIdentifier(item) == armed.item, requested.isNumeric, requested.epoch == 0 else { return nil }
+        let start = CMTime(value: CMTimeValue(armed.frame), timescale: 30)
+        let earliest = CMTime(value: CMTimeValue(armed.frame - Self.startupRegressionFrames), timescale: 30)
+        guard requested < start, requested >= earliest, !hasNewBuffer() else { return nil }
+        guard (now ?? CACurrentMediaTime()) < armed.deadline else { startupRegression = nil; return nil }
+        return last
+    }
+
     /// Rational floor on the fixed 30fps grid; never clamp invalid/end time to a plausible frame.
     static func frame(_ time: CMTime, duration: Int) -> Int? {
         guard time.isNumeric, time.epoch == 0, time >= .zero, duration > 0 else { return nil }
@@ -76,7 +113,7 @@ final class SpectrumPlaybackTiming {
     }
     #endif
 
-    func sample(hostTime: CFTimeInterval, timeline: Timeline) -> Int? {
+    func sample(hostTime: CFTimeInterval, timeline: Timeline, repeatsPreviousImage: (Int) -> Bool = { _ in false }) -> Int? {
         guard hostTime.isFinite, let output, item != nil else {
             #if DEBUG
             if SpectrumContinuityTrace.ownerCapturing {
@@ -87,12 +124,16 @@ final class SpectrumPlaybackTiming {
             return nil
         }
         let requested = output.itemTime(forHostTime: hostTime)
-        return sample(requested: requested, timeline: timeline, hasNewBuffer: output.hasNewPixelBuffer(forItemTime: requested)) { display in
+        return sample(requested: requested, timeline: timeline, hasNewBuffer: output.hasNewPixelBuffer(forItemTime: requested),
+                      repeatsPreviousImage: repeatsPreviousImage) { display in
             output.copyPixelBuffer(forItemTime: requested, itemTimeForDisplay: &display) != nil
         }
     }
 
+    /// `repeatsPreviousImage(n)`: true only when sample-table evidence shows timeline frame n displays the
+    /// same source video sample as frame n − 1 (see `VideoSampleIndex.repeats`). Defaults to never.
     func sample(requested: CMTime, timeline: Timeline, hasNewBuffer: @autoclosure () -> Bool,
+                now: CFTimeInterval? = nil, repeatsPreviousImage: (Int) -> Bool = { _ in false },
                 copyDisplayTime: (inout CMTime) -> Bool) -> Int? {
         #if DEBUG
         var traceDisplay = CMTime.invalid, traceReason: Int64 = 1, traceSelected: Int? = nil
@@ -107,13 +148,40 @@ final class SpectrumPlaybackTiming {
             }
         }
         #endif
+        // Startup-only reuse, decided before the invalid/uncovered guard: a start at timeline zero
+        // briefly maps display host times before 0 (FX02C-REAL-VIDEO-FLICKER-01, −57 ms), which that
+        // guard would otherwise treat as invalid and use to discard the approved start frame.
+        if let reused = startupRegressionReuse(requested: requested, hasNewBuffer: hasNewBuffer, now: now) {
+            #if DEBUG
+            traceReason = 5; traceSelected = reused; startupRegressionReusesForTest += 1
+            #endif
+            return reused
+        }
         guard let frame = Self.frame(requested, duration: timeline.durationFrames),
               timeline.clips.contains(where: { $0.start <= frame && frame < $0.start + $0.length }) else { lastFrame = nil; return nil }
         guard hasNewBuffer() else {
+            if lastFrame == frame {
+                #if DEBUG
+                traceReason = 2; traceSelected = frame
+                #endif
+                return frame
+            }
+            // REAL-MEDIA-FIX-01: a one-frame advance from an approved frame onto a timeline frame whose
+            // displayed source sample is, per the file's own sample table, the same as the previous
+            // frame's (e.g. 29.97 fps material on the 30 fps timeline). No new buffer is expected there.
+            // A frame that should show a new sample still requires a new, PTS-matching buffer.
+            if let last = lastFrame, frame == last + 1, repeatsPreviousImage(frame) {
+                lastFrame = frame
+                if let armed = startupRegression, frame > armed.frame { startupRegression = nil }
+                #if DEBUG
+                traceReason = 6; traceSelected = frame; repeatedImageAdvancesForTest += 1
+                #endif
+                return frame
+            }
             #if DEBUG
-            traceReason = 2; traceSelected = lastFrame == frame ? frame : nil
+            traceReason = 2; traceSelected = nil
             #endif
-            return lastFrame == frame ? frame : nil
+            return nil
         }
         var display = CMTime.invalid
         // Acquire only to obtain its media timestamp. No readback, image copy, or retained pixel buffer.
@@ -124,6 +192,8 @@ final class SpectrumPlaybackTiming {
             lastFrame = nil; return nil
         }
         lastFrame = Self.select(requested: requested, display: display, timeline: timeline)
+        // Forward progress (or a rejected buffer) ends the startup allowance for good.
+        if let armed = startupRegression, lastFrame.map({ $0 > armed.frame }) ?? true { startupRegression = nil }
         #if DEBUG
         confirmedPTSForTest = lastFrame == nil ? .invalid : display
         #endif
@@ -161,6 +231,8 @@ final class PlaybackSpectrumController {
         var suspensions = 0, retainedWhileSuspended = 0, sourceRevalidations = 0, sourceRejections = 0
     }
     static let pendingLimit = 8, retainedLimit = 8, byteLimit = 16 * 1024 * 1024, lookahead = 2
+    /// PCM warm-up distance (1 s); the measured cold 8 s AAC chunk decode was about 0.1 s.
+    static let prefetchLeadFrames = 30
     private weak var session: SpectrumPreviewSession?
     let timing = SpectrumPlaybackTiming()
     private(set) var currentFrame: Int?
@@ -214,6 +286,7 @@ final class PlaybackSpectrumController {
         }
         // A source can change while the player waits for its first display PTS.
         needsSourceValidation.formUnion(desired)
+        if !InternalImagePreview.containsImages(timeline) { timing.armStartupRegression(frame: frame) }
         pump(preparing: frame)
     }
 
@@ -288,6 +361,14 @@ final class PlaybackSpectrumController {
             retainedBytes -= retained.removeValue(forKey: key)?.bytes ?? 0
         }
         cancelObsolete(); validateCurrentRetained(); pump()
+        // REAL-MEDIA-FIX-01: keep the PCM chunk about one second ahead decoded, so the analysis
+        // window never waits for a chunk decode at a boundary (warm-up only; results unchanged).
+        let ahead = frame + Self.prefetchLeadFrames
+        if ahead < timeline.durationFrames {
+            for item in timeline.spectra where item.visible(atFrame: frame) && item.visible(atFrame: ahead) {
+                session.prefetchAnalysis(spectrum: item.id, frame: ahead)
+            }
+        }
     }
     private func pump(preparing frame: Int? = nil) {
         guard let session, let priorityFrame = currentFrame ?? frame,
@@ -533,7 +614,8 @@ extension ProjectStore {
             return
         }
         playback.timing.attach(item, view: view)
-        var frame = playback.timing.sample(hostTime: hostTime, timeline: timeline)
+        var frame = playback.timing.sample(hostTime: hostTime, timeline: timeline,
+                                           repeatsPreviousImage: { videoImageRepeats(frame: $0) })
         #if DEBUG
         if frame == nil {
             let status = player.timeControlStatus
@@ -559,5 +641,119 @@ extension ProjectStore {
         SpectrumContinuityTrace.record(22, SpectrumContinuityTrace.tick, Int64(frame ?? -1), SpectrumContinuityTrace.lease)
         #endif
         playback.advance(frame: frame, timeline: timeline)
+    }
+}
+
+
+/// REAL-MEDIA-FIX-01: presentation timestamps of a video file's samples, read from the file's sample
+/// table (AVSampleCursor) — actual data, not a nominal frame rate.
+struct VideoSampleIndex: Sendable {
+    let trackStart: CMTime
+    let pts: [CMTime] // sorted
+
+    /// True when 30 fps source frame k (item time trackStart + k/30, as CompositionPlanner inserts it)
+    /// shows the same sample as source frame k − 1, and a later sample exists (not past the media end).
+    func repeats(sourceFrame k: Int) -> Bool {
+        guard k > 0 else { return false }
+        let a = trackStart + CMTime(value: CMTimeValue(k - 1), timescale: 30)
+        let b = trackStart + CMTime(value: CMTimeValue(k), timescale: 30)
+        guard let ia = lastIndex(atOrBefore: a), let ib = lastIndex(atOrBefore: b), ib + 1 < pts.count else { return false }
+        return ia == ib
+    }
+    func lastIndex(atOrBefore t: CMTime) -> Int? {
+        var lo = 0, hi = pts.count
+        while lo < hi { let mid = (lo + hi) / 2; if pts[mid] <= t { lo = mid + 1 } else { hi = mid } }
+        return lo == 0 ? nil : lo - 1
+    }
+
+    /// One track segment as AVFoundation reports it: `source` on the track's media-sample timeline,
+    /// `target` on the track timeline (AVAssetTrack.segments).
+    struct Segment: Sendable { let source: CMTimeRange; let target: CMTimeRange; let isEmpty: Bool }
+
+    /// Builds the index on the track timeline from sample PTS on the media-sample timeline.
+    /// Accepted (EDIT-LIST-CADENCE-FIX-01): exactly one nonempty segment that is either the identity
+    /// or a 1× shift (equal, positive, numeric durations). For a shift, the earliest sample PTS must equal
+    /// `source.start` exactly — this verifies that the PTS really are media-timeline values aligned with
+    /// the edit (PTS already on the track timeline start at the track start instead, so an offset is never
+    /// applied twice; an edit that trims leading samples is also refused) — and only samples inside the
+    /// edit are kept, converted exactly by `target.start − source.start`.
+    /// Everything else (several or empty edits, non-1× rate, invalid times, unaligned samples) is nil.
+    static func make(rawPTS: [CMTime], trackStart: CMTime, segments: [Segment]) -> VideoSampleIndex? {
+        guard segments.count == 1, let seg = segments.first, !seg.isEmpty,
+              [seg.source.start, seg.source.duration, seg.target.start, seg.target.duration, trackStart].allSatisfy({ $0.isNumeric }),
+              seg.source.duration > .zero, seg.source.duration == seg.target.duration else { return nil }
+        let raw = rawPTS.sorted()
+        guard !raw.isEmpty, raw.allSatisfy({ $0.isNumeric }) else { return nil }
+        if seg.source == seg.target { return VideoSampleIndex(trackStart: trackStart, pts: raw) }
+        guard raw.first == seg.source.start else { return nil }
+        let shift = seg.target.start - seg.source.start, end = seg.source.end
+        let pts = raw.filter { $0 >= seg.source.start && $0 < end }.map { $0 + shift }
+        guard pts.first == seg.target.start else { return nil }
+        return VideoSampleIndex(trackStart: trackStart, pts: pts)
+    }
+
+    /// nil when the track cannot provide sample cursors or its edit list is not supported by `make`,
+    /// so no repeat is ever inferred.
+    static func load(url: URL, limit: Int = 2_000_000) async -> VideoSampleIndex? {
+        let asset = AVURLAsset(url: url)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+              let loaded = try? await track.load(.timeRange, .segments, .canProvideSampleCursors) else { return nil }
+        let (range, segments, cursors) = loaded
+        guard cursors, let cursor = track.makeSampleCursorAtFirstSampleInDecodeOrder() else { return nil }
+        var raw: [CMTime] = []
+        repeat {
+            guard raw.count < limit else { return nil }
+            raw.append(cursor.presentationTimeStamp)
+        } while cursor.stepInDecodeOrder(byCount: 1) == 1
+        return make(rawPTS: raw, trackStart: range.start,
+                    segments: segments.map { Segment(source: $0.timeMapping.source, target: $0.timeMapping.target, isEmpty: $0.isEmpty) })
+    }
+}
+
+/// Per-file cache of `VideoSampleIndex`, keyed by path and file identity (a relinked or changed file
+/// is a different key). Loading is asynchronous; until ready, no repeat is inferred.
+@MainActor
+final class VideoCadenceIndex {
+    static let shared = VideoCadenceIndex()
+    struct Key: Hashable { let path: String; let device: Int64, inode: UInt64, size: Int64, modifiedNs: Int64 }
+    private enum State { case loading, ready(VideoSampleIndex), unavailable }
+    private var states: [Key: State] = [:]
+    static func key(_ a: MediaAsset) -> Key {
+        Key(path: a.url.standardizedFileURL.path, device: a.identity.device, inode: a.identity.inode,
+            size: a.identity.size, modifiedNs: a.identity.modifiedNs)
+    }
+    func preload(_ assets: [MediaAsset]) {
+        let live = Set(assets.filter(\.hasVideo).map(Self.key))
+        for k in states.keys where !live.contains(k) { states[k] = nil }
+        for a in assets where a.hasVideo {
+            let k = Self.key(a), url = a.url
+            guard states[k] == nil else { continue }
+            states[k] = .loading
+            Task.detached(priority: .utility) { [weak self] in
+                let index = await VideoSampleIndex.load(url: url)
+                await MainActor.run { [weak self] in
+                    guard let self, case .loading? = self.states[k] else { return }
+                    if let index { self.states[k] = .ready(index) } else { self.states[k] = .unavailable }
+                }
+            }
+        }
+    }
+    func ready(for a: MediaAsset) -> VideoSampleIndex? {
+        if case let .ready(index)? = states[Self.key(a)] { return index }
+        return nil
+    }
+}
+
+extension ProjectStore {
+    /// True only when exactly one video clip covers frames n − 1 and n (no layer, edit or clip
+    /// boundary between them) and that file's sample table shows the same sample for both.
+    func videoImageRepeats(frame n: Int) -> Bool {
+        // Image compositions keep their existing access-driven behavior (no inference there).
+        guard n > 0, !InternalImagePreview.containsImages(timeline) else { return false }
+        let touching = timeline.clips.filter { $0.start <= n && n - 1 < $0.start + $0.length }
+        guard touching.count == 1, let clip = touching.first, clip.start <= n - 1, n < clip.start + clip.length,
+              let asset = assets.first(where: { $0.id == clip.mediaID }), asset.hasVideo,
+              let index = VideoCadenceIndex.shared.ready(for: asset) else { return false }
+        return index.repeats(sourceFrame: clip.sourceIn + n - clip.start)
     }
 }

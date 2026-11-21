@@ -24,7 +24,28 @@ final class PausedSpectrumOverlay {
     private var styleRequestsRemaining = 0
     private var pendingStyleRefresh = false
     private(set) var layers: [UUID: CALayer] = [:]
+    /// Exact inputs of the complete presentation now on the canvas (paused batch or playing tick).
+    private struct Presentation: Equatable {
+        let frame: Int, item: ObjectIdentifier, token: Int, epoch: Int, revision: Int
+        let entries: [SpectrumItem]
+    }
+    private enum TransitionKind { case start, end }
+    /// A presentation kept across one transport edge until playback can replace it,
+    /// any input changes, or the bound expires. Checked only by the playback tick.
+    private var transition: (kind: TransitionKind, presentation: Presentation, deadline: CFTimeInterval)?
+    private var presented: Presentation?
+    private var readyInBatch: Set<UUID> = []
+    /// Claimed only by the natural-end refresh that immediately follows completion.
+    private var naturalEndRetained: Presentation?
+    /// About 7 composition frames. Measured transition gaps were 35–47 ms (TRANSITION-FIX-01).
+    private static let transitionLimit: CFTimeInterval = 0.25
     #if DEBUG
+    private(set) var retainedTransitionTicks = 0
+    private(set) var retainedNaturalEnds = 0
+    var transitionRetentionForTest: String? {
+        if let transition { return transition.kind == .start ? "start" : "end" }
+        return naturalEndRetained == nil ? nil : "naturalEnd"
+    }
     var playbackObservationForTest: (owner: UUID, observe: () -> Void)?
     var publicationForParityTest: (owner: UUID, receive: (Int, Int, UUID, SpectrumFrameOutcome) -> Void)?
     private(set) var assignments = 0
@@ -68,6 +89,8 @@ final class PausedSpectrumOverlay {
         #endif
         playbackLink?.invalidate()
         playbackLink = nil
+        // Retention expires only on playback ticks; without a link it must not survive.
+        if transition != nil { invalidate(forgetFrame: true) }
     }
 
     @objc private func playbackTick(_ link: CADisplayLink) {
@@ -89,32 +112,54 @@ final class PausedSpectrumOverlay {
         store.sampleSpectrumPlayback(hostTime: link.targetTimestamp)
         let controller = store.spectrumPreview.playback
         let frame = controller.currentFrame
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        defer { CATransaction.commit() }
-        var ordered: [CALayer] = []
+        // Read every outcome before touching a layer, so a retained presentation stays intact.
+        var ready: [(id: UUID, rendered: SpectrumRenderedFrame)] = []
+        var visible = 0
+        // An exposed non-image result (ready-empty or a retained failure) is a decision, not a wait.
+        var decidedWithoutImage = false
         if let frame {
             for entry in store.timeline.spectra.reversed() where entry.visible(atFrame: frame) {
+                visible += 1
                 let outcome = controller.currentOutcome(spectrum: entry.id, frame: frame)
                 #if DEBUG
                 if SpectrumContinuityTrace.ownerCapturing { visibleSpectra += 1 }
                 #endif
                 guard case let .ready(_, rendered?) = outcome else {
+                    if outcome != nil { decidedWithoutImage = true }
                     #if DEBUG
                     controller.traceMissingLayer(spectrum: entry.id, frame: frame, outcome: outcome)
                     #endif
                     continue
                 }
-                let layer = layers[entry.id] ?? CALayer()
-                layer.actions = PlayerNSView.noActions
-                layer.contents = rendered.image
-                layer.frame = Self.layerRect(rendered.drawRect)
-                layers[entry.id] = layer
-                ordered.append(layer)
+                ready.append((entry.id, rendered))
             }
+        }
+        let complete = frame != nil && visible > 0 && ready.count == visible
+        if retainsTransition(frame: frame, complete: complete, pending: !decidedWithoutImage, at: link.targetTimestamp) {
+            #if DEBUG
+            retainedTransitionTicks += 1
+            SpectrumContinuityTrace.record(40, SpectrumContinuityTrace.tick, Int64(frame ?? -1),
+                SpectrumContinuityTrace.id(traceOld), SpectrumContinuityTrace.id(traceOld),
+                Int64(view.spectrumCanvas.sublayers?.count ?? 0), SpectrumContinuityTrace.lease, visibleSpectra)
+            playbackObservationForTest?.observe()
+            #endif
+            return
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        var ordered: [CALayer] = []
+        for (id, rendered) in ready {
+            let layer = layers[id] ?? CALayer()
+            layer.actions = PlayerNSView.noActions
+            layer.contents = rendered.image
+            layer.frame = Self.layerRect(rendered.drawRect)
+            layers[id] = layer
+            ordered.append(layer)
         }
         layers = layers.filter { ordered.contains($0.value) }
         view.spectrumCanvas.sublayers = ordered
+        presented = complete ? frame.flatMap { currentPresentation(frame: $0) } : nil
         #if DEBUG
         SpectrumContinuityTrace.record(40, SpectrumContinuityTrace.tick, Int64(frame ?? -1),
             SpectrumContinuityTrace.id(traceOld), SpectrumContinuityTrace.id(ordered.first?.contents as AnyObject?),
@@ -148,8 +193,110 @@ final class PausedSpectrumOverlay {
         clearPresentation()
     }
 
+    /// Playback starts at the confirmed paused frame. Keep that complete, current
+    /// presentation until the first complete playing frame (see `retainsTransition`);
+    /// otherwise clear as before.
+    func beginPlaybackTransition(at frame: Int?) {
+        guard let frame, let store, !store.isPlaying, !presentingNaturalEnd, confirmedFrame == frame,
+              confirmedToken == store.seekToken, let item = confirmedItem, store.player.currentItem === item,
+              styleRequestsRemaining == 0, !pendingStyleRefresh,
+              let presentation = presented, presentation.frame == frame, retainable(presentation) else {
+            invalidate(forgetFrame: true); return
+        }
+        serial &+= 1
+        tickets.forEach { store.spectrumPreview.cancel($0) }
+        tickets = []
+        readyInBatch = []
+        confirmedFrame = nil; confirmedToken = nil; confirmedItem = nil
+        transition = (.start, presentation, CACurrentMediaTime() + Self.transitionLimit)
+    }
+
+    /// Natural completion keeps the final complete playing frame for the natural-end
+    /// refresh that follows synchronously. Anything else clears as before.
+    func suspendForNaturalEnd() {
+        guard let store, store.isPlaying, let presentation = presented,
+              presentation.frame == store.timeline.durationFrames - 1, retainable(presentation) else {
+            invalidate(forgetFrame: true); return
+        }
+        serial &+= 1
+        styleRequestsRemaining = 0
+        pendingStyleRefresh = false
+        tickets.forEach { store.spectrumPreview.cancel($0) }
+        tickets = []
+        readyInBatch = []
+        confirmedFrame = nil; confirmedToken = nil; confirmedItem = nil
+        presentingNaturalEnd = false
+        transition = nil
+        presented = nil
+        naturalEndRetained = presentation
+    }
+
+    /// The completion notification did not authorize the retained final frame.
+    func releaseUnclaimedNaturalEnd() {
+        if naturalEndRetained != nil { invalidate(forgetFrame: true) }
+    }
+
+    private func currentPresentation(frame: Int) -> Presentation? {
+        guard let store, let item = store.player.currentItem else { return nil }
+        return Presentation(frame: frame, item: ObjectIdentifier(item), token: store.seekToken,
+                            epoch: store.spectrumPreview.epoch, revision: store.spectrumPreview.revision,
+                            entries: store.timeline.spectra.reversed().filter { $0.visible(atFrame: frame) })
+    }
+
+    /// Same item, seek, session inputs, visible items and styles, with the canvas holding
+    /// exactly those layers. Image compositions keep their existing access-driven blanking.
+    private func retainable(_ presentation: Presentation) -> Bool {
+        guard let store, let view, view.window != nil, store.previewHost === view, !view.isShowingStill,
+              !view.hasPendingSpectrumSeek, store.gestureBase == nil, !store.relinkInProgress,
+              store.appliedGeneration == store.generation, !InternalImagePreview.containsImages(store.timeline),
+              !presentation.entries.isEmpty, Set(layers.keys) == Set(presentation.entries.map(\.id)) else { return false }
+        return currentPresentation(frame: presentation.frame) == presentation
+    }
+
+    /// Decided on each playback tick; no timer. Start waits until the first complete
+    /// playing frame, end waits while sampling is past the final frame. Any mismatch ends it.
+    ///
+    /// START-FLICKER-FIX-03: the transport often samples a frame after the paused one
+    /// before that frame's raster exists (the start candidate is prepared only for the
+    /// paused frame, and later frames are requested when they become current). Ending
+    /// retention on that first later frame emptied the canvas for one request latency.
+    /// Start therefore also waits on later frames, but only while the same Spectrum items
+    /// are visible there and every one of their results is still pending. The deadline,
+    /// the per-tick input check (`retainable`) and every Pause/Seek/session invalidation
+    /// are unchanged. A result the controller exposes without an image (ready-empty,
+    /// budget failure, source revalidation failure) ends retention at once. Outcomes the
+    /// controller does not retain stay invisible here and are bounded only by the deadline.
+    private func retainsTransition(frame: Int?, complete: Bool, pending: Bool, at time: CFTimeInterval) -> Bool {
+        guard let store, store.isPlaying else { transition = nil; return false }
+        let end = store.timeline.durationFrames
+        if transition == nil, frame == nil, let presentation = presented, presentation.frame == end - 1,
+           let item = store.player.currentItem, item.status == .readyToPlay,
+           item.duration == store.settings.time(end), item.currentTime() >= store.settings.time(presentation.frame) {
+            transition = (.end, presentation, time + Self.transitionLimit)
+        }
+        guard let current = transition else { return false }
+        let waiting: Bool
+        switch current.kind {
+        case .start:
+            let start = current.presentation
+            waiting = !complete && (frame.map { playing in
+                playing == start.frame || (pending && playing > start.frame &&
+                    store.timeline.spectra.reversed().filter { $0.visible(atFrame: playing) } == start.entries)
+            } ?? true)
+        case .end: waiting = frame == nil
+        }
+        guard waiting, time < current.deadline, retainable(current.presentation) else {
+            transition = nil; return false
+        }
+        return true
+    }
+
     private func clearPresentation() {
         serial &+= 1
+        transition = nil
+        presented = nil
+        readyInBatch = []
+        naturalEndRetained = nil
         styleRequestsRemaining = 0
         pendingStyleRefresh = false
         if let store { tickets.forEach { store.spectrumPreview.cancel($0) } }
@@ -189,8 +336,21 @@ final class PausedSpectrumOverlay {
 
     func refresh(retainingStyleFrame: Bool = false) {
         // Ordinary seeks/session changes still clear immediately. Only a style update
-        // of the same confirmed paused frame may keep its previously validated image.
-        if retainingStyleFrame {
+        // of the same confirmed paused frame may keep its previously validated image,
+        // and natural completion may keep the identical final frame it just played.
+        let retainedEnd = naturalEndRetained
+        naturalEndRetained = nil
+        if retainedEnd != nil, retainingStyleFrame { invalidate(forgetFrame: true); return }
+        let retainingNaturalEnd = presentingNaturalEnd &&
+            retainedEnd.map { $0.frame == confirmedFrame && retainable($0) } == true
+        if retainingNaturalEnd {
+            serial &+= 1
+            if let store { tickets.forEach { store.spectrumPreview.cancel($0) } }
+            tickets = []
+            #if DEBUG
+            retainedNaturalEnds += 1
+            #endif
+        } else if retainingStyleFrame {
             if styleRequestsRemaining > 0 {
                 pendingStyleRefresh = true
                 #if DEBUG
@@ -207,9 +367,11 @@ final class PausedSpectrumOverlay {
               !store.isPlaying, store.gestureBase == nil, !view.isShowingStill, store.appliedGeneration == store.generation,
               let frame = confirmedFrame, let token = confirmedToken, token == store.seekToken,
               let item = confirmedItem, store.player.currentItem === item else {
-            if retainingStyleFrame { invalidate() }
+            if retainingStyleFrame || retainingNaturalEnd { invalidate() }
             return
         }
+        presented = nil
+        readyInBatch = []
         let generation = serial
         let epoch = store.spectrumPreview.epoch, revision = store.spectrumPreview.revision
         // Timeline stores top lanes first; CA paints bottom lanes first, as subtitles do.
@@ -278,7 +440,14 @@ final class PausedSpectrumOverlay {
                     case let .ready(_, rendered):
                         layer.contents = rendered?.image
                         layer.frame = rendered.map { Self.layerRect($0.drawRect) } ?? .zero
+                        self.readyInBatch.insert(entry.id)
+                        if self.readyInBatch == visibleIDs {
+                            self.presented = Presentation(frame: frame, item: ObjectIdentifier(item), token: token,
+                                                          epoch: epoch, revision: revision, entries: entries)
+                        }
                     case .cancelled, .superseded, .dropped:
+                        // A natural-end frame stays only until its own paused publication: a
+                        // non-ready result clears it, so no unverified final frame persists.
                         if !retainingStyleFrame { layer.contents = nil; layer.frame = .zero }
                     case .notVisible, .itemMissing, .unsetSource, .missingSource, .overlap, .mediaUnavailable:
                         layer.contents = nil; layer.frame = .zero
@@ -289,6 +458,7 @@ final class PausedSpectrumOverlay {
                         #endif
                     }
                     CATransaction.commit()
+                    if case .ready = accepted {} else { self.presented = nil }
                     #if DEBUG
                     if SpectrumContinuityTrace.ownerCapturing {
                         self.traceLayer(layer, spectrum: entry.id, frame: frame, playing: false, view: view)

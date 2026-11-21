@@ -39,6 +39,10 @@ final class SpectrumPreviewSession {
         coordinator.resetProject()
     }
 
+    /// REAL-MEDIA-FIX-01: warm the analysis PCM cache for a future frame (no request, no delivery).
+    func prefetchAnalysis(spectrum: UUID, frame: Int) { coordinator.prefetchAnalysis(spectrum: spectrum, frame: frame) }
+    var analysisStatistics: SpectrumSchedulerStatistics { coordinator.schedulerStatistics }
+
     func update(timeline: Timeline, media: [MediaAsset]) {
         playback.stop(detachTiming: false)
         playback.timing.invalidateApproval()

@@ -193,6 +193,16 @@ public final class SpectrumFrameCoordinator: @unchecked Sendable {   // 가변 �
             scheduler.invalidateSession()   // 일정이 남은 호출을 invalidated로 끝내도 이미 끝낸 요청이라 무시된다
         }
     }
+    /// REAL-MEDIA-FIX-01: warm the PCM chunk cache for a future frame of an already-open source.
+    /// Resolves the frame exactly like a request (current timeline, sourceIn/trims, media) but never
+    /// opens a source, renders, or delivers anything; unresolved/unavailable frames are ignored.
+    public func prefetchAnalysis(spectrum id: UUID, frame n: Int) {
+        queue.async { [self] in
+            guard fps == Self.timelineFPS, case let .plan(p) = resolve(id, n), case let .ready(provider)? = sources[p.source] else { return }
+            scheduler.prefetch(SpectrumFrameRequest(frame: p.frame, fps: fps, settings: p.style.analysisSettings, pieces: p.pieces), from: provider)
+        }
+    }
+    public var schedulerStatistics: SpectrumSchedulerStatistics { scheduler.statistics }
     /// 그 스펙트럼의 타임라인 프레임 n을 canvasWidth × canvasHeight 캔버스에 그린 결과를 요청한다. priority: 작을수록 먼저(일정에 넘김).
     @discardableResult
     public func request(spectrum id: UUID, frame n: Int, canvasWidth: Int, canvasHeight: Int, priority: Int = 0,

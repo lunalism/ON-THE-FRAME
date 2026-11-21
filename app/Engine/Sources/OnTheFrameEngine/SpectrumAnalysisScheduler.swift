@@ -58,6 +58,8 @@ public struct SpectrumSchedulerStatistics: Sendable, Equatable {
     public var retiredActive = 0
     /// 기다리는·도는 작업이 쥔 덩어리 참조 수와 그 바이트 합(같은 배열을 여러 작업이 쥐면 겹쳐 셈 — 위쪽 어림). 무효 세션의 도는 분석이 쥔 것은 세지 않음.
     public var retainedChunkReferences = 0, retainedChunkBytesUpperBound = 0
+    /// REAL-MEDIA-FIX-01: chunk decodes started by `prefetch` (also counted in `decodes` when they finish)
+    public var prefetchDecodes = 0
 }
 
 public final class SpectrumAnalysisScheduler: Sendable {
@@ -205,6 +207,34 @@ public final class SpectrumAnalysisScheduler: Sendable {
             if let id { cancel(id) }
         }
     }
+    /// REAL-MEDIA-FIX-01: decode the PCM chunks a future frame needs into the same chunk cache, so
+    /// playback does not stall when its analysis window first reaches a new chunk (measured ~97 ms
+    /// for an 8 s AAC chunk vs ~5.5 ms analysis). Bounded and side-effect free for results:
+    /// - starts only when no frame job is waiting and a concurrency slot is free (never delays requests);
+    /// - skips chunks already cached or in flight in this session (no redundant/concurrent decode);
+    /// - completion goes through the normal decode path (same cache budget/LRU, waiting jobs reuse it);
+    /// - `invalidateSession` cancels it like any decode and a stale result is never cached.
+    /// Returns the number of decodes started.
+    @discardableResult
+    public func prefetch(_ r: SpectrumFrameRequest, from provider: any SpectrumPCMProvider) -> Int {
+        guard let resolved = try? Self.key(r, provider) else { return 0 }
+        let needed = resolved.2
+        let starts: [Start] = state.withLock { s in
+            guard s.pendingCount == 0 else { return [] }
+            var starts: [Start] = []
+            for c in needed where s.active < limits.maxConcurrent {
+                let ck = ChunkKey(source: provider.identity, index: c)
+                let f = InFlight(session: s.session, chunk: ck)
+                guard s.chunkCache[ck] == nil, !s.inFlight.contains(f) else { continue }
+                s.inFlight.insert(f); s.active += 1; s.stats.prefetchDecodes += 1
+                starts.append(.decode(provider, ck, s.session))
+            }
+            s.stats.peakActive = max(s.stats.peakActive, s.active)
+            return starts
+        }
+        launch(starts)
+        return starts.count
+    }
     /// 세션 무효(프로젝트 바꿈·원본 재연결 등): 기다리는 요청을 모두 invalidated로 끝내고 캐시를 비운다. 진행 중 디코딩 작업은 취소하고,
     /// 끝나도(취소를 보지 않는 원본이라도) 알리지 않고 캐시에 넣지 않는다. 그 작업들은 끝날 때까지 동시 수에 든다.
     public func invalidateSession() {
@@ -276,6 +306,9 @@ public final class SpectrumAnalysisScheduler: Sendable {
             s.stats.peakActive = max(s.stats.peakActive, s.active)
             return starts
         }
+        launch(starts)
+    }
+    private func launch(_ starts: [Start]) {
         for st in starts {   // 전용 작업자에서(UI·협력 스레드 아님). 동시 수는 active로 묶인다.
             switch st {
             case let .decode(p, ck, session):

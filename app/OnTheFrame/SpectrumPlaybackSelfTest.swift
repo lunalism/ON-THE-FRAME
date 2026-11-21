@@ -2,6 +2,7 @@
 import AppKit
 import AVFoundation
 import OnTheFrameEngine
+import os
 
 /// Controlled delivery gates determine ordering; timeouts only bound a failed test.
 @MainActor
@@ -50,6 +51,318 @@ enum SpectrumPlaybackSelfTest {
         step("same confirmed frame", 68894, expected: 2, source: 32)
         session.resetProject()
         step("after project reset", 68894, expected: nil, source: nil)
+        return checks
+    }
+
+    /// VIDEO-TIMING-FIX-01: injected timing for the startup backward item-time request seen in
+    /// FX02C-TIMING-CAPTURE-01 (342 approved, then 340–341 requested with no new buffer).
+    /// Only that bounded startup pattern may reuse the approved start frame.
+    static func startupRegressionChecks() -> [Check] {
+        var checks: [Check] = []
+        let media = UUID()
+        let audio = Clip(mediaID: media, start: 0, sourceIn: 0, length: 360, lane: Lane.audioID)
+        let entry = SpectrumItem(lane: UUID(), start: 0, length: 360, sourceKey: audio.lineageKey)
+        let timeline = Timeline(clips: [Clip(mediaID: media, start: 0, sourceIn: 0, length: 360)],
+                                audioClips: [audio], spectra: [entry], durationFrames: 360)
+        let view = PlayerNSView()
+        var keep: [AnyObject] = [] // timing holds its item weakly; keep sessions and items alive
+        defer { withExtendedLifetime(keep) {} }
+        func frame(_ f: Int) -> CMTime { CMTime(value: CMTimeValue(f), timescale: 30) }
+        let regressed = CMTime(value: 11_348_044, timescale: 1_000_000) // frame 340, as captured
+        func check(_ name: String, _ pass: Bool, _ detail: String = "") {
+            checks.append(Check(name: "startupRegression." + name, pass: pass, detail: detail))
+        }
+        /// A fresh transport with 342 armed at t=100 s and approved from a matching buffer.
+        func started() -> (SpectrumPreviewSession, PlaybackSpectrumController, AVPlayerItem) {
+            let session = SpectrumPreviewSession(), controller = session.playback
+            let item = AVPlayerItem(asset: AVMutableComposition())
+            keep.append(session); keep.append(item)
+            controller.prepareForTransition(item: item, view: view)
+            controller.timing.armStartupRegression(frame: 342, now: 100)
+            _ = controller.timing.sample(requested: frame(342), timeline: timeline, hasNewBuffer: true, now: 100.01) { d in
+                d = frame(342); return true
+            }
+            return (session, controller, item)
+        }
+        func noBuffer(_ c: PlaybackSpectrumController, _ t: CMTime, at now: CFTimeInterval) -> Int? {
+            c.timing.sample(requested: t, timeline: timeline, hasNewBuffer: false, now: now) { _ in false }
+        }
+        do {
+            let (_, c, _) = started()
+            check("approvedStartFrame", c.timing.confirmedPTSForTest == frame(342))
+            let reused = noBuffer(c, regressed, at: 100.05)
+            check("backwardRequestWithoutBufferReusesStartFrame", reused == 342, "frame=\(String(describing: reused))")
+            check("forwardRequestWithoutBufferStaysNil", noBuffer(c, frame(343), at: 100.06) == nil)
+            check("stillBoundedAfterForwardMiss", noBuffer(c, frame(341), at: 100.07) == 342)
+            check("regressionDeeperThanBoundIsNil", noBuffer(c, frame(342 - SpectrumPlaybackTiming.startupRegressionFrames - 1), at: 100.08) == nil)
+            check("expiredAllowanceIsNil", noBuffer(c, regressed, at: 100.30) == nil)
+            check("expiryIsFinal", noBuffer(c, regressed, at: 100.10) == nil)
+        }
+        do {
+            let (_, c, _) = started()
+            let wrong = c.timing.sample(requested: frame(342), timeline: timeline, hasNewBuffer: true, now: 100.02) { d in
+                d = frame(341); return true
+            }
+            check("wrongDisplayPTSWithNewBufferRejected", wrong == nil)
+            check("noReuseAfterRejectedBuffer", noBuffer(c, regressed, at: 100.05) == nil)
+        }
+        do {
+            let (_, c, item) = started()
+            c.prepareForTransition(item: item, view: view) // Pause and every transport edge
+            check("pauseTransitionRevokesAllowance", noBuffer(c, regressed, at: 100.05) == nil)
+        }
+        do {
+            let (_, c, _) = started()
+            c.stop() // explicit seek retires the output (PlayerNSView.subtitleSeekRequested)
+            check("seekRetirementRevokesAllowance", noBuffer(c, regressed, at: 100.05) == nil && c.timing.item == nil)
+        }
+        do {
+            let (session, c, _) = started()
+            session.update(timeline: timeline, media: []) // source/session revision
+            check("sessionRevisionRevokesAllowance", noBuffer(c, regressed, at: 100.05) == nil)
+        }
+        do {
+            let (_, c, _) = started()
+            _ = c.timing.sample(requested: frame(343), timeline: timeline, hasNewBuffer: true, now: 100.04) { d in
+                d = frame(343); return true
+            }
+            check("forwardProgressEndsAllowance", noBuffer(c, frame(341), at: 100.05) == nil)
+        }
+        do {
+            let (_, c, _) = started()
+            let atEnd = c.timing.sample(requested: frame(360), timeline: timeline, hasNewBuffer: false, now: 100.05) { _ in false }
+            check("naturalEndBoundaryIsNil", atEnd == nil && noBuffer(c, regressed, at: 100.06) == nil)
+        }
+        do {
+            // Without arming, the original exact-frame contract is unchanged.
+            let session = SpectrumPreviewSession(), c = session.playback
+            let item = AVPlayerItem(asset: AVMutableComposition())
+            keep.append(session); keep.append(item)
+            c.prepareForTransition(item: item, view: view)
+            _ = c.timing.sample(requested: frame(342), timeline: timeline, hasNewBuffer: true, now: 100.01) { d in
+                d = frame(342); return true
+            }
+            check("unarmedBackwardRequestStaysNil", noBuffer(c, regressed, at: 100.05) == nil)
+        }
+        do {
+            // The real arming path: an image-free start prepared by the controller.
+            let session = SpectrumPreviewSession(), c = session.playback
+            let item = AVPlayerItem(asset: AVMutableComposition())
+            keep.append(session); keep.append(item)
+            c.prepareForTransition(item: item, view: view)
+            c.prepareStartingFrame(342, timeline: timeline)
+            let now = CACurrentMediaTime()
+            _ = c.timing.sample(requested: frame(342), timeline: timeline, hasNewBuffer: true, now: now) { d in
+                d = frame(342); return true
+            }
+            check("imageFreeStartPreparationArms", noBuffer(c, regressed, at: now + 0.01) == 342)
+            c.stop()
+        }
+        // REAL-MEDIA-FIX-01 (A): a start at timeline zero; the captured request was −57.531 ms.
+        func startedAtZero() -> PlaybackSpectrumController {
+            let session = SpectrumPreviewSession(), c = session.playback
+            let item = AVPlayerItem(asset: AVMutableComposition())
+            keep.append(session); keep.append(item)
+            c.prepareForTransition(item: item, view: view)
+            c.timing.armStartupRegression(frame: 0, now: 100)
+            _ = c.timing.sample(requested: .zero, timeline: timeline, hasNewBuffer: true, now: 100.01) { d in d = .zero; return true }
+            return c
+        }
+        let negative = CMTime(value: -57_531, timescale: 1_000_000)
+        do {
+            let c = startedAtZero()
+            check("zeroStartNegativeRequestReusesFrameZero", noBuffer(c, negative, at: 100.05) == 0)
+            check("zeroStartKeepsApprovalAfterNegativeRequests", noBuffer(c, .zero, at: 100.06) == 0)
+            check("zeroStartNegativeBeyondBoundIsNil", noBuffer(c, CMTime(value: -9, timescale: 30), at: 100.07) == nil)
+        }
+        do {
+            let c = startedAtZero()
+            check("zeroStartNegativeAfterExpiryIsNil", noBuffer(c, negative, at: 100.30) == nil)
+        }
+        do {
+            let c = startedAtZero()
+            let withBuffer = c.timing.sample(requested: negative, timeline: timeline, hasNewBuffer: true, now: 100.05) { d in d = negative; return true }
+            check("negativeRequestWithNewBufferStaysInvalid", withBuffer == nil)
+        }
+        do {
+            let session = SpectrumPreviewSession(), c = session.playback
+            let item = AVPlayerItem(asset: AVMutableComposition())
+            keep.append(session); keep.append(item)
+            c.prepareForTransition(item: item, view: view)
+            _ = c.timing.sample(requested: .zero, timeline: timeline, hasNewBuffer: true, now: 100.01) { d in d = .zero; return true }
+            check("unarmedNegativeRequestStaysInvalid", noBuffer(c, negative, at: 100.05) == nil)
+        }
+        // REAL-MEDIA-FIX-01 (C): a one-frame advance only onto a sample-table-verified repeated image.
+        func approved(at f: Int) -> PlaybackSpectrumController {
+            let session = SpectrumPreviewSession(), c = session.playback
+            let item = AVPlayerItem(asset: AVMutableComposition())
+            keep.append(session); keep.append(item)
+            c.prepareForTransition(item: item, view: view)
+            _ = c.timing.sample(requested: frame(f), timeline: timeline, hasNewBuffer: true, now: 200) { d in d = frame(f); return true }
+            return c
+        }
+        func step(_ c: PlaybackSpectrumController, _ f: Int, repeats: @escaping (Int) -> Bool) -> Int? {
+            c.timing.sample(requested: frame(f), timeline: timeline, hasNewBuffer: false, now: 200.05, repeatsPreviousImage: repeats) { _ in false }
+        }
+        do {
+            let c = approved(at: 301)
+            check("repeatedImageAdvancesOneFrame", step(c, 302, repeats: { $0 == 302 }) == 302)
+            check("repeatedImageFrameStaysCurrent", step(c, 302, repeats: { _ in false }) == 302)
+            check("nextRealSampleStillNeedsBuffer", step(c, 303, repeats: { _ in false }) == nil)
+        }
+        do {
+            let c = approved(at: 301)
+            check("missingVideoDataIsNotARepeat", step(c, 302, repeats: { _ in false }) == nil)
+        }
+        do {
+            let c = approved(at: 301)
+            check("repeatCannotSkipAFrame", step(c, 303, repeats: { _ in true }) == nil)
+        }
+        do {
+            let c = approved(at: 301)
+            c.prepareForTransition(item: c.timing.item!, view: view) // Pause/transport edge
+            check("repeatNeedsAnApprovedFrame", step(c, 302, repeats: { _ in true }) == nil)
+        }
+        do {
+            let c = approved(at: 301)
+            let atEnd = c.timing.sample(requested: frame(360), timeline: timeline, hasNewBuffer: false, now: 200.05,
+                                        repeatsPreviousImage: { _ in true }) { _ in false }
+            check("repeatNeverPassesNaturalEnd", atEnd == nil)
+        }
+        return checks
+    }
+
+    /// REAL-MEDIA-FIX-01 (C): repeat evidence from sample timestamps, without a nominal-rate formula.
+    static func videoSampleIndexChecks() -> [Check] {
+        var checks: [Check] = []
+        func check(_ name: String, _ pass: Bool, _ detail: String = "") {
+            checks.append(Check(name: "videoSampleIndex." + name, pass: pass, detail: detail))
+        }
+        // 29.97 fps sample timestamps (j × 1001/30000 s) as stored in such files.
+        let ntsc = VideoSampleIndex(trackStart: .zero, pts: (0..<1100).map { CMTime(value: CMTimeValue($0 * 1001), timescale: 30000) })
+        let repeated = (1..<1099).filter { ntsc.repeats(sourceFrame: $0) }
+        check("ntscRepeatsOnlyWhereNoSampleStarts", repeated == [1, 1002], "repeated=\(repeated)")
+        let exact = VideoSampleIndex(trackStart: .zero, pts: (0..<400).map { CMTime(value: CMTimeValue($0), timescale: 30) })
+        check("exact30HasNoRepeats", (1..<399).allSatisfy { !exact.repeats(sourceFrame: $0) })
+        let offset = VideoSampleIndex(trackStart: CMTime(value: 1, timescale: 10),
+                                      pts: (0..<200).map { CMTime(value: 3 + CMTimeValue($0) * 3, timescale: 30) }) // 10 fps from 0.1 s
+        check("trackStartOffsetAndLowRate", offset.repeats(sourceFrame: 1) && offset.repeats(sourceFrame: 2) && !offset.repeats(sourceFrame: 3))
+        check("pastLastSampleIsNotARepeat", !exact.repeats(sourceFrame: 400) && !exact.repeats(sourceFrame: 500))
+        check("frameZeroIsNeverARepeat", !ntsc.repeats(sourceFrame: 0))
+
+        // EDIT-LIST-CADENCE-FIX-01: one 1× edit with a media offset of 2002/30000 s, as in the owner's MP4.
+        typealias Segment = VideoSampleIndex.Segment
+        func t(_ v: Int) -> CMTime { CMTime(value: CMTimeValue(v), timescale: 30000) }
+        let count = 1100, duration = t(count * 1001)
+        // Media-timeline PTS with B-frame style decode reordering (pairs swapped); sorted by the index.
+        var media = (0..<count).map { t(2002 + $0 * 1001) }
+        for i in stride(from: 1, to: count - 1, by: 2) { media.swapAt(i, i + 1) }
+        let shift = Segment(source: CMTimeRange(start: t(2002), duration: duration), target: CMTimeRange(start: .zero, duration: duration), isEmpty: false)
+        let shifted = VideoSampleIndex.make(rawPTS: media, trackStart: .zero, segments: [shift])
+        check("singleShiftedEditAccepted", shifted != nil)
+        if let shifted {
+            check("ptsConvertedExactlyToTrackTime", shifted.pts.first == .zero && shifted.pts[1] == t(1001) && shifted.pts.last == t((count - 1) * 1001))
+            let found = (1..<count - 1).filter { shifted.repeats(sourceFrame: $0) }
+            check("shiftedEditRepeatsFrames1And1002", found == [1, 1002], "repeated=\(found)")
+            check("nextGenuinelyNewSampleIsNotARepeat", !shifted.repeats(sourceFrame: 1003) && !shifted.repeats(sourceFrame: 1001) && !shifted.repeats(sourceFrame: 2))
+        }
+        let earlier = (0..<count).map { t(1001 + $0 * 1001) } // one sample before the edit start (trimmed lead)
+        check("editTrimmingLeadingSamplesUnavailable", VideoSampleIndex.make(rawPTS: earlier, trackStart: .zero, segments: [shift]) == nil)
+        let longer = (0..<(count + 5)).map { t(2002 + $0 * 1001) } // samples after the edit end
+        check("samplesAfterEditAreExcluded", VideoSampleIndex.make(rawPTS: longer, trackStart: .zero, segments: [shift])?.pts.count == count)
+        let trackTimeline = (0..<count).map { t($0 * 1001) } // PTS already on the track timeline
+        check("offsetNeverAppliedTwice", VideoSampleIndex.make(rawPTS: trackTimeline, trackStart: .zero, segments: [shift]) == nil)
+        let unaligned = (0..<count).map { t(2003 + $0 * 1001) }
+        check("unalignedSamplesUnavailable", VideoSampleIndex.make(rawPTS: unaligned, trackStart: .zero, segments: [shift]) == nil)
+        check("multipleSegmentsUnavailable", VideoSampleIndex.make(rawPTS: media, trackStart: .zero, segments: [shift, shift]) == nil)
+        check("emptyEditUnavailable", VideoSampleIndex.make(rawPTS: media, trackStart: .zero,
+            segments: [Segment(source: shift.source, target: shift.target, isEmpty: true)]) == nil)
+        check("non1xEditUnavailable", VideoSampleIndex.make(rawPTS: media, trackStart: .zero,
+            segments: [Segment(source: shift.source, target: CMTimeRange(start: .zero, duration: t(count * 2002)), isEmpty: false)]) == nil)
+        check("invalidMappingUnavailable", VideoSampleIndex.make(rawPTS: media, trackStart: .zero,
+            segments: [Segment(source: CMTimeRange(start: .invalid, duration: duration), target: shift.target, isEmpty: false)]) == nil)
+        check("noSegmentsUnavailable", VideoSampleIndex.make(rawPTS: media, trackStart: .zero, segments: []) == nil)
+        let exact30 = (0..<400).map { CMTime(value: CMTimeValue($0), timescale: 30) }
+        let identityRange = CMTimeRange(start: .zero, duration: CMTime(value: 400, timescale: 30))
+        let identity = VideoSampleIndex.make(rawPTS: exact30, trackStart: .zero,
+            segments: [Segment(source: identityRange, target: identityRange, isEmpty: false)])
+        check("identityEditUnchanged", identity != nil && (1..<399).allSatisfy { !(identity!.repeats(sourceFrame: $0)) })
+        return checks
+    }
+
+    /// REAL-MEDIA-FIX-01 (B): bounded PCM chunk prefetch through the real scheduler with a counting provider.
+    struct CountingPCM: SpectrumPCMProvider {
+        let identity: SpectrumSourceIdentity
+        let sampleRate = 48_000, channelCount = 2, chunkSamples = 48_000
+        let delayNs: UInt64
+        let decoded = OSAllocatedUnfairLock(initialState: [Int]())
+        func decodeChunk(_ index: Int) async throws -> [[Float]] {
+            decoded.withLock { $0.append(index) }
+            try? await Task.sleep(nanoseconds: delayNs)
+            return [[Float]](repeating: [Float](repeating: 0.01, count: chunkSamples), count: channelCount)
+        }
+    }
+    static func analysisPrefetchChecks() async -> [Check] {
+        var checks: [Check] = []
+        func check(_ name: String, _ pass: Bool, _ detail: String = "") {
+            checks.append(Check(name: "analysisPrefetch." + name, pass: pass, detail: detail))
+        }
+        let audio = Clip(mediaID: UUID(), start: 0, sourceIn: 0, length: 600, lane: Lane.audioID)
+        let entry = SpectrumItem(lane: UUID(), start: 0, length: 600, sourceKey: audio.lineageKey)
+        let timeline = Timeline(clips: [], audioClips: [audio], spectra: [entry], durationFrames: 600)
+        let pieces = timeline.spectrumPieces(entry), settings = entry.style.analysisSettings
+        func request(_ f: Int) -> SpectrumFrameRequest { SpectrumFrameRequest(frame: f, fps: 30, settings: settings, pieces: pieces) }
+        func settled(_ s: SpectrumAnalysisScheduler) async -> Bool {
+            await LaneSelfTest.waitUntil(5) { s.statistics.active == 0 }
+        }
+        let chunkBytes = 2 * 48_000 * MemoryLayout<Float>.size
+        do {
+            let s = SpectrumAnalysisScheduler(), p = CountingPCM(identity: .init("prefetch-a"), delayNs: 60_000_000)
+            let first = s.prefetch(request(45), from: p)
+            let duplicate = s.prefetch(request(45), from: p)
+            check("startsOnceAndSkipsInFlight", first == 1 && duplicate == 0, "first=\(first) duplicate=\(duplicate)")
+            let done = await settled(s)
+            let st = s.statistics
+            check("decodedIntoCache", done && st.prefetchDecodes == 1 && st.decodes == 1 && st.chunkCacheEntries == 1)
+            check("cachedChunkIsNotPrefetchedAgain", s.prefetch(request(45), from: p) == 0)
+            let bands = try? await s.bands(request(45), from: p)
+            check("laterRequestUsesPrefetchedChunk", bands != nil && p.decoded.withLock { $0 } == [1], "decoded=\(p.decoded.withLock { $0 })")
+            let direct = SpectrumAnalysisScheduler(), q = CountingPCM(identity: .init("prefetch-a"), delayNs: 0)
+            let reference = try? await direct.bands(request(45), from: q)
+            check("analysisResultUnchanged", reference != nil && reference == bands)
+        }
+        do {
+            let s = SpectrumAnalysisScheduler(), p = CountingPCM(identity: .init("prefetch-b"), delayNs: 150_000_000)
+            let waiting = Task { try? await s.bands(request(105), from: p) }
+            _ = await LaneSelfTest.waitUntil(2) { s.statistics.pendingJobs > 0 }
+            check("neverCompetesWithWaitingRequests", s.prefetch(request(165), from: p) == 0)
+            _ = await waiting.value
+        }
+        do {
+            let limits = SpectrumSchedulerLimits(chunkCacheBytes: chunkBytes)
+            let s = SpectrumAnalysisScheduler(limits: limits), p = CountingPCM(identity: .init("prefetch-c"), delayNs: 10_000_000)
+            _ = s.prefetch(request(165), from: p); _ = await settled(s)
+            _ = s.prefetch(request(195), from: p); _ = await settled(s)
+            let st = s.statistics
+            check("respectsCacheBudget", st.chunkCacheEntries == 1 && st.chunkCacheBytes <= chunkBytes && st.peakChunkCacheBytes <= 2 * chunkBytes,
+                  "entries=\(st.chunkCacheEntries) bytes=\(st.chunkCacheBytes)")
+        }
+        do {
+            let s = SpectrumAnalysisScheduler(), p = CountingPCM(identity: .init("prefetch-d"), delayNs: 100_000_000)
+            _ = s.prefetch(request(45), from: p)
+            s.invalidateSession()
+            _ = await settled(s)
+            let st = s.statistics
+            check("invalidatedPrefetchIsNeverCached", st.chunkCacheEntries == 0 && st.staleDecodes >= 1)
+        }
+        do {
+            let s = SpectrumAnalysisScheduler()
+            let old = CountingPCM(identity: .init("prefetch-e-old"), delayNs: 0), relinked = CountingPCM(identity: .init("prefetch-e-new"), delayNs: 0)
+            _ = s.prefetch(request(45), from: old); _ = await settled(s)
+            let again = s.prefetch(request(45), from: relinked)
+            _ = await settled(s)
+            check("relinkedSourceIsADifferentKey", again == 1 && relinked.decoded.withLock { $0 } == [1])
+        }
         return checks
     }
 
@@ -208,6 +521,9 @@ enum SpectrumPlaybackSelfTest {
             return
         }
         checks.append(contentsOf: await transitionTransportChecks())
+        checks.append(contentsOf: startupRegressionChecks())
+        checks.append(contentsOf: videoSampleIndexChecks())
+        checks.append(contentsOf: await analysisPrefetchChecks())
         checks.append(contentsOf: await temporaryTimingChecks(audioURL: folder.appendingPathComponent("sources/aud-wav48s.wav")))
         func check(_ name: String, _ pass: Bool, _ detail: String = "") {
             checks.append(Check(name: name, pass: pass, detail: detail)); LaneSelfTest.checkCountForMode = checks.count
