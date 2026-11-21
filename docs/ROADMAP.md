@@ -2,13 +2,15 @@
 
 ## 현행 기능과 검증 경계
 
+**2026-11-22 · FX-02C 이미지 기반 재생과 수동 Pause 체크포인트.** `15f2b694eabf0de30b4e238ecf792f42e6f8a612`에서 정지 중 이미지 접근 갱신, 접근이 유효할 때만 허용하는 이미지 프로젝트의 시작·종료 유지, Pause 프레임이 정확히 같을 때만 허용하는 수동 Pause 유지를 구현했다(Pause 위치 계산은 변경 없음). **Claude Code 자동 검증:** PNG + WAV 32/32, MP4 Pause 11/11, 합성 79/79, 이미지 접근 계약 35/35, 실제 MP4 15/16 1회 후 재실행 16/16. **소유자 수동 PASS:** 정지 후·0초 재생 시작, 자연 종료, 앱 전환, 일반 Space Pause, 빠른 Pause → Play, Pause → Seek, MP4 Pause, MP4 26.5초 부근. **미해결:** 빠른 Pause → Play 자동 측정 약 78 ms 공백, 간헐적 MP4 프레임 지연(과거 1회 빈 tick 2개, 원인 미상). 시험한 미디어·이 Mac에 한한 수락이다. [체크포인트 기록](DECISIONS.md#2026-11-22-fx-02c-이미지-기반-재생과-수동-pause-안정화-체크포인트)
+
 **2026-11-21 · FX-02C 재생 안정화 체크포인트.** `feature/spectrum-effects`의 `7c4c7bbf8dbb395916015df9aa0afb7f689f6ffe`에서 이미지 없는 영상 기반 프로젝트의 Spectrum 재생 시작 유지, 0초 시작의 음수 item 시각 처리, 샘플 테이블 기반 반복 영상 프레임 진행(단일 1배속 편집 목록), PCM 덩어리 미리 디코딩, 자연 종료 유지를 구현했다. 2026-11-18의 Hue 기능 FX-02C와 다른 작업이다. **Claude Code 자동 검증:** 외부 Debug 빌드에서 합성·단위 79/79 PASS, 소유자 MP4 사본 0–35.5 s 연속 재생 16/16 PASS, 빈 Spectrum tick 0/5023(Spectrum 레이어 모델 기준). **소유자 수동 PASS(같은 빌드):** 0초 시작, 8·16·24·32초 구간, 33.4초·66.8초 반복 프레임, 자연 종료, Pause·Seek. 이 Mac의 한 MP4 종류에 한한 수락이며 모든 미디어 형식·앱 전체 수락이 아니다. 여러·앞쪽 자르기 편집 목록, VFR, 24/25 fps 원본은 미검증이고 색인이 꺼지면 반복 프레임 공백이 남을 수 있다. [수락 기록](DECISIONS.md#2026-11-21-fx-02c-재생-안정화-실제-mp4-수락) 빌드 산출물은 외부 APFS 볼륨에 둔다([정책](DECISIONS.md#2026-11-21-빌드-산출물을-외부-apfs-볼륨으로)).
 
 **새 OPEN(2026-11-21):** Digital Spectrum Hue/색 보간에서 막대 진폭이 매우 작으면 중심 기준선 근처에 작은 외딴 점이 보일 수 있다. 유보한 시각 품질 개선이며 재생 깜박임·Softness와 별개다. [기록](DECISIONS.md#2026-11-21-digital-spectrum-hue-보간의-저진폭-점open)
 
 **2026-11-20 · Softness v1.1 유보.** 소유자 결정으로 Softness 완성 작업(정수 0–100, Digital 안쪽 feather, Analog 바깥 feather 재검토, 성능, Inspector, Preview·Export 일치, 저장 호환 검증)은 **v1.1 목표**로 옮겼다. v1.1은 출시 약속이 아니다. `feature/spectrum-effects`의 `f208e2c`(Softness Preview pilot·요청 시간 계측·Feather 최적화 A·oracle 시험)는 **컴파일·시험하지 않았고** 구현 완료나 성능 검증 완료가 아니다. 정적 소스 검토 기준으로 일반 Preview·Export는 Softness 0 경로이고, Inspector에 Softness가 없으며, 양수 Preview는 DEBUG 빌드와 실행 인수가 모두 필요한 Digital pilot에서만 그린다. Format 11·appearance v3와 저장된 양수 값은 유지한다. [유보 결정](DECISIONS.md#2026-11-20-spectrum-softness-v11-유보)
 
-**v1.0 Spectrum의 남은 작업(2026-11-21 갱신):** 이미지 기반 Spectrum 재생 깜박임(OPEN; 이미지 없는 영상 기반 실제 MP4의 시작·자연 종료는 위 체크포인트에서 소유자 PASS), 다른 영상 형식의 반복 프레임 처리 검증, Digital Hue 저진폭 점(유보한 시각 품질), Native Inspector 7 FAIL/4 SKIP, 내부 Undo/Redo Seek 지연, 기본 Spectrum Preview 검증, 기본 Spectrum Export 통합(공개 Export 비활성), `f208e2c`의 Release 컴파일·회귀 시험, 남은 편집기 기능, end-to-end 회귀 검증. 빌드·시험 실행은 별도 승인을 받는다.
+**v1.0 Spectrum의 남은 작업(2026-11-21 갱신, 2026-11-22 일부 갱신):** 이미지 기반 Spectrum 재생 깜박임(2026-11-22 체크포인트에서 시험한 PNG + WAV의 시작·자연 종료·Pause 소유자 PASS, 빠른 Pause → Play 자동 측정 공백과 간헐적 MP4 프레임 지연은 미해결), 다른 영상 형식의 반복 프레임 처리 검증, Digital Hue 저진폭 점(유보한 시각 품질), Native Inspector 7 FAIL/4 SKIP, 내부 Undo/Redo Seek 지연, 기본 Spectrum Preview 검증, 기본 Spectrum Export 통합(공개 Export 비활성), `f208e2c`의 Release 컴파일·회귀 시험, 남은 편집기 기능, end-to-end 회귀 검증. 빌드·시험 실행은 별도 승인을 받는다.
 
 **2026-11-19 · SPECTRUM-FX-02D-1B.** Softness 0–100을 Spectrum 스타일에 보존한다. 양수는 Format 11 appearance v3로 저장하며 일반 Preview의 양수 적용, Inspector 편집, 소유자 Mac의 시각 강도 수락은 후속 범위다. 실제 음악의 FHD 직렬 진단에서 1024밴드 대각선 Digital 100%의 p95는 두 구간 각각 111.76ms와 112.27ms였다. [저장 계약](DECISIONS.md#2026-11-19-spectrum-softness-모델과-저장-계약)
 
@@ -563,7 +565,9 @@ native finish 정지 시 job/temp/scope/slot도 계속 대기하므로 hard time
 - ✅ **PREVIEW-IMAGE-01B 시험한 동작의 소유자 수락 6/6 PASS(2026-11-16):** 구현·범위별 자동 검증과 별도로 소유자가 macOS에서 여섯 조건을 수동 PASS로 보고했다. 초기 재연결은 준비 상황이며 신규 결함으로 분류하지 않았다. 장시간·다른 하드웨어·전체 Preview/Export parity는 미검증이고 아래 내부 Undo/Redo Seek 성능 조사는 OPEN으로 유지한다([수락과 한계](DECISIONS.md#2026-11-16-preview-image-01c)).
 - ⏳ **PREVIEW-SEEK-01B 내부 설치 지연 조사 OPEN(2026-11-16):** 재구성 완료 후 Undo/Redo seek 중앙값 **53.6→116.2 ms**로 증가했고 ruler seek는 **122.0→63.5 ms**로 개선됐다(각 조건 n=3, 내부 레이어 설치 시각·화면 FPS 아님). 소유자의 시험한 seek 동작 5/5 PASS는 별도 수락이며 이 성능 우려를 해결한 근거가 아니다. 지연 분산·다른 조건·장시간 성능·전체 Preview/Export parity는 미검증, 공개 Spectrum Export는 비활성 유지. native 입력 105 PASS / 7 FAIL / 4 SKIP의 동일 기준선 실패도 유지한다([수락과 한계](DECISIONS.md#2026-11-16-preview-seek-01b-구현과-소유자-수락)).
 - ✅ **FX-02C 재생 안정화(2026-11-21, `7c4c7bb`):** 이미지 없는 영상 기반 실제 MP4에서 재생 시작·반복 프레임·자연 종료·Pause/Seek 소유자 PASS, Claude Code 자동 79/79·16/16 PASS와 빈 tick 0/5023을 구분한다. 다른 편집 목록·VFR·24/25 fps와 장시간·다른 하드웨어는 미검증([수락 기록](DECISIONS.md#2026-11-21-fx-02c-재생-안정화-실제-mp4-수락)).
-- ⏳ **이미지 기반 Spectrum 재생 깜박임 OPEN(2026-11-21 기준):** 위 안정화는 이미지 composition을 기존 접근 기반 동작으로 남겼다. 해결로 표시하지 않는다.
+- ⏳ **이미지 기반 Spectrum 재생 깜박임 OPEN(2026-11-21 기준):** 위 안정화는 이미지 composition을 기존 접근 기반 동작으로 남겼다. 해결로 표시하지 않는다. → **2026-11-22 후속:** 시험한 PNG + WAV에서 시작·자연 종료·수동 Pause 소유자 PASS(`15f2b69`). 이미지가 일부만 덮는 프로젝트 등 다른 조건은 미검증이다.
+- ⏳ **빠른 Pause → Play 공백 OPEN(2026-11-22):** 자동 시험 약 78 ms 빈 표시, 소유자 수동은 보이는 문제 없음.
+- ⏳ **간헐적 MP4 프레임 지연 OPEN(2026-11-22):** 과거 1회 프레임 795 처리 80.4 ms로 빈 tick 2개(약 14 ms), 재실행에서 재현 안 됨, 원인 미상. [기록](DECISIONS.md#2026-11-22-fx-02c-이미지-기반-재생과-수동-pause-안정화-체크포인트)
 - ⏳ **Digital Hue 저진폭 점 OPEN(2026-11-21, 유보한 시각 품질):** Hue/색 보간에서 아주 작은 진폭의 막대가 중심 기준선 근처에 외딴 점으로 보일 수 있다. 재생 깜박임·Softness와 별개([기록](DECISIONS.md#2026-11-21-digital-spectrum-hue-보간의-저진폭-점open)).
 - ⏳ SP-6 native Preview 성능 부채(2026-11-13, SP-6D-03): 두께·반응 slider stutter는 소유자 FAIL·원인 미확정. SP-6C-02 요청 병합 잠정 유지, 효과 미입증 Timeline 생략/임시 profiling은 SP-6C-09에서 제거. 위 SP-6D-03 최신 절의 별도 bounded 성능 계획과 한계를 따른다. Format10의 Spectrum-only·혼합 native save/reopen PASS로 이 문제를 닫지 않는다.
 - ⏳ A-010 프리뷰 경로 프레임 0 불일치(가끔, 원인 미확정, E2와 별개): [diagnostics/A-010-preview-frame0.md](diagnostics/A-010-preview-frame0.md).

@@ -1,5 +1,19 @@
 # 인계 요약 — ON THE FRAME
 
+## 2026-11-22 현행 인계 · FX02C-PAUSE-CHECKPOINT-01
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 그 아래 2026-11-21 이하의 ‘현행’은 각 작성 날짜 기준이다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 구현 체크포인트 | `feature/spectrum-effects` @ `15f2b694eabf0de30b4e238ecf792f42e6f8a612`(부모 `23c2a98`). 이미지 기반 재생 안정화, 수동 Pause 유지, 회귀 검사. 이 인계를 담은 문서 커밋이 그 위에 온다. |
+| 게시 | 소유자가 `origin/feature/spectrum-effects` fast-forward push를 승인했다(FX02C-PAUSE-CHECKPOINT-01). 실제 결과는 그 작업 보고와 원격 조회로 확인한다. |
+| 빌드·시험 | 마지막 빌드는 외부 Debug `FX02C-PauseValidate-20261122-01`. 자동 검증과 소유자 수동 결과는 [체크포인트 기록](DECISIONS.md#2026-11-22-fx-02c-이미지-기반-재생과-수동-pause-안정화-체크포인트)에 있다. 체크포인트 작업 자체는 빌드·시험을 실행하지 않았다. |
+
+**열린 문제.** 빠른 Pause → Play 자동 측정 약 78 ms 공백, 간헐적 MP4 프레임 지연(과거 1회, 원인 미상), 시험하지 않은 이미지·영상 조건, Digital Hue 저진폭 점, Native Inspector 7 FAIL / 4 SKIP, 내부 Undo/Redo Seek 지연, 기본(공개) Spectrum Export 미완료, Softness v1.1 유보.
+
+**다음 승인.** 다음 구현·빌드·시험은 소유자가 범위를 정해 승인한다.
+
 ## 2026-11-21 현행 인계 · FX02C-CHECKPOINT-01
 
 아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 그 아래 2026-11-20 이하의 ‘현행’은 각 작성 날짜 기준이다.
