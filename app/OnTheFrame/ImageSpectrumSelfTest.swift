@@ -469,7 +469,11 @@ import os
             if !predicate() { throw Failure(name: "bounded wait") }
         }
         s.imagePlaybackAccessClockForTest = 1000
+        // These contracts count validation starts exactly; paused renewal (IMAGE-SPECTRUM-FLICKER-FIX-01)
+        // is exercised separately, so keep it off regardless of whether the app is frontmost.
+        s.previewHost?.spectrumOverlay.windowActiveOverrideForTest = false
         defer {
+            s.previewHost?.spectrumOverlay.windowActiveOverrideForTest = nil
             s.imagePlaybackAccessPreparedForTest = nil
             release?.resume()
             s.imagePlaybackAccessClockForTest = nil
@@ -480,6 +484,7 @@ import os
         }
         do {
             let opened = await s.openProject(at: folder.appendingPathComponent("test.ontheframe"))
+            s.previewHost?.spectrumOverlay.windowActiveOverrideForTest = false
             try check("fixture opened", opened)
             try await wait { s.player.currentItem.map { s.imagePreviewEligibility(for: $0, session: s.projectSession, generation: s.generation) == .validatedAtInstallation } ?? false }
             let item = s.player.currentItem!
@@ -574,7 +579,10 @@ import os
             if !predicate() { throw Failure(name: "bounded wait") }
         }
         func open() async throws {
+            // Lease-contract checks: keep paused renewal (IMAGE-SPECTRUM-FLICKER-FIX-01) off here.
+            s.previewHost?.spectrumOverlay.windowActiveOverrideForTest = false
             let ok = await s.openProject(at: folder.appendingPathComponent("test.ontheframe"))
+            s.previewHost?.spectrumOverlay.windowActiveOverrideForTest = false
             try check("fixture opened", ok)
             try await wait { s.player.currentItem.map { s.imagePreviewEligibility(for: $0, session: s.projectSession, generation: s.generation) == .validatedAtInstallation } ?? false }
         }
@@ -685,6 +693,7 @@ import os
             try check("project replacement rejects late access", !s.imagePlaybackAccessIsCurrent(for: previous))
         } catch { failure = String(describing: error) }
         s.imagePlaybackAccessPreparedForTest = nil
+        s.previewHost?.spectrumOverlay.windowActiveOverrideForTest = nil
         resume?.resume()
         s.stopAllScopes()
         try? JSONSerialization.data(withJSONObject: ["checks": checks, "error": failure as Any? ?? NSNull(), "pass": failure == nil], options: [.prettyPrinted, .sortedKeys])

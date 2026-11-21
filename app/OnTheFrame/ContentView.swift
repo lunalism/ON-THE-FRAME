@@ -491,7 +491,8 @@ final class PlayerNSView: NSView {
             // Retire it here; playback obtains a fresh output for the new target.
             store.spectrumPreview.playback.stop()
         }
-        spectrumOverlay.invalidate(forgetFrame: true)
+        // Clears as before, except the Pause-owned exact seek claimed by the overlay (PAUSE-FLICKER-FIX-01).
+        spectrumOverlay.seekRequested(token: token, frame: frame)
         pendingSeeks.append((token, frame))
     }
     /// 플레이어 탐색이 끝났다(저장소가 주 스레드에서 알림, 완료 또는 취소).

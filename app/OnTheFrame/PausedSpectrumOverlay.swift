@@ -39,13 +39,37 @@ final class PausedSpectrumOverlay {
     private var naturalEndRetained: Presentation?
     /// About 7 composition frames. Measured transition gaps were 35–47 ms (TRANSITION-FIX-01).
     private static let transitionLimit: CFTimeInterval = 0.25
+    /// IMAGE-SPECTRUM-FLICKER-FIX-01: at most one pending one-shot renewal step, only while a
+    /// complete paused image presentation is visible in the active editor window.
+    private var accessRenewalTimer: Timer?
+    private var accessRenewalObservers: [SpectrumWindowObservation] = []
+    /// PAUSE-FLICKER-FIX-01: the playing presentation kept across a manual Pause, only when it shows
+    /// exactly the Pause frame. `token` is the Pause-owned seek; the hold ends when that seek's paused
+    /// batch completes, on any invalidation, or at `deadline`.
+    private struct PauseHold { let presentation: Presentation; var token: Int?; let deadline: CFTimeInterval }
+    private var pauseHold: PauseHold?
+    private var pauseHoldTimer: Timer?
+    /// Bound on showing the retained (same-frame) raster while the exact seek and paused render finish.
+    static let pauseHoldLimit: CFTimeInterval = 0.5
+    #if DEBUG
+    private(set) var pausedAccessRenewalSteps = 0
+    var pausedAccessRenewalScheduledForTest: Bool { accessRenewalTimer != nil }
+    /// Automation cannot always make the app frontmost; nil uses the real window/app state.
+    var windowActiveOverrideForTest: Bool?
+    #endif
     #if DEBUG
     private(set) var retainedTransitionTicks = 0
     private(set) var retainedNaturalEnds = 0
+    private(set) var pauseRetentions = 0, pauseFrameMismatches = 0, pauseRetentionsDeclined = 0
+    private(set) var pauseRetentionTimeouts = 0, pauseRetentionReplacements = 0
     var transitionRetentionForTest: String? {
         if let transition { return transition.kind == .start ? "start" : "end" }
+        if pauseHold != nil { return "pause" }
         return naturalEndRetained == nil ? nil : "naturalEnd"
     }
+    var pauseHoldTokenForTest: Int? { pauseHold?.token }
+    var presentedFrameForTest: Int? { presented?.frame }
+    var pauseHoldRemainingForTest: CFTimeInterval? { pauseHold.map { $0.deadline - CACurrentMediaTime() } }
     var playbackObservationForTest: (owner: UUID, observe: () -> Void)?
     var publicationForParityTest: (owner: UUID, receive: (Int, Int, UUID, SpectrumFrameOutcome) -> Void)?
     private(set) var assignments = 0
@@ -59,6 +83,7 @@ final class PausedSpectrumOverlay {
     private var playbackLink: CADisplayLink?
 
     func updatePlaybackLink() {
+        defer { updatePausedAccessRenewal() }
         guard let store, let view, view.window != nil, store.isPlaying,
               !store.timeline.spectra.isEmpty else {
             #if DEBUG
@@ -171,8 +196,180 @@ final class PausedSpectrumOverlay {
         #endif
     }
 
-    func attach(_ store: ProjectStore) { self.store = store; updatePlaybackLink() }
-    func detach() { stopPlaybackLink(); invalidate(forgetFrame: true); store = nil }
+    func attach(_ store: ProjectStore) {
+        self.store = store
+        if accessRenewalObservers.isEmpty {
+            let names: [Notification.Name] = [
+                NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification,
+                NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification,
+                NSWindow.didBecomeMainNotification, NSWindow.didResignMainNotification,
+                NSWindow.didChangeOcclusionStateNotification, NSWindow.didMiniaturizeNotification,
+                NSWindow.didDeminiaturizeNotification]
+            accessRenewalObservers = names.map { name in
+                SpectrumWindowObservation(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.updatePausedAccessRenewal() }
+                })
+            }
+        }
+        updatePlaybackLink()
+    }
+    func detach() { stopPlaybackLink(); invalidate(forgetFrame: true); cancelPausedAccessRenewal(); endPauseHold(); store = nil }
+
+    /// PAUSE-FLICKER-FIX-01. Called by `setPlaying(false, pauseFrame:)` for a manual Pause that will
+    /// issue its own exact seek to `frame`. Keeps the canvas only when the last complete playing
+    /// presentation is confirmed for exactly `frame` and is current (item, seek, session epoch and
+    /// revision, visible items, image lease for image compositions); otherwise clears as before.
+    /// A start/end retention in progress is not converted.
+    func suspendForPause(at frame: Int) {
+        guard let store, store.isPlaying, transition == nil, naturalEndRetained == nil, !presentingNaturalEnd,
+              let presentation = presented else {
+            #if DEBUG
+            pauseRetentionsDeclined += 1
+            #endif
+            invalidate(forgetFrame: true); return
+        }
+        guard presentation.frame == frame else {
+            // A different displayed frame is never shown as the paused frame.
+            #if DEBUG
+            pauseFrameMismatches += 1
+            #endif
+            invalidate(forgetFrame: true); return
+        }
+        guard retainable(presentation) else {
+            #if DEBUG
+            pauseRetentionsDeclined += 1
+            #endif
+            invalidate(forgetFrame: true); return
+        }
+        serial &+= 1
+        tickets.forEach { store.spectrumPreview.cancel($0) }
+        tickets = []
+        readyInBatch = []
+        styleRequestsRemaining = 0
+        pendingStyleRefresh = false
+        confirmedFrame = nil; confirmedToken = nil; confirmedItem = nil
+        presented = nil
+        cancelPausedAccessRenewal()
+        endPauseHold()
+        // For an image composition the hold never outlives the current lease (no tick or paused
+        // renewal runs during the hold).
+        var limit = Self.pauseHoldLimit
+        if InternalImagePreview.containsImages(store.timeline), let item = store.player.currentItem {
+            limit = min(limit, store.imageAccessValidRemaining(for: item))
+        }
+        let deadline = CACurrentMediaTime() + limit
+        pauseHold = PauseHold(presentation: presentation, token: nil, deadline: deadline)
+        let timer = Timer(timeInterval: limit, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.pauseHoldExpired(deadline: deadline) }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        pauseHoldTimer = timer
+        #if DEBUG
+        pauseRetentions += 1
+        #endif
+    }
+
+    /// The Pause-owned exact seek. Binds the hold to that seek token; a different frame or a second
+    /// claim clears.
+    func claimPauseSeek(token: Int, frame: Int) {
+        guard var hold = pauseHold else { return }
+        guard hold.token == nil, hold.presentation.frame == frame else { invalidate(forgetFrame: true); return }
+        hold.token = token
+        pauseHold = hold
+    }
+
+    /// The host's seek request. Every seek clears as before, except the claimed Pause-owned seek.
+    func seekRequested(token: Int, frame: Int) {
+        if let hold = pauseHold, hold.token == token, hold.presentation.frame == frame,
+           CACurrentMediaTime() < hold.deadline { return }
+        invalidate(forgetFrame: true)
+    }
+
+    private func pauseHoldExpired(deadline: CFTimeInterval) {
+        guard let hold = pauseHold, hold.deadline == deadline else { return }
+        // Not replaced in time: clear every retained raster not yet replaced by this paused batch.
+        // The exact seek and its paused requests continue and install normally.
+        endPauseHold()
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        for (id, layer) in layers where !readyInBatch.contains(id) { layer.contents = nil; layer.frame = .zero }
+        CATransaction.commit()
+        presented = nil
+        #if DEBUG
+        pauseRetentionTimeouts += 1
+        #endif
+    }
+
+    private func endPauseHold() {
+        pauseHold = nil
+        pauseHoldTimer?.invalidate()
+        pauseHoldTimer = nil
+    }
+
+    /// The hold's presentation is still exactly current for its claimed seek: same frame, item,
+    /// session epoch/revision and visible items, only the seek token advanced to the Pause-owned one;
+    /// no later seek, edit, relink or project change; image lease valid now for image compositions.
+    private func pauseRetainable(_ hold: PauseHold) -> Bool {
+        guard let store, let view, view.window != nil, store.previewHost === view, !view.isShowingStill,
+              !store.isPlaying, store.gestureBase == nil, !store.relinkInProgress,
+              store.appliedGeneration == store.generation, let token = hold.token, token == store.seekToken,
+              CACurrentMediaTime() < hold.deadline, let item = store.player.currentItem,
+              ObjectIdentifier(item) == hold.presentation.item,
+              Set(layers.keys) == Set(hold.presentation.entries.map(\.id)) else { return false }
+        let p = hold.presentation
+        guard currentPresentation(frame: p.frame) == Presentation(frame: p.frame, item: p.item, token: token,
+                                                                  epoch: p.epoch, revision: p.revision, entries: p.entries)
+        else { return false }
+        return !InternalImagePreview.containsImages(store.timeline) || store.imageAccessIsValidNow(for: item)
+    }
+
+    /// The editor window is visible, unobscured, not minimized, and the app and window are active.
+    private var editorWindowActive: Bool {
+        #if DEBUG
+        if let windowActiveOverrideForTest { return windowActiveOverrideForTest && view?.window != nil }
+        #endif
+        guard let window = view?.window else { return false }
+        return NSApp.isActive && window.isVisible && !window.isMiniaturized &&
+            window.occlusionState.contains(.visible) && (window.isKeyWindow || window.isMainWindow)
+    }
+
+    /// The paused, complete, current image presentation whose access may be renewed, or nil.
+    private var pausedRenewalItem: AVPlayerItem? {
+        guard let store, !store.isPlaying, transition == nil, naturalEndRetained == nil,
+              InternalImagePreview.containsImages(store.timeline), editorWindowActive,
+              let presentation = presented, let item = confirmedItem, store.player.currentItem === item,
+              ObjectIdentifier(item) == presentation.item, presentation.frame == confirmedFrame,
+              presentation.token == confirmedToken, presentationIsCurrent(presentation) else { return nil }
+        return item
+    }
+
+    /// Start, keep or stop paused image-access renewal (IMAGE-SPECTRUM-FLICKER-FIX-01). Called when a
+    /// paused presentation completes or clears, on transport changes and on window/app activity changes.
+    /// No timer exists while the window is hidden, inactive or minimized, or while playing.
+    func updatePausedAccessRenewal() {
+        guard pausedRenewalItem != nil else { cancelPausedAccessRenewal(); return }
+        if accessRenewalTimer == nil { pausedAccessRenewalStep() }
+    }
+
+    private func cancelPausedAccessRenewal() {
+        accessRenewalTimer?.invalidate()
+        accessRenewalTimer = nil
+    }
+
+    private func pausedAccessRenewalStep() {
+        cancelPausedAccessRenewal()
+        guard let store, let item = pausedRenewalItem else { return }
+        #if DEBUG
+        pausedAccessRenewalSteps += 1
+        #endif
+        guard let delay = store.renewPausedImageAccess(for: item) else { return }
+        // A confirmed failure clears this presentation synchronously or on publication; the next
+        // step then finds no eligible presentation and schedules nothing.
+        let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.accessRenewalTimer = nil; self?.pausedAccessRenewalStep() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        accessRenewalTimer = timer
+    }
 
     /// Seek/resume immediately invalidates the paused batch. Publish its newest
     /// coalesced model first so cancellation cannot discard the final style.
@@ -244,13 +441,23 @@ final class PausedSpectrumOverlay {
     }
 
     /// Same item, seek, session inputs, visible items and styles, with the canvas holding
-    /// exactly those layers. Image compositions keep their existing access-driven blanking.
-    private func retainable(_ presentation: Presentation) -> Bool {
+    /// exactly those layers.
+    private func presentationIsCurrent(_ presentation: Presentation) -> Bool {
         guard let store, let view, view.window != nil, store.previewHost === view, !view.isShowingStill,
               !view.hasPendingSpectrumSeek, store.gestureBase == nil, !store.relinkInProgress,
-              store.appliedGeneration == store.generation, !InternalImagePreview.containsImages(store.timeline),
+              store.appliedGeneration == store.generation,
               !presentation.entries.isEmpty, Set(layers.keys) == Set(presentation.entries.map(\.id)) else { return false }
         return currentPresentation(frame: presentation.frame) == presentation
+    }
+
+    /// `presentationIsCurrent`, and for an image composition an unexpired image lease right now
+    /// (IMAGE-SPECTRUM-FLICKER-FIX-01). Checked at every retention decision and on every playback
+    /// tick, so expiry, a pending check without a valid lease, failure or invalidation ends retention.
+    private func retainable(_ presentation: Presentation) -> Bool {
+        guard presentationIsCurrent(presentation), let store else { return false }
+        guard InternalImagePreview.containsImages(store.timeline) else { return true }
+        guard let item = store.player.currentItem, ObjectIdentifier(item) == presentation.item else { return false }
+        return store.imageAccessIsValidNow(for: item)
     }
 
     /// Decided on each playback tick; no timer. Start waits until the first complete
@@ -297,6 +504,8 @@ final class PausedSpectrumOverlay {
         presented = nil
         readyInBatch = []
         naturalEndRetained = nil
+        cancelPausedAccessRenewal()
+        endPauseHold()
         styleRequestsRemaining = 0
         pendingStyleRefresh = false
         if let store { tickets.forEach { store.spectrumPreview.cancel($0) } }
@@ -343,6 +552,10 @@ final class PausedSpectrumOverlay {
         if retainedEnd != nil, retainingStyleFrame { invalidate(forgetFrame: true); return }
         let retainingNaturalEnd = presentingNaturalEnd &&
             retainedEnd.map { $0.frame == confirmedFrame && retainable($0) } == true
+        // PAUSE-FLICKER-FIX-01: only the paused refresh of the claimed Pause-owned seek, for the same frame.
+        let retainingPause = !retainingNaturalEnd && !retainingStyleFrame && !presentingNaturalEnd &&
+            pauseHold.map { $0.token == confirmedToken && $0.presentation.frame == confirmedFrame && pauseRetainable($0) } == true
+        if pauseHold != nil && !retainingPause { invalidate(forgetFrame: false) }
         if retainingNaturalEnd {
             serial &+= 1
             if let store { tickets.forEach { store.spectrumPreview.cancel($0) } }
@@ -350,6 +563,11 @@ final class PausedSpectrumOverlay {
             #if DEBUG
             retainedNaturalEnds += 1
             #endif
+        } else if retainingPause {
+            // Keep the identical-frame raster until this batch publishes; the hold and its deadline stay.
+            serial &+= 1
+            if let store { tickets.forEach { store.spectrumPreview.cancel($0) } }
+            tickets = []
         } else if retainingStyleFrame {
             if styleRequestsRemaining > 0 {
                 pendingStyleRefresh = true
@@ -367,7 +585,7 @@ final class PausedSpectrumOverlay {
               !store.isPlaying, store.gestureBase == nil, !view.isShowingStill, store.appliedGeneration == store.generation,
               let frame = confirmedFrame, let token = confirmedToken, token == store.seekToken,
               let item = confirmedItem, store.player.currentItem === item else {
-            if retainingStyleFrame || retainingNaturalEnd { invalidate() }
+            if retainingStyleFrame || retainingNaturalEnd || retainingPause { invalidate() }
             return
         }
         presented = nil
@@ -444,6 +662,14 @@ final class PausedSpectrumOverlay {
                         if self.readyInBatch == visibleIDs {
                             self.presented = Presentation(frame: frame, item: ObjectIdentifier(item), token: token,
                                                           epoch: epoch, revision: revision, entries: entries)
+                            if let hold = self.pauseHold, hold.token == token {
+                                // The paused result replaced every retained layer.
+                                self.endPauseHold()
+                                #if DEBUG
+                                self.pauseRetentionReplacements += 1
+                                #endif
+                            }
+                            self.updatePausedAccessRenewal()
                         }
                     case .cancelled, .superseded, .dropped:
                         // A natural-end frame stays only until its own paused publication: a

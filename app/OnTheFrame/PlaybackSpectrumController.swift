@@ -286,7 +286,10 @@ final class PlaybackSpectrumController {
         }
         // A source can change while the player waits for its first display PTS.
         needsSourceValidation.formUnion(desired)
-        if !InternalImagePreview.containsImages(timeline) { timing.armStartupRegression(frame: frame) }
+        // IMAGE-SPECTRUM-FLICKER-FIX-01: image compositions too. Their start frame is prepared only after
+        // the image lease is current, and every tick checks access before sampling; an invalid lease
+        // calls `invalidateApproval()`, which disarms this allowance (sampleSpectrumPlayback).
+        timing.armStartupRegression(frame: frame)
         pump(preparing: frame)
     }
 

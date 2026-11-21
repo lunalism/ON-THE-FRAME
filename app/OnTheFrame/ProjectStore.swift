@@ -2017,7 +2017,7 @@ final class ProjectStore {
         // A full valid reference check can take ~0.17 s for an admitted PNG.
         // Start the next check with enough lead; the original one-second expiry,
         // one-worker bound and failure retry deadline remain unchanged.
-        if authorized && (!allowProactiveRenewal || now < imagePlaybackAccessUntil - 0.25) { return true }
+        if authorized && (!allowProactiveRenewal || now < imagePlaybackAccessUntil - Self.imageAccessRenewalLead) { return true }
         #if DEBUG
         SpectrumContinuityTrace.record(11, SpectrumContinuityTrace.lease, authorized ? 4 : 2, Int64(imagePlaybackAccessUntil * 1_000_000))
         #endif
@@ -2130,6 +2130,43 @@ final class ProjectStore {
             #endif
         }
         return authorized
+    }
+
+    /// Renewal lead before the one-second lease expires (provisional; 100 ms in SP-3C2-34, 250 ms since a153b99).
+    /// The retry spacing (start + 0.75 s) makes the earliest renewal start exactly at this lead.
+    static let imageAccessRenewalLead: Double = 0.25
+
+    /// IMAGE-SPECTRUM-FLICKER-FIX-01: pure query for presentation retention. True only for the
+    /// installed, validated item with an unexpired lease. Never starts validation; an expired lease
+    /// or a pending check without an unexpired lease is not valid.
+    func imageAccessIsValidNow(for item: AVPlayerItem) -> Bool {
+        guard appliedImagePreview != nil,
+              imagePreviewEligibility(for: item, session: projectSession, generation: generation) == .validatedAtInstallation
+        else { return false }
+        return imagePlaybackAccessNow < imagePlaybackAccessUntil
+    }
+
+    /// Seconds the current lease stays valid for this item (0 when not valid). Pure query.
+    func imageAccessValidRemaining(for item: AVPlayerItem) -> TimeInterval {
+        imageAccessIsValidNow(for: item) ? max(0, imagePlaybackAccessUntil - imagePlaybackAccessNow) : 0
+    }
+
+    /// IMAGE-SPECTRUM-FLICKER-FIX-01: one bounded paused renewal step for a visible paused Spectrum.
+    /// Uses the existing worker, one-second lease, renewal lead and retry spacing; acquires when the
+    /// lease is absent or expired (that check grants nothing until it succeeds). Failure clears the
+    /// presentation through the existing path. Returns the delay until the next step, or nil when the
+    /// installation is not validated (no further work).
+    func renewPausedImageAccess(for item: AVPlayerItem) -> TimeInterval? {
+        guard appliedImagePreview != nil,
+              imagePreviewEligibility(for: item, session: projectSession, generation: generation) == .validatedAtInstallation
+        else { return nil }
+        _ = imagePlaybackAccessIsCurrent(for: item, allowProactiveRenewal: true)
+        let now = imagePlaybackAccessNow
+        if imagePlaybackAccessTask != nil { return 0.1 }
+        let due = now < imagePlaybackAccessUntil
+            ? max(imagePlaybackAccessUntil - Self.imageAccessRenewalLead, imagePlaybackAccessRetry)
+            : imagePlaybackAccessRetry
+        return max(0.02, due - now)
     }
 
     private func clearImagePlaybackSpectrum() {
@@ -2542,16 +2579,31 @@ final class ProjectStore {
         previewHost?.spectrumOverlay.discardNaturalEnd()
         let awaitingImage = imagePlaybackReconstruction != nil
         pendingImagePlay = nil
-        player.pause(); setPlaying(false)
+        player.pause()
+        // The Pause position is unchanged: the frame containing the paused player time.
+        let target = min(settings.frame(containing: player.currentTime()), timeline.durationFrames)
+        let seeks = wasPlaying && !timeline.spectra.isEmpty && previewHost?.hasPendingSpectrumSeek == false
+        // PAUSE-FLICKER-FIX-01: only a Pause that issues its own exact seek may offer that target to the
+        // overlay; the overlay keeps the playing presentation only if it shows exactly this frame.
+        var offer = target
+        #if DEBUG
+        if let hook = pauseOfferFrameForTest { offer = hook(target) } // retention offer only, never the playhead
+        #endif
+        setPlaying(false, pauseFrame: seeks ? offer : nil)
         // A nil or not-yet-sought replacement has no authoritative playhead yet.
         if awaitingImage && !wasPlaying { return }
-        playhead = min(settings.frame(containing: player.currentTime()), timeline.durationFrames)
-        if wasPlaying, !timeline.spectra.isEmpty, previewHost?.hasPendingSpectrumSeek == false { seek(to: playhead) }
+        playhead = target
+        if seeks { seek(to: playhead, pauseOwned: true) }
     }
+    #if DEBUG
+    /// PAUSE-FLICKER-FIX-01 tests: substitutes the frame offered to the overlay (forces a mismatch).
+    @ObservationIgnored var pauseOfferFrameForTest: ((Int) -> Int)?
+    #endif
     func pauseForEdit() { pendingImagePlay = nil; if isPlaying { pause() } }
     func step(_ k: Int) { pauseForEdit(); seek(to: playhead + k) }
     @ObservationIgnored private(set) var seekToken = 0
-    func seek(to frame: Int) {
+    /// `pauseOwned` is set only by `pause()` for its own exact seek to the Pause position.
+    func seek(to frame: Int, pauseOwned: Bool = false) {
         finishSpectrumNumericScrubIfAny()
         #if DEBUG
         SpectrumContinuityTrace.record(62, Int64(frame), Int64(projectSession), Int64(generation))
@@ -2575,6 +2627,9 @@ final class ProjectStore {
         // The host retires frame approval and output before the exact seek.
         // A hostless seek still fences playback.
         if host == nil { spectrumPreview.playback.stop() }
+        // PAUSE-FLICKER-FIX-01: bind a Pause retention to this exact seek before the host's seek
+        // request runs; any other seek (or a different frame) still clears there as before.
+        if pauseOwned { previewHost?.spectrumOverlay.claimPauseSeek(token: token, frame: f) }
         previewHost?.subtitleSeekRequested(token: token, frame: f)
         playhead = f
         nonisolated(unsafe) let seekDone: (Bool) -> Void = { [weak host] finished in
@@ -2588,7 +2643,7 @@ final class ProjectStore {
     /// 재생 중에만 디스플레이 유휴 절전을 막는다(E3-1: 디스플레이가 꺼지면 화면 표시가 멈춤).
     /// `startFrame` and `retainingNaturalEnd` only let the overlay keep an exactly matching
     /// presentation across this edge. Every other transition clears it as before.
-    private func setPlaying(_ p: Bool, startFrame: Int? = nil, retainingNaturalEnd: Bool = false) {
+    private func setPlaying(_ p: Bool, startFrame: Int? = nil, retainingNaturalEnd: Bool = false, pauseFrame: Int? = nil) {
         if !p { pendingImagePlay = nil }
         if p { previewHost?.spectrumOverlay.flushPendingStyleBeforeTransition() }
         if let host = previewHost, host.window != nil, let item = player.currentItem {
@@ -2597,6 +2652,7 @@ final class ProjectStore {
         if p || isPlaying {
             if p { previewHost?.spectrumOverlay.beginPlaybackTransition(at: startFrame) }
             else if retainingNaturalEnd { previewHost?.spectrumOverlay.suspendForNaturalEnd() }
+            else if let pauseFrame { previewHost?.spectrumOverlay.suspendForPause(at: pauseFrame) }
             else { previewHost?.spectrumOverlay.invalidate(forgetFrame: true) }
         }
         isPlaying = p
