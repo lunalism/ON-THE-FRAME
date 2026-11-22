@@ -1228,6 +1228,8 @@ Spectrum 항목의 프로젝트 형식은 11이다. Softness 0은 appearance v2�
 
 소유자가 새로 관찰해 보고했다(2026-11-21, FX02C-CHECKPOINT-01). Digital Spectrum에서 Hue/색 보간을 쓸 때 막대 진폭이 매우 작으면 중심 기준선 근처에 작은 외딴 점이 보일 수 있다. 상태는 **OPEN, 유보한 시각 품질 개선**이다. 재생 깜박임이나 Softness와 별개 문제로 추적하며 원인은 조사하지 않았다. 유효한 0높이 Digital 점([SPECTRUM-ZERO-01](#2026-11-17-spectrum-zero-01-digital-0높이-최소-요소))과의 관계도 확인하지 않았다.
 
+**2026-11-22 후속 기록(상태는 OPEN 유지).** 정적 조사와 자동 시험에서 Digital 막대·0높이 점의 칠하는 범위(알파)는 Hue와 무관했다. Hue는 이미 칠한 화소의 색만 바꾼다. 소유자는 현재 0높이 모양을 유지하기로 했고 렌더러는 바꾸지 않았다. 이 결과는 관찰된 점이 해결됐다는 뜻이 아니다([타임라인 체크포인트](#2026-11-22-타임라인-스냅덮어쓰기-붙여넣기화면-정리-체크포인트)).
+
 ### 2026-11-21 빌드 산출물을 외부 APFS 볼륨으로
 
 소유자 정책(FX02C-EXTERNAL-BUILD-01, FX02C-CHECKPOINT-01에서 문서화). [2026-10-24 내부 APFS DerivedData 결정](#2026-10-24-앱-deriveddata를-내부-apfs로소유자-승인-옵션-가)을 대체하며 그 기록은 보존한다. 당시 근거는 데이터 볼륨이 HFS+였던 것이고, `/Volumes/Data`는 이제 APFS다.
@@ -1272,3 +1274,29 @@ Spectrum 항목의 프로젝트 형식은 11이다. Softness 0은 appearance v2�
 - **B. 간헐적 MP4 프레임 지연:** 과거 1회, 프레임 795에서 빈 tick 2개(약 14 ms)가 있었다. 그 프레임의 처리에 80.4 ms가 걸려 2프레임 미리 준비 여유를 넘겼다. 원본 재확인·PCM 디코딩·timing 중단은 관여하지 않았다. 이후 재실행에서는 25–28 s 요청이 최대 26.1 ms로 재현되지 않았다. 지연의 근본 원인은 알 수 없다.
 
 **범위와 남은 제한.** 이 Mac에서 시험한 PNG 한 장 + WAV, 소유자 MP4 한 종류의 조건에 한한다. 이미지가 일부만 덮는 프로젝트, 큰 이미지·여러 이미지, 장시간 재생, 다른 하드웨어와 화면 주사율, 다른 영상 형식(여러·앞쪽 자르기 편집 목록, VFR, 24/25 fps)은 미검증이다. Softness v1.1 유보, Digital Hue 저진폭 점 OPEN, Native Inspector 7 FAIL / 4 SKIP OPEN, 내부 Undo/Redo Seek 지연 OPEN, 기본(공개) Spectrum Export 미완료는 그대로다.
+
+### 2026-11-22 타임라인 스냅·덮어쓰기 붙여넣기·화면 정리 체크포인트
+
+소유자가 작업 지시로 요청한 타임라인 편집 개선과 Hue 검증 시험을 체크포인트로 보존한다(TIMELINE-CHECKPOINT-01). 기준은 `feature/spectrum-effects` @ `a7ed82d`이며 구현은 이 체크포인트 커밋에 들어간다. 프로젝트 형식·Spectrum 렌더러·내보내기·Softness는 바꾸지 않았다.
+
+**구현 내용.**
+
+1. **스냅(자석, TIMELINE-EDITING-01·FIX-02):** 타임라인 머리의 켜기/끄기 단추(편집기 상태, 프로젝트에 저장하지 않음, 기본 켜짐). 옮기기와 트림이 0, 다른 클립·항목 가장자리(다른 레인 포함), 재생 헤드에 화면 8 pt(확대 배율로 나눈 프레임) 안에서 붙는다. 가장 가까운 대상, 같은 거리면 앞 가장자리·작은 대상 순으로 정한다. 트림의 1프레임·원본 범위·겹침 규칙은 그대로다. 끌기 중에는 켜기/끄기를 거부한다.
+2. **같은 레인 덮어쓰기 붙여넣기(TIMELINE-OVERWRITE-PASTE-01):** ⌘V는 재생 헤드에 복사한 묶음을 원래 레인에 놓고, 겹친 구간만 바꾼다. 남는 앞·뒤 부분은 원본 오프셋·페이드를 지키며 리플·겹침 회피용 새 레인은 없다. 연결된 쌍의 한쪽만 바뀌면 아무것도 바꾸지 않는다. 한 단계 Undo/Redo다.
+3. **Shift 재생 헤드 스냅:** 스냅이 켜져 있고 Shift를 누른 채 눈금자를 끌면 클립 시작·끝에 붙는다(같은 8 pt). Shift 없는 일반 이동은 그대로다.
+4. **스냅 경계 화살표(TIMELINE-UI-POLISH-01, 소유자 정정 반영):** Shift 재생 헤드 스냅이 붙은 클립 경계마다 클립 위 모서리 바로 위에 ▼, 아래 모서리 바로 아래에 ▲를 같은 X에 그린다. 시작·끝 같은 모양이며, 여러 경계가 같은 프레임이면 모두 표시한다. 기존 노란 안내선은 유지한다. Shift 떼기·범위 밖·스냅 끔·끌기 끝·Esc·클립 끌기 시작에서 지운다. 그리기 전용이며 누름 판정과 무관하다.
+5. **빈 레인 장식 제거:** 영상 레인 빈 곳의 회색 빗금과 "빈틈", 소리 레인의 "무음" 장식을 지웠다. 빈 구간 자체(`Timeline.gaps`)·편집·누름 판정은 그대로다. 원본 없음 경고 표시는 별도 코드로 그대로다.
+6. **Esc:** 재생 헤드를 끄는 중 Esc는 끌기를 끝내고 안내선·화살표를 지운다(재생 헤드는 그 자리). 이전에는 아무 동작이 없었다.
+7. **Hue 검증 시험:** `testHueSweepRecolorsWithoutChangingZeroOrLowAmplitudeCoverage`. Hue 0°·180°에서 Digital·Analog의 알파가 바이트 단위로 같고 색만 다른지, 0·극소·짧은 막대의 실제 기하를 확인한다. 렌더러 변경이 아니다.
+
+**Claude Code 자동 검증(외부 Debug 빌드 `HueUI-Validate-20261122-03`, 소유자 감독).** 앞의 두 빌드(-01, -02)는 새 코드의 컴파일 오류(정적 멤버 호출, 지역 이름 중복)로 실패했고, 수정 뒤 Xcode 설정을 그대로 쓴 type-check(오류 0)를 거쳐 세 번째 빌드가 성공했다. 저장소 Spectrum XCTest(`SpectrumDigitalZeroTests` 10, `SpectrumFrameRendererTests` 18)를 엔진 Debug 모듈에 대해 28/28 PASS했다. 외부 타임라인 하네스(`CopyPasteSelfTest.timelineEditingChecks`, 사용자 실제 PNG·WAV·MP4의 격리 사본)는 51/51 PASS(편집 48행 모두 실행 — Shift 스냅 8h 5, 화살표·빈 레인 8i 13 포함, 엔진 측 3)였다. 새 컴파일러 경고는 없고 기존 경고 4개(`ProjectStore.swift` 3, `TimelineView.swift` 1)는 그대로다. 빌드 최대 RSS는 약 1226 MiB로 조기 중지 1280 MiB에 가까웠다. 이 자동 결과는 소유자 수동 수락이 아니다.
+
+**소유자 수동 확인(같은 빌드, 실제 Mac).** 스냅 화살표 위치, 여러 경계 표시, 화살표 지워짐, 빈 타임라인 모양, 기존 편집 동작, Spectrum Hue 비교 6개 항목 모두 PASS였다.
+
+**미해결·범위 밖(해결로 표시하지 않음).**
+
+- Digital 0높이 모양은 [SPECTRUM-ZERO-01](#2026-11-17-spectrum-zero-01-digital-0높이-최소-요소) 그대로다. [Hue 저진폭 점](#2026-11-21-digital-spectrum-hue-보간의-저진폭-점open)은 시험 통과만으로 해결로 보지 않으며 OPEN이다.
+- 원본 없음 경고의 실행 확인은 이번에 하지 않았다(코드 검토만).
+- Shift 떼기·Esc는 저장소 경로로만 자동 확인했고 실제 키 이벤트 자동 시험은 없다.
+- 이전 `SubtitleSelfTest` 실행은 결과가 없었고(TimelineOverwrite-Validate02 legacy 묶음, setup/timeout) 별도로 미해결이다.
+- 기존 컴파일러 경고 4개와 빌드 메모리 여유 부족을 계속 추적한다. Native Inspector 7 FAIL / 4 SKIP, 내부 Undo/Redo Seek 지연, 공개 Spectrum Export 미완료, Softness v1.1 유보도 그대로다.

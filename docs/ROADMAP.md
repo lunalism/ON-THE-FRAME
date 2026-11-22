@@ -47,7 +47,7 @@ UX-02는 계획된 v1.1로 유보하며 공개 Spectrum Export는 비활성이�
 
 | 현재 기능 | 구현과 노출·검증 경계 |
 | --- | --- |
-| 미디어·타임라인 | 영상·오디오 가져오기, 여러 레인·연결·트림·분할·이동·복사/붙여넣기·변형·오디오 gain/mute/fade·Undo/Redo 구현. 모든 포맷 지원을 뜻하지 않음 |
+| 미디어·타임라인 | 영상·오디오 가져오기, 여러 레인·연결·트림·분할·이동·복사/붙여넣기·변형·오디오 gain/mute/fade·Undo/Redo 구현. 2026-11-22: 스냅 켜기/끄기(옮기기·트림·Shift 재생 헤드, 경계 ▼/▲ 표시), 같은 레인 덮어쓰기 붙여넣기, 빈 레인 장식 제거 — 자동 검증과 소유자 수동 PASS([기록](DECISIONS.md#2026-11-22-타임라인-스냅덮어쓰기-붙여넣기화면-정리-체크포인트)). 모든 포맷 지원을 뜻하지 않음 |
 | 이미지 | DEBUG && OTF_IMAGE_IMPORT 빌드와 -OTFEnableImageImport 실행 인수 모두 필요. 한정된4096px/ICC·Display P3 입력과 ColorSync→sRGB Preview 표현. 원본·전체 해상도 descriptor는 보존하며 검증/Preview용 일시적 proxy의 긴 변은 최대2048px다. full-resolution 4K Preview/Export·무제한 이미지·공개 Release 지원 아님 |
 | 자막 | 글·모양·효과·Preview·자막 포함 일반 Export 구현. 전체 Preview/Export parity 수락과 별개 |
 | Spectrum 생성·소스 | 생성은 Debug 전용. 기존 항목의 소스 선택·계보·이동·트림·편집은 별도 경로. sourceKey·시간/소스 매핑과 겹침/누락 판정 유지 |

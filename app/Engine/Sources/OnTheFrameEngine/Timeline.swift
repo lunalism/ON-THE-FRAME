@@ -268,6 +268,8 @@ public enum EditError: Error, Equatable, CustomStringConvertible {
     case overlap
     /// 연결된 쌍의 다른 클립 범위 밖이라 함께 자를 수 없음
     case linkedSplitOutside
+    /// 덮어쓰기 붙여넣기(TIMELINE-OVERWRITE-PASTE-01): 연결된 쌍의 한쪽만 바뀌어 연결을 지킬 수 없음(아무것도 바꾸지 않음)
+    case overwriteBreaksLink
     case linkNeedsPair, linkDifferentMedia, alreadyLinked, notLinked
     case emptyName, unknownLane
     /// 재연결: 새 파일이 기존 클립의 원본 구간을 모두 덮지 못함(클립을 줄이지 않음)
@@ -318,6 +320,7 @@ public enum EditError: Error, Equatable, CustomStringConvertible {
         case .crossingContent: return "다른 레인의 클립이 이 지점(구간)에 걸쳐 있어 리플 편집을 할 수 없습니다. 동기가 깨질 수 있기 때문입니다. 일반 삭제(Delete)를 쓰거나 걸친 클립을 먼저 옮기세요."
         case .overlap: return "같은 레인의 다른 클립과 겹칩니다. 클립을 덮어쓰지 않으므로 빈 곳에 놓으세요."
         case .linkedSplitOutside: return "연결된 짝 클립이 이 위치를 덮지 않아 함께 자를 수 없습니다. 연결을 해제한 뒤 자르세요."
+        case .overwriteBreaksLink: return "붙여 넣을 구간이 연결된 영상·소리 쌍의 한쪽만 덮어 연결을 지킬 수 없습니다. 아무것도 바꾸지 않았습니다. 연결을 해제하거나 연결된 쌍을 함께 붙여 넣으세요."
         case .linkNeedsPair: return "연결하려면 연결되지 않은 영상 클립 하나와 소리 클립 하나를 고르세요(⌘-클릭으로 둘째 클립 추가)."
         case .linkDifferentMedia: return "같은 원본에서 나온 영상·소리 클립만 연결할 수 있습니다."
         case .alreadyLinked: return "이미 연결된 클립입니다."
@@ -802,6 +805,47 @@ public struct Timeline: Sendable, Equatable {
         return best.map { ($0.delta, $0.snap) } ?? (delta, nil)
     }
 
+    /// TIMELINE-EDITING-01: the shared nearest-target rule of `snappedDelta` for an arbitrary edge set moved by
+    /// `raw` (fractional frames from the pointer). Distance is measured before rounding (so the on-screen distance
+    /// is zoom independent when `threshold` = points / zoom). Among targets within `threshold`, the nearest wins;
+    /// ties keep the earlier edge, then the smaller target (deterministic). `accept` filters integer deltas
+    /// (e.g. a start may not go below 0). Without a target: (rounded raw, nil).
+    public static func nearestSnap(edges: [Int], raw: Double, threshold: Double, targets: Set<Int>,
+                                   accept: (Int) -> Bool = { _ in true }) -> (delta: Int, snap: Int?) {
+        let raw = raw.isFinite ? min(max(raw, -1e9), 1e9) : 0
+        let delta = Int(raw.rounded())
+        guard threshold > 0, !edges.isEmpty else { return (delta, nil) }
+        let sorted = targets.sorted()
+        var best: (dist: Double, delta: Int, snap: Int)?
+        for edge in edges {
+            for t in sorted {
+                let d = t - edge, dist = abs(Double(edge) + raw - Double(t))
+                guard dist <= threshold, accept(d) else { continue }
+                if best == nil || dist < best!.dist { best = (dist, d, t) }
+            }
+        }
+        return best.map { ($0.delta, $0.snap) } ?? (delta, nil)
+    }
+
+    /// TIMELINE-EDITING-01: targets for trimming item `id`, by the same family rule as moving it:
+    /// clips (video/image/audio) → 0, `extra`, every clip edge outside its linked group;
+    /// subtitles → 0, `extra`, clip edges and other subtitles; Spectrum items → 0, `extra`, clip edges and other Spectrum items.
+    public func trimSnapTargets(for id: UUID, extra: [Int] = []) -> Set<Int> {
+        var t = Set([0] + extra)
+        func add(_ s: Int, _ e: Int) { t.insert(s); t.insert(e) }
+        if subtitle(id) != nil {
+            for o in clips + audioClips { add(o.start, o.end) }
+            for o in subtitles where o.id != id { add(o.start, o.end) }
+        } else if spectrum(id) != nil {
+            for o in clips + audioClips { add(o.start, o.end) }
+            for o in spectra where o.id != id { add(o.start, o.end) }
+        } else {
+            let ids = Set(group(of: id).map(\.id))
+            for o in clips + audioClips where !ids.contains(o.id) { add(o.start, o.end) }
+        }
+        return t
+    }
+
     /// 타임라인 프레임 at에서 클립(과 연결된 짝)을 나눈다. 짝은 같은 원본 위치에서 나누어 어긋남(offset)이 그대로다.
     /// 왼쪽 조각 쌍은 원래 연결을, 오른쪽 조각 쌍은 새 연결을 갖는다. newIDs는 대상 클립의 (왼쪽, 오른쪽) ID. 레인은 그대로다.
     public func splitting(clip id: UUID, atFrame at: Int, newIDs: (UUID, UUID) = (UUID(), UUID())) throws -> Timeline {
@@ -1180,6 +1224,13 @@ extension Timeline {
     ///   그 레인의 기존 클립과 하나라도 겹치면 다음 레인을 본다. 원래 레인이 다르면 같은 대상 레인을 쓰지 않는다. 새 레인은 이 편집에 함께 들어간다.
     /// - 미디어가 이 타임라인에 없거나 원본 범위를 넘으면 거부(clipboardMismatch). 일부만 넣지 않는다.
     public func pasting(_ content: ClipboardContent, at: Int, newLaneName: (LaneKind) -> String) throws -> PasteResult {
+        try validatePaste(content, at: at)
+        // 연결: 묶음 안에서 영상 1 + 소리 1인 연결만 새 ID로 잇는다(짝이 묶음에 없으면 연결 없이 — 복사는 늘 짝을 함께 담는다)
+        let newLink = Self.pasteLinks(content)
+        return try pastingPlaced(content, at: at, newLink: newLink, newLaneName: newLaneName)
+    }
+    /// Clipboard admission shared by both paste modes (unchanged rules).
+    private func validatePaste(_ content: ClipboardContent, at: Int) throws {
         guard !content.isEmpty else { throw EditError.clipboardEmpty }
         guard at >= 0 else { throw EditError.badIndex }
         guard at <= Self.maxFrames else { throw EditError.frameLimit }
@@ -1193,11 +1244,15 @@ extension Timeline {
         }
         for c in content.video { guard isStillImage(c.mediaID) || (mediaHasVideo[c.mediaID] ?? true) else { throw EditError.clipboardMismatch } }
         for c in content.audio { guard mediaHasAudio[c.mediaID] ?? false else { throw EditError.clipboardMismatch } }
-        // 연결: 묶음 안에서 영상 1 + 소리 1인 연결만 새 ID로 잇는다(짝이 묶음에 없으면 연결 없이 — 복사는 늘 짝을 함께 담는다)
+    }
+    /// New link IDs for copied pairs (one video + one audio sharing a link).
+    private static func pasteLinks(_ content: ClipboardContent) -> [UUID: UUID] {
         var linkCount: [UUID: (v: Int, a: Int)] = [:]
         for c in content.video { if let l = c.link { linkCount[l, default: (0, 0)].v += 1 } }
         for c in content.audio { if let l = c.link { linkCount[l, default: (0, 0)].a += 1 } }
-        let newLink = Dictionary(uniqueKeysWithValues: linkCount.filter { $0.value == (1, 1) }.map { ($0.key, UUID()) })
+        return Dictionary(uniqueKeysWithValues: linkCount.filter { $0.value == (1, 1) }.map { ($0.key, UUID()) })
+    }
+    private func pastingPlaced(_ content: ClipboardContent, at: Int, newLink: [UUID: UUID], newLaneName: (LaneKind) -> String) throws -> PasteResult {
         let d = at - ((content.all.map(\.start) + content.subtitles.map(\.start)).min() ?? 0)
         var t = self
         var created: [UUID] = [], ids: [UUID: UUID] = [:]
@@ -1256,5 +1311,127 @@ extension Timeline {
         let out = t.rebuilt(video: t.clips + placedVideo, audio: t.audioClips + placedAudio, subtitles: t.subtitles + placedSubs, duration: max(t.durationFrames, end))
         guard out.isValid else { throw EditError.overlap }
         return PasteResult(timeline: out, ids: ids, createdLanes: created)
+    }
+
+    /// Overwrite paste result: the pasted IDs, lanes created only because no lane of a kind existed, and
+    /// how many existing items were shortened, split or removed.
+    public struct OverwritePasteResult: Sendable {
+        public let timeline: Timeline; public let ids: [UUID: UUID]; public let createdLanes: [UUID]; public let replacedItems: Int
+    }
+
+    /// TIMELINE-OVERWRITE-PASTE-01: same-lane overwrite paste. The copied group keeps its relative offsets with its
+    /// earliest start at `at`, on its original lanes (a missing original lane falls back to the first lane of that kind;
+    /// a lane is created only when no lane of that kind exists — never to avoid an overlap). On each destination lane,
+    /// exactly the pasted clips' timeline ranges are replaced: an existing clip or subtitle overlapping them keeps every
+    /// unaffected part (split at both boundaries; a piece starting at frame `a` gets `sourceIn + (a − start)`, images keep 0,
+    /// fades follow `ClipAudio.split`), fully covered items are removed, and nothing else moves (no ripple).
+    /// The leftmost piece keeps the original ID; other audio pieces inherit its lineage (`origin`), like splitting.
+    /// Linked pairs: a pair may change only if both members change and keep the same piece count; pieces are relinked
+    /// pairwise (the first pair keeps the link). Otherwise `overwriteBreaksLink` and nothing changes (all or nothing).
+    /// Spectrum items are not moved or edited (as with a non-ripple delete). Media files are never touched.
+    public func pastingOverwrite(_ content: ClipboardContent, at: Int, newLaneName: (LaneKind) -> String) throws -> OverwritePasteResult {
+        try validatePaste(content, at: at)
+        let newLink = Self.pasteLinks(content)
+        let d = at - ((content.all.map(\.start) + content.subtitles.map(\.start)).min() ?? 0)
+        var t = self
+        var created: [UUID] = [], ids: [UUID: UUID] = [:]
+        func destination(_ original: UUID?, _ kind: LaneKind) throws -> UUID {
+            if let o = original, t.laneInfo(o)?.kind == kind { return o }
+            if let l = t.lanesFromBoundary(kind).first?.id { return l }
+            let id = UUID()
+            t = try t.addingLane(kind, name: newLaneName(kind), id: id, outward: true)
+            created.append(id)
+            return id
+        }
+        var placedV: [Clip] = [], placedA: [Clip] = [], placedS: [SubtitleItem] = []
+        for (kind, src) in [(LaneKind.video, content.video), (.audio, content.audio)] {
+            for c in src {
+                let lane = try destination(c.lane, kind), nid = UUID()
+                ids[c.id] = nid
+                // 복사한 소리는 새 계보(2026-10-25): 원래 소스의 스펙트럼에 조용히 붙지 않는다
+                let placed = c.with(start: c.start + d, id: nid, link: .some(c.link.flatMap { newLink[$0] }), lane: .some(lane), origin: .some(nil))
+                if kind == .video { placedV.append(placed) } else { placedA.append(placed) }
+            }
+        }
+        for s in content.subtitles {
+            let lane = try destination(s.lane, .subtitle), nid = UUID()
+            ids[s.id] = nid
+            placedS.append(s.with(id: nid, lane: lane, start: s.start + d))
+        }
+        // Replaced ranges per destination lane.
+        var cuts: [UUID: [(Int, Int)]] = [:]
+        for c in placedV + placedA { if let l = c.lane { cuts[l, default: []].append((c.start, c.end)) } }
+        for s in placedS { cuts[s.lane, default: []].append((s.start, s.end)) }
+        /// The parts of [start, end) on `lane` left after removing the replaced ranges (sorted, nonempty).
+        func remaining(_ start: Int, _ end: Int, lane: UUID?) -> [(Int, Int)] {
+            guard let lane, let ranges = cuts[lane]?.sorted(by: { $0.0 < $1.0 }) else { return [(start, end)] }
+            var out: [(Int, Int)] = [], cursor = start
+            for (a, b) in ranges where b > cursor && a < end {
+                if a > cursor { out.append((cursor, min(a, end))) }
+                cursor = max(cursor, b)
+                if cursor >= end { break }
+            }
+            if cursor < end { out.append((cursor, end)) }
+            return out
+        }
+        func unchanged(_ parts: [(Int, Int)], _ start: Int, _ end: Int) -> Bool { parts.count == 1 && parts[0] == (start, end) }
+        /// Piece [a, b) of clip `c`.
+        func piece(_ c: Clip, _ a: Int, _ b: Int, id: UUID, link: UUID?, audioLane: Bool) -> Clip {
+            let k = a - c.start
+            var fades = c.audio
+            if var x = c.audio {
+                if k > 0 { x = x.split(at: k, length: c.length).right }
+                let rest = c.end - a
+                if b - a < rest { x = x.split(at: b - a, length: rest).left }
+                fades = x
+            }
+            let keepsID = id == c.id
+            return c.with(start: a, sourceIn: isStillImage(c.mediaID) ? 0 : c.sourceIn + k, length: b - a, id: id,
+                          link: .some(link), audio: .some(fades),
+                          origin: .some(keepsID ? c.origin : (audioLane ? c.lineageKey : nil)))
+        }
+        var keptV: [Clip] = [], keptA: [Clip] = [], replaced = 0
+        var handled = Set<UUID>()
+        let audioIDs = Set(t.audioClips.map(\.id))
+        for c in t.clips + t.audioClips where !handled.contains(c.id) {
+            handled.insert(c.id)
+            let parts = remaining(c.start, c.end, lane: c.lane)
+            let isAudio = audioIDs.contains(c.id)
+            if let p = t.partner(of: c.id) {
+                handled.insert(p.id)
+                let pParts = remaining(p.start, p.end, lane: p.lane)
+                let cSame = unchanged(parts, c.start, c.end), pSame = unchanged(pParts, p.start, p.end)
+                if cSame && pSame {
+                    if isAudio { keptA.append(c); keptV.append(p) } else { keptV.append(c); keptA.append(p) }
+                    continue
+                }
+                guard !cSame, !pSame, parts.count == pParts.count else { throw EditError.overwriteBreaksLink }
+                replaced += 2
+                for i in parts.indices {
+                    let link: UUID? = i == 0 ? c.link : UUID()
+                    let cp = piece(c, parts[i].0, parts[i].1, id: i == 0 ? c.id : UUID(), link: link, audioLane: isAudio)
+                    let pp = piece(p, pParts[i].0, pParts[i].1, id: i == 0 ? p.id : UUID(), link: link, audioLane: !isAudio)
+                    if isAudio { keptA.append(cp); keptV.append(pp) } else { keptV.append(cp); keptA.append(pp) }
+                }
+                continue
+            }
+            if unchanged(parts, c.start, c.end) { if isAudio { keptA.append(c) } else { keptV.append(c) }; continue }
+            replaced += 1
+            for (i, r) in parts.enumerated() {
+                let pc = piece(c, r.0, r.1, id: i == 0 ? c.id : UUID(), link: nil, audioLane: isAudio)
+                if isAudio { keptA.append(pc) } else { keptV.append(pc) }
+            }
+        }
+        var keptS: [SubtitleItem] = []
+        for s in t.subtitles {
+            let parts = remaining(s.start, s.end, lane: s.lane)
+            if unchanged(parts, s.start, s.end) { keptS.append(s); continue }
+            replaced += 1
+            for (i, r) in parts.enumerated() { keptS.append(s.with(id: i == 0 ? s.id : UUID(), start: r.0, length: r.1 - r.0)) }
+        }
+        let end = ((placedV + placedA).map(\.end) + placedS.map(\.end)).max() ?? 0
+        let out = t.rebuilt(video: keptV + placedV, audio: keptA + placedA, subtitles: keptS + placedS, duration: max(t.durationFrames, end))
+        guard out.isValid else { throw EditError.overlap }
+        return OverwritePasteResult(timeline: out, ids: ids, createdLanes: created, replacedItems: replaced)
     }
 }

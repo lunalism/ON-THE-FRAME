@@ -12,6 +12,16 @@ struct TimelinePane: View {
                 Text("타임라인").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
                 if let m = store.statusMessage { Text(m).font(.callout).foregroundStyle(.orange).lineLimit(1) }
                 Spacer()
+                // TIMELINE-EDITING-01: 스냅(자석). 옮기기·트림이 다른 클립 가장자리와 재생 헤드에 붙는다(화면 8 pt).
+                // The binding reads the store and writes through the controlled setter (rejected during a drag).
+                Toggle(isOn: Binding(get: { store.snapEnabled }, set: { store.setSnapEnabled($0) })) {
+                    Label("스냅", systemImage: "arrow.right.and.line.vertical.and.arrow.left")
+                }
+                .toggleStyle(.button).labelStyle(.iconOnly)
+                .help(store.snapEnabled ? "스냅 켜짐: 옮기기·트림이 다른 클립 가장자리와 재생 헤드에 붙습니다(누르면 끔)"
+                                        : "스냅 꺼짐: 옮기기·트림이 프레임 단위로만 움직입니다(누르면 켬)")
+                .accessibilityLabel(store.snapEnabled ? "스냅 켜짐" : "스냅 꺼짐")
+                .disabled(store.gestureBase != nil)
                 Menu {
                     Button("영상·소리 레인 쌍 추가") { store.addLanePair() }
                     Button("영상 레인 추가") { store.addLane(.video) }
@@ -56,6 +66,8 @@ struct TimelineDrawState: Equatable {
     var proposalStart: Int?, proposalOK: Bool, proposalID: UUID?, proposalLane: UUID?
     /// 끌어 옮기기에서 붙은 위치(안내선)
     var snap: Int?
+    /// TIMELINE-UI-POLISH-01: clip edges a Shift playhead snap landed on (vertical ▼/▲ marker pairs)
+    var snapMarkers: [ProjectStore.SnapMarker]
     /// 거부된 스펙트럼 트림 제안(2C-2, 같은 레인 겹침 — 빨간 상자): 항목과 제안 구간
     var trimRejectID: UUID?, trimRejectRange: Range<Int>?
     /// 찾을 수 없는 원본(미디어 id)
@@ -73,6 +85,7 @@ struct TimelineDrawState: Equatable {
         selectedLane = store.selectedLane
         playhead = store.playhead
         snap = store.snapGuide
+        snapMarkers = store.snapMarkers
         trimRejectID = store.spectrumTrimRejected?.id; trimRejectRange = store.spectrumTrimRejected?.range
         proposalStart = store.freeMoveProposal?.start; proposalOK = store.freeMoveProposal?.ok ?? true; proposalID = store.freeMoveProposal?.id; proposalLane = store.freeMoveProposal?.lane
         missing = Set(store.missingMedia.keys)
@@ -437,11 +450,8 @@ final class TimelineNSView: NSView {
         drawRuler(st, area: area)
         let t = st.timeline
         let rows = Self.layout(t.lanes)
-        for (l, r) in rows where l.kind == .video || l.kind == .audio {   // 자막·스펙트럼 레인의 빈 곳은 빈틈이 아니다(그 항목 없음)
-            for g in t.gaps(inLane: l.id) where g.upperBound >= fr.lowerBound && g.lowerBound <= fr.upperBound {
-                drawGap(NSRect(x: x(g.lowerBound), y: r.minY, width: CGFloat(g.count) * pixelsPerFrame, height: r.height), label: l.kind == .video ? "빈틈" : "무음", area: area)
-            }
-        }
+        // TIMELINE-UI-POLISH-01 (owner request): empty lane regions draw nothing extra (no dark fill, hatch or "빈틈"/"무음" label) —
+        // the plain timeline background, like empty subtitle/Spectrum lanes. Gaps themselves (`Timeline.gaps`) are unchanged.
         let top = rows.first?.rect.minY ?? Self.firstLaneY, bottom = rows.last?.rect.maxY ?? Self.firstLaneY
         if let by = Self.boundaryY(t.lanes) { Self.drawBoundary(y: by, from: 0, to: bounds.width) }
         if t.durationFrames > 0 {   // 타임라인 끝(길이)
@@ -501,6 +511,7 @@ final class TimelineNSView: NSView {
         if let f = st.snap {   // 붙은 위치 안내선(0 또는 다른 클립 경계)
             NSColor.systemYellow.setFill()
             NSRect(x: x(f) - 1, y: top - 6, width: 2, height: bottom - top + 12).fill()
+            drawSnapMarkers(st, frame: f)
         }
         if dropHover, let dp = dropPoint, let l = lane(atY: dp.y), let r = laneRect(l.id) {   // 놓일 시각(놓은 위치 그대로)
             NSColor.controlAccentColor.setFill()
@@ -526,22 +537,31 @@ final class TimelineNSView: NSView {
         tri.fill()
     }
 
-    private func drawGap(_ r: NSRect, label: String, area: NSRect) {
-        NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(rect: r).addClip()
-        let shown = r.intersection(area)
-        if !shown.isEmpty { NSColor.black.withAlphaComponent(0.55).setFill(); shown.fill() }
-        NSColor.secondaryLabelColor.withAlphaComponent(0.35).setStroke()
-        let hatch = NSBezierPath(); hatch.lineWidth = 1
-        // 빗금은 그릴 영역에 닿는 줄만(위치는 빈틈 시작 기준 8pt 간격 그대로 — 스크롤해도 무늬가 움직이지 않음)
-        let start = r.minX - r.height, skip = max(0, ((area.minX - r.height - start) / 8).rounded(.down))
-        var hx = start + skip * 8
-        let end = min(r.maxX, area.maxX)
-        while hx < end { hatch.move(to: NSPoint(x: hx, y: r.maxY)); hatch.line(to: NSPoint(x: hx + r.height, y: r.minY)); hx += 8 }
-        hatch.stroke()
-        NSGraphicsContext.restoreGraphicsState()
-        if r.width > 40, r.minX + 6 < area.maxX, r.minX + 60 > area.minX {
-            NSString(string: label).draw(at: NSPoint(x: r.minX + 6, y: r.minY + 4), withAttributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.secondaryLabelColor])
+    /// TIMELINE-UI-POLISH-01: marker triangle size (pt). Fits the 8 pt lane gap; drawn only, never hit-tested.
+    static let snapMarkerHalfWidth: CGFloat = 4, snapMarkerHeight: CGFloat = 5
+    /// Vertical marker pair for each snapped clip edge: ▼ just above the clip's top corner and ▲ just below its bottom
+    /// corner, both centred on the edge X and pointing at the clip (same for start and end edges). Markers whose clip was
+    /// removed or whose edge is no longer at the snapped frame are skipped.
+    static func snapMarkerRects(clip r: NSRect, edgeX ex: CGFloat) -> (above: NSRect, below: NSRect) {
+        let w = snapMarkerHalfWidth * 2, h = snapMarkerHeight
+        return (NSRect(x: ex - snapMarkerHalfWidth, y: r.minY - h, width: w, height: h), NSRect(x: ex - snapMarkerHalfWidth, y: r.maxY, width: w, height: h))
+    }
+    func snapMarkerGeometry(_ st: TimelineDrawState, frame f: Int) -> [(marker: ProjectStore.SnapMarker, above: NSRect, below: NSRect)] {
+        st.snapMarkers.compactMap { m in
+            guard m.frame == f, let c = st.timeline.clip(m.clip), (m.edge == .start ? c.start : c.end) == f else { return nil }
+            let r = Self.snapMarkerRects(clip: rect(c), edgeX: x(f))
+            return (marker: m, above: r.above, below: r.below)
+        }
+    }
+    private func drawSnapMarkers(_ st: TimelineDrawState, frame f: Int) {
+        NSColor.systemYellow.setFill()   // same accent as the snap guide
+        for g in snapMarkerGeometry(st, frame: f) {
+            let down = NSBezierPath()   // ▼ above the top corner, tip touching the clip
+            down.move(to: NSPoint(x: g.above.minX, y: g.above.minY)); down.line(to: NSPoint(x: g.above.maxX, y: g.above.minY))
+            down.line(to: NSPoint(x: g.above.midX, y: g.above.maxY)); down.close(); down.fill()
+            let up = NSBezierPath()   // ▲ below the bottom corner, tip touching the clip
+            up.move(to: NSPoint(x: g.below.minX, y: g.below.maxY)); up.line(to: NSPoint(x: g.below.maxX, y: g.below.maxY))
+            up.line(to: NSPoint(x: g.below.midX, y: g.below.minY)); up.close(); up.fill()
         }
     }
 
@@ -834,7 +854,7 @@ final class TimelineNSView: NSView {
         if store.gestureBase != nil { store.interruptGesture() }
         let p = convert(e.locationInWindow, from: nil)
         if p.y < Self.firstLaneY {
-            store.pauseForEdit(); drag = .scrub; store.seek(to: frame(atX: p.x)); return
+            store.pauseForEdit(); drag = .scrub; scrub(p, shift: e.modifierFlags.contains(.shift)); return
         }
         if store.tool == .cut {
             // 자르기 도구(D-030): 수정 키 없는 왼쪽 누름이 클립 본문에 있으면 그 프레임에서 한 번 자른다. 이어지는 끌기는 무시한다
@@ -886,7 +906,7 @@ final class TimelineNSView: NSView {
         autoscroll(with: e)
         switch drag {
         case .scrub:
-            store.seek(to: frame(atX: p.x))
+            scrub(p, shift: e.modifierFlags.contains(.shift))
         case .pending(let id, let p0):
             // 일반 끌기 = 옮기기(2026-10-11): 연결된 쌍·연결되지 않은 클립 모두 위치(와 같은 종류 레인)만 바꾼다. 리플·끼워 넣기 없음.
             guard abs(p.x - p0.x) > 4 || abs(p.y - p0.y) > 4 else { return }
@@ -902,8 +922,9 @@ final class TimelineNSView: NSView {
         case .free(let id, let x0):
             updateDragMove(id, p, from: x0)
         case .trim(let id, let edge, let x0):
-            let d = Int(((p.x - x0) / pixelsPerFrame).rounded())
-            store.updateTrim(id, edge: edge, delta: d)
+            // Same screen distance as moving (8 pt / zoom); the store applies the snap only when the magnet is on.
+            let raw = Double((p.x - x0) / pixelsPerFrame)
+            store.updateTrim(id, edge: edge, delta: Int(raw.rounded()), rawDelta: raw, snapFrames: Double(Self.snapDistance / pixelsPerFrame))
         case .fade(let id, let edge, let grab):
             // 손잡이를 잡은 곳 그대로(누른 곳과 손잡이 가운데의 거리를 뺀다): 페이드 인은 클립 시작에서, 페이드 아웃은 클립 끝에서 잰 프레임
             guard let c = store.gestureBase?.clip(id) else { return }
@@ -921,10 +942,22 @@ final class TimelineNSView: NSView {
         #endif
         switch drag {
         case .trim, .free, .fade: store.commitGesture()
+        case .scrub: store.endScrub()
         default: break
         }
         drag = .none
         needsDisplay = true
+    }
+    /// Last pointer position of a ruler scrub, so pressing or releasing Shift without moving re-evaluates the snap (TIMELINE-UI-POLISH-01).
+    private var lastScrubPoint: NSPoint?
+    override func flagsChanged(with e: NSEvent) {
+        if case .scrub = drag, let p = lastScrubPoint { scrub(p, shift: e.modifierFlags.contains(.shift)) }
+        super.flagsChanged(with: e)
+    }
+    /// Ruler scrub (TIMELINE-OVERWRITE-PASTE-01): the same frame as `frame(atX:)`; Shift + magnet snaps to clip boundaries (8 pt).
+    private func scrub(_ p: NSPoint, shift: Bool) {
+        lastScrubPoint = p
+        store.scrubPlayhead(raw: Double((p.x - Self.inset) / pixelsPerFrame), snapFrames: Double(Self.snapDistance / pixelsPerFrame), shift: shift)
     }
     /// 끌어 옮기기 갱신: 문서 보기 좌표의 가로 거리 → 프레임(확대 배율), 붙음 거리는 화면 8pt를 프레임으로 바꾼다
     private func updateDragMove(_ id: UUID, _ p: NSPoint, from x0: CGFloat) {
@@ -987,6 +1020,7 @@ final class TimelineNSView: NSView {
     override func cancelOperation(_ sender: Any?) {
         switch drag {
         case .trim, .free, .fade: store.cancelGesture(); drag = .none; needsDisplay = true
+        case .scrub: store.endScrub(); drag = .none; needsDisplay = true   // TIMELINE-UI-POLISH-01: Esc ends the scrub (playhead stays) and clears its guide/markers
         default: break
         }
     }

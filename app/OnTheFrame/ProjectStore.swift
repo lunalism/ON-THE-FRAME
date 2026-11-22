@@ -1249,7 +1249,8 @@ final class ProjectStore {
         clipClipboard = ClipClipboard(project: projectID, content: c, selected: id)
         statusMessage = !c.subtitles.isEmpty ? "자막을 복사했습니다." : (c.all.count > 1 ? "연결된 클립 \(c.all.count)개를 복사했습니다." : "클립을 복사했습니다.")
     }
-    /// 붙여넣기(⌘V): 재생 헤드에 복사한 묶음의 가장 이른 시작을 둔다. 한 단계(필요한 새 레인 포함). 붙여 넣은 클립(복사할 때 고른 클립의 복제)을 고른다.
+    /// 붙여넣기(⌘V): 재생 헤드에 복사한 묶음의 가장 이른 시작을 둔다. 한 단계. 붙여 넣은 클립(복사할 때 고른 클립의 복제)을 고른다.
+    /// TIMELINE-OVERWRITE-PASTE-01: 원래 레인에 덮어쓰기(겹친 구간만 바꾸고 양쪽 남은 부분은 지킴, 리플·겹침 회피용 새 레인 없음, `Timeline.pastingOverwrite`).
     func pasteAtPlayhead() {
         // 진행 중인 모양 조정·패널 글 입력을 먼저 한 단계로 넣는다(다른 문서 편집과 같은 경계, commit과 같음 — 2026-10-23 전체 검토:
         // 붙여넣기가 열린 조정 세션을 건너뛰어 조정한 모양이 사라지거나 실행 취소 순서가 어긋났다). 글 칸의 붙여넣기는 여기로 오지 않는다(KeyRouting).
@@ -1259,12 +1260,14 @@ final class ProjectStore {
         cancelPendingPress()
         pauseForEdit()
         do {
-            let r = try timeline.pasting(cb.content, at: playhead, newLaneName: newLaneName)
+            // TIMELINE-OVERWRITE-PASTE-01 (owner-approved): same-lane overwrite at the playhead, one undo step.
+            let r = try timeline.pastingOverwrite(cb.content, at: playhead, newLaneName: newLaneName)
             let focus = r.ids[cb.selected]
             history.apply(r.timeline, focus: focus)
             selection = focus
             linkCandidate = nil
-            statusMessage = r.createdLanes.isEmpty ? nil : "겹치지 않도록 새 레인 \(r.createdLanes.count)개에 붙여 넣었습니다."
+            statusMessage = r.replacedItems > 0 ? "겹친 구간을 덮어써 붙여 넣었습니다(기존 항목 \(r.replacedItems)개 조정)."
+                : (r.createdLanes.isEmpty ? nil : "해당 종류의 레인이 없어 새 레인 \(r.createdLanes.count)개에 붙여 넣었습니다.")
             timelineChanged()
         } catch let e as EditError {
             statusMessage = e.description
@@ -1655,6 +1658,7 @@ final class ProjectStore {
         commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         interruptGesture()   // 끝나지 않은 끌기가 남아 있으면 먼저 취소(새 끌기에 섞어 확정하지 않음, D-031)
         pauseForEdit()
+        if !snapMarkers.isEmpty { snapMarkers = [] }   // TIMELINE-UI-POLISH-01: scrub markers never carry into a clip drag
         selection = id
         previewHost?.spectrumOverlay.invalidate()
         history.beginGesture()
@@ -1682,7 +1686,30 @@ final class ProjectStore {
         history.updateGesture(t, focus: id)
         return t.subtitle(id)
     }
-    func updateTrim(_ id: UUID, edge: TrimEdge, delta: Int) {
+    /// TIMELINE-EDITING-01: `rawDelta` is the fractional pointer distance in frames. With snapping on, the
+    /// dragged edge snaps to the nearest target within `snapFrames` (0, other clip/item edges by the move rule,
+    /// the playhead); the existing trim rules (1-frame minimum, source bounds, overlap) then apply unchanged.
+    /// The guide is shown only when the applied edge actually lands on the target.
+    func updateTrim(_ id: UUID, edge: TrimEdge, delta: Int, rawDelta: Double? = nil, snapFrames: Double = 0) {
+        guard let base = gestureBase else { return }
+        var delta = delta, target: Int?
+        if snapEnabled, snapFrames > 0, let raw = rawDelta, let pos = Self.trimEdge(base, id, edge) {
+            let r = Timeline.nearestSnap(edges: [pos], raw: raw, threshold: snapFrames,
+                                         targets: base.trimSnapTargets(for: id, extra: [playhead]))
+            delta = r.delta; target = r.snap
+        }
+        applyTrim(id, edge: edge, delta: delta)
+        let guide = target.flatMap { gestureBase != nil && Self.trimEdge(timeline, id, edge) == $0 ? $0 : nil }
+        if snapGuide != guide { snapGuide = guide }
+    }
+    /// Edge position of a clip, subtitle or Spectrum item in `t`.
+    static func trimEdge(_ t: Timeline, _ id: UUID, _ edge: TrimEdge) -> Int? {
+        if let s = t.subtitle(id) { return edge == .start ? s.start : s.end }
+        if let s = t.spectrum(id) { return edge == .start ? s.start : s.end }
+        if let c = t.clip(id) { return edge == .start ? c.start : c.end }
+        return nil
+    }
+    private func applyTrim(_ id: UUID, edge: TrimEdge, delta: Int) {
         guard let base = gestureBase else { return }
         if let s = base.subtitle(id) {   // 자막 트림(리플 없음): 가장자리를 그대로 옮긴다. 1프레임·0·겹침 안으로 제한
             let ns = edge == .start ? max(0, min(s.start + delta, s.end - 1)) : s.start, ne = edge == .end ? max(s.start + 1, s.end + delta) : s.end
@@ -1728,11 +1755,12 @@ final class ProjectStore {
     /// 끌어 옮기기 미리 보기(2026-10-11: 연결된 쌍·연결되지 않은 클립 모두): 드래그 시작 위치 + delta, lane이 있으면 같은 종류의 그 레인으로.
     /// 연결된 짝은 같은 양만큼 옮기고(상대 위치 그대로) 자기 레인에 둔다. 묶음의 가장 이른 시작이 0보다 앞서지 않게 막는다.
     /// snapFrames > 0이면 0과 다른 클립 경계에 그 거리(프레임) 안에서 붙인다. 리플 없음, 원래 자리는 빈틈.
+    /// TIMELINE-EDITING-01: 재생 헤드도 붙는 곳이며, `snapEnabled`가 꺼져 있으면 붙지 않는다(정수 프레임 반올림만).
     /// 겹치면 원래 자리에 두고 제안 위치를 빨갛게 보인다(놓으면 아무것도 옮기지 않음).
     /// delta는 포인터에서 잰 소수 프레임(붙음 거리를 반올림 전 값으로 잰다).
     func updateFreeMove(_ id: UUID, delta: Double, lane: UUID? = nil, snapFrames: Double = 0) {
         if let base = gestureBase, let sub = base.subtitle(id) {   // 자막 옮기기(리플 없음): 자막 레인 사이에서만
-            let (d, snap) = base.snappedSubtitleDelta(id, delta: max(Double(-sub.start), delta), threshold: snapFrames)
+            let (d, snap) = base.snappedSubtitleDelta(id, delta: max(Double(-sub.start), delta), threshold: snapEnabled ? snapFrames : 0, extra: [playhead])
             let s = sub.start + d
             let l = lane.flatMap { base.laneInfo($0)?.kind == .subtitle ? $0 : nil } ?? sub.lane
             // 같은 프레임·레인이면 아무것도 바꾸지 않는다(§45.3): 프레임 사이의 포인터 움직임마다 관찰되는 값(기록·안내선·제안)을 다시 넣어
@@ -1751,7 +1779,7 @@ final class ProjectStore {
             return
         }
         if let base = gestureBase, let sp = base.spectrum(id) {   // 스펙트럼 옮기기(SP-1A 2C-1, 리플 없음): 스펙트럼 레인 사이에서만, 소스·모양·ID 그대로
-            let (d, snap) = base.snappedSpectrumDelta(id, delta: max(Double(-sp.start), delta), threshold: snapFrames)
+            let (d, snap) = base.snappedSpectrumDelta(id, delta: max(Double(-sp.start), delta), threshold: snapEnabled ? snapFrames : 0, extra: [playhead])
             let s = sp.start + d
             let l = lane.flatMap { base.laneInfo($0)?.kind == .spectrum ? $0 : nil } ?? sp.lane   // 다른 종류 레인 위면 원래 레인(새 레인을 만들지 않음)
             if let p = freeMoveProposal, p.id == id, p.start == s, p.lane == l, snapGuide == snap { return }   // 같은 프레임·레인이면 다시 넣지 않음(§45.3)
@@ -1762,7 +1790,7 @@ final class ProjectStore {
         }
         guard let base = gestureBase, let c = base.clip(id) else { return }
         let earliest = base.group(of: id).map(\.start).min() ?? c.start
-        let (d, snap) = base.snappedDelta(clip: id, delta: max(Double(-earliest), delta), threshold: snapFrames)
+        let (d, snap) = base.snappedDelta(clip: id, delta: max(Double(-earliest), delta), threshold: snapEnabled ? snapFrames : 0, extra: [playhead])
         let s = c.start + d
         let l = lane.flatMap { base.laneInfo($0)?.kind == base.lane(of: id) ? $0 : nil } ?? c.lane
         snapGuide = snap
@@ -1780,6 +1808,50 @@ final class ProjectStore {
     @ObservationIgnored private var spectrumTrimID: UUID?
     /// 끌어 옮기기 중 붙은 위치(프레임, 표시용 안내선). 붙지 않았으면 nil.
     private(set) var snapGuide: Int?
+    /// TIMELINE-EDITING-01: 스냅(자석) 켜기·끄기. 옮기기·트림 모두에 적용한다. 편집기 상태이며 프로젝트 파일에 저장하지 않는다(기본 켜짐 —
+    /// 이전의 늘 켜진 옮기기 붙음과 같다). 바꾸기는 `setSnapEnabled`만 한다(끌기 중에는 거부).
+    private(set) var snapEnabled = true
+    /// TIMELINE-EDITING-FIX-02: the only way to change the magnet. Rejected (false, value unchanged) during an
+    /// active drag, so a gesture's preview and commit always use one snapping state. No self-assignment.
+    @discardableResult func setSnapEnabled(_ on: Bool) -> Bool {
+        guard gestureBase == nil else { return false }
+        if snapEnabled != on { snapEnabled = on }
+        if !on, !snapMarkers.isEmpty { snapMarkers = []; snapGuide = nil }   // TIMELINE-UI-POLISH-01: a Shift-scrub snap ends with the magnet
+        return true
+    }
+    /// TIMELINE-OVERWRITE-PASTE-01: ruler scrub to `raw` (fractional frames from the pointer). Ordinary scrubbing seeks the
+    /// nearest frame exactly as before. With the magnet on and Shift held, the playhead snaps to the nearest clip start/end
+    /// on any lane within `snapFrames` (same rule as `Timeline.nearestSnap`) and shows the guide; Shift alone does nothing.
+    func scrubPlayhead(raw: Double, snapFrames: Double, shift: Bool) {
+        var frame = Int(raw.rounded()), guide: Int?
+        if shift, snapEnabled, snapFrames > 0, gestureBase == nil {
+            var targets = Set<Int>()
+            for c in timeline.clips + timeline.audioClips { targets.insert(c.start); targets.insert(c.end) }
+            if let s = Timeline.nearestSnap(edges: [0], raw: raw, threshold: snapFrames, targets: targets).snap { frame = s; guide = s }
+        }
+        if gestureBase == nil, snapGuide != guide { snapGuide = guide }
+        // TIMELINE-UI-POLISH-01: the boundaries the playhead actually snapped to (display only; the frame choice above is unchanged).
+        let markers = gestureBase == nil ? guide.map { Self.snapEdges(timeline, frame: $0) } ?? [] : []
+        if snapMarkers != markers { snapMarkers = markers }
+        seek(to: frame)
+    }
+    /// Ends a ruler scrub: removes its guide and edge markers (gesture guides are cleared by their own commit/cancel).
+    func endScrub() {
+        if gestureBase == nil, snapGuide != nil { snapGuide = nil }
+        if !snapMarkers.isEmpty { snapMarkers = [] }
+    }
+    /// TIMELINE-UI-POLISH-01: one clip edge that a Shift playhead snap landed on (display only, not saved).
+    struct SnapMarker: Equatable { let clip: UUID; let lane: UUID?; let edge: TrimEdge; let frame: Int }
+    /// Edge markers of the current Shift playhead snap: every video/audio clip (the scrub snap targets) whose start or
+    /// end equals the snapped frame, in timeline order. Empty when the playhead is not snapped.
+    private(set) var snapMarkers: [SnapMarker] = []
+    /// Clip edges at `frame` among the Shift-scrub targets (video and audio clips on any lane).
+    static func snapEdges(_ t: Timeline, frame: Int) -> [SnapMarker] {
+        (t.clips + t.audioClips).compactMap { c in
+            c.start == frame ? SnapMarker(clip: c.id, lane: c.lane, edge: .start, frame: frame)
+                : c.end == frame ? SnapMarker(clip: c.id, lane: c.lane, edge: .end, frame: frame) : nil
+        }
+    }
     /// 끼워 넣기 이동(리플). 2026-10-11부터 일반 끌기에서는 쓰지 않는다(이전 자체 검사의 저장소 경로로만 남김).
     func updateMove(_ id: UUID, toIndex: Int) {
         guard let base = gestureBase else { return }

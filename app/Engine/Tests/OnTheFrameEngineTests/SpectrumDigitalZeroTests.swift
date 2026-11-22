@@ -192,6 +192,36 @@ final class SpectrumDigitalZeroTests: XCTestCase {
         }
     }
 
+    /// SPECTRUM-HUE-DOT-FIX-01 (characterization, no renderer change): Hue interpolation only recolors existing
+    /// coverage. Zero dots, tiny positive bars and normal bars cover exactly the same pixels with and without Hue,
+    /// so baseline dots seen with Hue come from the geometry (valid-zero dots / genuine short bars), not the color field.
+    func testHueSweepRecolorsWithoutChangingZeroOrLowAmplitudeCoverage() throws {
+        let r = try SpectrumFrameRenderer(width: 1920, height: 1080)
+        // band centres x = 192 + (i + 0.5) × 192; mirrored, 6 px thick, 400 px maximum height
+        let v: [Float] = [0, 0.00001, 0.002, 0.01, 0.5, 0, 0.3, 0]
+        for mode in SpectrumFrameRendererTests.modes {
+            var s = style(.mirrored); s.mode = mode
+            s.red = 255; s.green = 0; s.blue = 0; s.outsideRGB = .init(red: 0, green: 0, blue: 255)
+            s.hueInterpolationDegrees = 0
+            let plain = try XCTUnwrap(r.render(bands: v, style: s))
+            s.hueInterpolationDegrees = 180
+            let hue = try XCTUnwrap(r.render(bands: v, style: s))
+            XCTAssertEqual(plain.drawRect, hue.drawRect, "\(mode)")
+            let a = SpectrumFrameRendererTests.bytes(plain.image), b = SpectrumFrameRendererTests.bytes(hue.image)
+            XCTAssertEqual(a.count, b.count)
+            let alphaA = stride(from: 3, to: a.count, by: 4).map { a[$0] }, alphaB = stride(from: 3, to: b.count, by: 4).map { b[$0] }
+            XCTAssertEqual(alphaA, alphaB, "\(mode): Hue never adds or removes coverage")
+            XCTAssertNotEqual(a, b, "\(mode): Hue does change color")
+            guard mode == .digital else { continue }
+            XCTAssertEqual(pixel(hue, 288, 540)[3], 255, "valid zero band: approved dot (SPECTRUM-ZERO-01)")
+            XCTAssertEqual(pixel(hue, 480, 542)[3], 0, "0.00001 × 400 px: no dot and no amplitude floor")
+            XCTAssertGreaterThan(pixel(hue, 672, 540)[3], 0, "0.002 × 400 px = 0.8 px each side: genuine short bar stays visible")
+            XCTAssertEqual(pixel(hue, 672, 536)[3], 0, "short bar keeps its real height")
+            XCTAssertEqual(pixel(hue, 864, 537)[3], 255, "0.01 × 400 px = 4 px each side")
+        }
+        XCTAssertEqual(v, [0, 0.00001, 0.002, 0.01, 0.5, 0, 0.3, 0], "rendering never changes analysis data")
+    }
+
     func testMaximumHeightZeroUsesInsideWithoutDivisionForBothModes() throws {
         let r = try SpectrumFrameRenderer(width: 1920, height: 1080)
         let input: [Float] = [0, 0.125, 0.25, 0.5, 0.75, 1, 0.5, 0]
