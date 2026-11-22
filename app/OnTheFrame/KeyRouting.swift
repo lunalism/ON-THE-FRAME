@@ -49,7 +49,7 @@ enum KeyRouting {
         return a
     }
 
-    enum CommandAction: Equatable { case split, undo, redo, export, newProject, openProject, save, saveAs, copy, paste }
+    enum CommandAction: Equatable { case split, undo, redo, export, newProject, openProject, save, saveAs, copy, paste, verticalZoomIn, verticalZoomOut }
 
     /// ⌘ 조합 → 명령. 글자는 수정 키를 뺀 문자로 맞추고, 한글 등 라틴 문자가 아닌 입력 소스에서는 키 코드(ANSI)로 맞춘다.
     static func commandAction(keyCode: UInt16, charactersIgnoringModifiers: String?, modifiers: NSEvent.ModifierFlags) -> CommandAction? {
@@ -69,6 +69,12 @@ enum KeyRouting {
         }
         if mods == [.command, .shift], letter("z", 6) { return .redo }
         if mods == [.command, .shift], letter("s", 1) { return .saveAs }
+        // 레인 세로 확대(LANE-VERTICAL-ZOOM-01): ⌥⌘= 확대, ⌥⌘− 축소. "+"로 누른 경우(⇧⌥⌘=)와 숫자 키패드 +/−도 같다.
+        // 라틴 입력 소스는 글자로, 한글 등은 키 코드(= 24, − 27, 키패드 + 69, 키패드 − 78)로 맞춘다. 가로 확대(슬라이더)와는 별개다.
+        if mods == [.command, .option] || mods == [.command, .option, .shift] {
+            if keyCode == 69 || (latin ? (c == "=" || c == "+") : keyCode == 24) { return .verticalZoomIn }
+            if mods == [.command, .option], keyCode == 78 || (latin ? c == "-" : keyCode == 27) { return .verticalZoomOut }
+        }
         return nil
     }
 
@@ -173,9 +179,15 @@ enum KeyRouting {
             case .undo: NSApp.sendAction(Selector(("undo:")), to: nil, from: nil); return nil
             case .redo: NSApp.sendAction(Selector(("redo:")), to: nil, from: nil); return nil
             case .split, .export, .newProject, .openProject, .save, .saveAs, .copy, .paste: return e   // 텍스트 입력 중: 메뉴(응답자 체인 → 텍스트 복사·붙여넣기)로
+            case .verticalZoomIn, .verticalZoomOut: return e   // 텍스트 입력 중에는 레인 확대를 하지 않는다(이벤트는 그대로 보낸다)
             }
         }
         guard editorAcceptsShortcuts(store) else { return e }
+        if cmd == .verticalZoomIn || cmd == .verticalZoomOut {
+            // 화면 상태만 바꾼다(편집 기록 아님). 누르고 있으면 이어서 확대·축소한다. 끌기 중이거나 한도에 닿았으면 경고음만.
+            if !store.verticalZoom(step: cmd == .verticalZoomIn ? 1 : -1) { NSSound.beep() }
+            return nil
+        }
         if e.isARepeat { return nil }   // 누르고 있어도 한 번
         var done = false
         switch cmd {
@@ -191,6 +203,7 @@ enum KeyRouting {
         case .saveAs: if store.gestureBase == nil { store.saveProject(saveAs: true); done = true }
         case .copy: if store.canCopy { store.copySelection(); done = true } else if store.selectedSpectrum != nil { store.statusMessage = ProjectStore.spectrumEditUnsupported }   // 스펙트럼 복사 없음(2B-2): 경고음 + 안내
         case .paste: if store.canPaste { store.pasteAtPlayhead(); done = true } else if store.clipClipboard == nil { store.statusMessage = EditError.clipboardEmpty.description }
+        case .verticalZoomIn, .verticalZoomOut: done = true   // 위에서 이미 처리했다
         }
         if !done { NSSound.beep() }   // 꺼진 동작: 메뉴 키 등가물과 같이 경고음만
         return nil

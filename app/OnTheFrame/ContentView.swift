@@ -13,7 +13,7 @@ struct ContentView: View {
         // 편집기 배치(A-012): 위 패널 70% · 타임라인 30%, 위는 목록 20% · 프리뷰 60% · 정보 20%(나눔선 두께 제외).
         // 나눔선을 끌면 비율을 바꾸고 기억한다(EditorLayout). 패널은 최소 크기를 지키고 안에서 스크롤한다.
         GeometryReader { g in
-            let sp = layout.split(for: g.size)
+            let sp = layout.split(for: g.size, lanes: store.timeline.lanes)   // 레인이 모두 보이도록 타임라인 자동 높이(LANE-VERTICAL-ZOOM-01)
             let availW = max(1, g.size.width - 2 * EditorLayout.divider), availH = max(1, g.size.height - EditorLayout.divider)
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
@@ -37,7 +37,7 @@ struct ContentView: View {
                 SplitDivider(axis: .horizontal, help: "타임라인 높이") { start, d in
                     let h = min(max(start * availH + d, EditorLayout.minUpper), availH - EditorLayout.minTimeline)
                     layout.upperFraction = Double(h / availH)
-                } begin: { layout.upperFraction } end: { layout.saveFractions() }
+                } begin: { Double(sp.upper / availH) } end: { layout.saveFractions() }   // 보이는 위치에서 시작(자동 타임라인 높이 포함, LANE-VERTICAL-ZOOM-01)
                 TimelinePane(store: store).frame(height: sp.timeline)
             }
             .onAppear { layout.lastContentSize = g.size; layout.lastSplit = sp }

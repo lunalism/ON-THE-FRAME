@@ -102,6 +102,12 @@ struct OnTheFrameApp: App {
                 Button("오디오 레인 추가") { store.addLane(.audio) }.disabled(store.gestureBase != nil)
                 Button("자막 레인 추가") { store.addLane(.subtitle) }.disabled(store.gestureBase != nil)
                 Divider()
+                // 레인 세로 확대(LANE-VERTICAL-ZOOM-01): 대상은 선택으로 정한다(없음 = 모든 레인, 레인 = 그 레인, 클립 = 그 클립의 레인).
+                // 키는 KeyRouting이 처리하므로 메뉴 키 등가물로 두지 않고 제목에만 적는다(한 번 누름 = 한 번 동작).
+                Button("레인 세로 확대  ⌥⌘=") { store.verticalZoom(step: 1) }.disabled(store.gestureBase != nil)
+                Button("레인 세로 축소  ⌥⌘−") { store.verticalZoom(step: -1) }.disabled(store.gestureBase != nil)
+                Button("모든 레인 맞춤") { store.fitAllLanes() }.disabled(store.gestureBase != nil)
+                Divider()
                 // 자막(2026-10-22): 재생 헤드에 기본 길이(3초) 자막. 기본 단축키 없음. 자막 레인이 없으면 S1을 함께 만든다.
                 Button("자막 추가") { store.addSubtitleAtPlayhead() }.disabled(store.gestureBase != nil || !store.fileCommandsAvailable)
             }
@@ -371,6 +377,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if args.contains("-OTFStickyRulerTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {   // TIMELINE-STICKY-RULER-01, six-lane start
             Task { await StickyRulerSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFLaneZoomTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {   // LANE-VERTICAL-ZOOM-01, six-lane start
+            Task { await LaneZoomSelfTest.run(folder: folder) }
             return
         }
         if args.contains("-OTFSpectrumOverlayTest") || args.contains("-OTFSpectrumOverlayManual"),

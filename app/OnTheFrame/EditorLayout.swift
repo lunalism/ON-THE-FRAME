@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import OnTheFrameEngine
 
 /// 창·편집기 배치(A-012).
 /// - 처음 실행(저장된 위치 없음): 바깥 창을 대상 화면의 쓸 수 있는 영역(메뉴 막대·Dock 제외, visibleFrame, 논리 포인트) 너비·높이의 70%로,
@@ -146,12 +147,50 @@ final class EditorLayout {
     // MARK: 나눔 계산
 
     struct Split: Equatable { var media: CGFloat; var preview: CGFloat; var inspector: CGFloat; var upper: CGFloat; var timeline: CGFloat }
+
+    // MARK: 타임라인 자동 높이(LANE-VERTICAL-ZOOM-01)
+    //
+    // 처음 맞춤(Auto Fit): 사용자가 "타임라인 높이" 나눔선을 옮긴 적이 없으면(`upperIsDefault`) 레인이 모두 보이도록 타임라인 패널에
+    // 높이를 더 준다. 규칙은 창 크기와 레인 목록에서 바로 계산한다(저장하지 않는 화면 배치):
+    // - 한도(`maxAutoTimelineFraction`, 위 패널 최소 높이) 안에서 읽을 수 있는 최소 레인 높이로라도 다 들어갈 때만 키운다.
+    // - 키울 때는 모든 레인이 기본 높이로 들어가는 높이까지(한도까지). 기본 비율의 타임라인보다 줄이지 않는다.
+    // - 다 들어갈 수 없는 작은 창은 기본 비율 그대로 두고 타임라인 안에서 세로 스크롤한다.
+    // 레인 높이 자체(배율)는 `LaneZoom`이 실제로 보이는 레인 영역에 맞춰 정한다.
+
+    /// 타임라인 패널에서 레인 영역 밖의 높이(타임라인 툴바 줄·구분선·안내 글). `TimelinePane`이 실제 배치에서 재서 알려 준다.
+    var timelineChrome: CGFloat = 36
+    /// 자동 높이가 타임라인에 줄 수 있는 가장 큰 몫(위 패널·프리뷰가 절반 가까이 남는다)
+    static let maxAutoTimelineFraction: CGFloat = 0.55
+    /// 위 패널 비율이 기본값인가(사용자가 "타임라인 높이" 나눔선을 옮기지 않았거나 기본 배치로 되돌렸다)
+    var upperIsDefault: Bool { abs(upperFraction - Self.defaultUpper) < 0.0005 }
+    /// 기본 비율만으로 정한 위 패널 높이(자동 높이 없음)
+    func baseUpper(availH: CGFloat) -> CGFloat {
+        min(max(availH * upperFraction, Self.minUpper), max(Self.minUpper, availH - Self.minTimeline))
+    }
+    /// 자동 높이가 줄 수 있는 가장 큰 타임라인 패널 높이
+    static func maxAutoTimeline(availH: CGFloat) -> CGFloat { max(0, min(availH * maxAutoTimelineFraction, availH - minUpper)) }
+    /// 레인 목록에 필요한 타임라인 패널 높이: 모든 레인이 기본 높이일 때(`full`)와 최소 높이일 때(`minimum`)
+    func timelineNeed(_ lanes: [Lane]) -> (full: CGFloat, minimum: CGFloat) {
+        ((LaneZoom.neededHeight(lanes, scale: 1) + timelineChrome).rounded(.up),
+         (LaneZoom.neededHeight(lanes, scale: LaneZoom.minScale) + timelineChrome).rounded(.up))
+    }
+    /// 위 패널 높이: 기본 비율, 또는 나눔선이 기본이고 한도 안에서 최소 높이가 들어가면 타임라인이 커진 값
+    func upperHeight(availH: CGFloat, lanes: [Lane]?) -> CGFloat {
+        let base = baseUpper(availH: availH)
+        guard let lanes, !lanes.isEmpty, upperIsDefault else { return base }
+        let need = timelineNeed(lanes), maxPane = Self.maxAutoTimeline(availH: availH)
+        guard maxPane >= need.minimum else { return base }
+        let timeline = max(availH - base, min(need.full, maxPane))
+        return max(0, availH - timeline)
+    }
+
     /// 내용 크기 → 패널 크기(나눔선 두께 제외한 비율, 최소 크기 지킴). 접힌 패널은 0이고 그 나눔선도 없으며, 남는 폭은 프리뷰가 쓴다.
     /// 비율의 기준 폭은 접힘과 무관하게 (너비 − 나눔선 2개)라, 펼치면 접기 전 너비로 돌아온다(창 크기가 같으면).
-    func split(for size: CGSize) -> Split {
+    /// `lanes`를 주면(편집기 화면) 타임라인 자동 높이를 적용한다. 주지 않으면 비율만 쓴다.
+    func split(for size: CGSize, lanes: [Lane]? = nil) -> Split {
         let d = Self.divider
         let availH = max(0, size.height - d)
-        let upper = min(max(availH * upperFraction, Self.minUpper), max(Self.minUpper, availH - Self.minTimeline))
+        let upper = upperHeight(availH: availH, lanes: lanes)
         let availW = max(0, size.width - 2 * d)
         var m = mediaCollapsed ? 0 : max(Self.minMedia, availW * mediaFraction), i = inspectorCollapsed ? 0 : max(Self.minInspector, availW * inspectorFraction)
         let over = Self.minPreview - (availW - m - i)

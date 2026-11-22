@@ -8,6 +8,9 @@ struct TimelinePane: View {
 
     var body: some View {
         VStack(spacing: 0) {
+          // LANE-VERTICAL-ZOOM-01: 레인 영역 위의 줄(툴바·안내 글·구분선)을 한 묶음으로 두고 그 높이를 잰다. 편집기 배치가 이 값으로
+          // 레인이 모두 보이는 타임라인 패널 높이를 계산한다(`EditorLayout.timelineChrome`).
+          VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Text("타임라인").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
                 if let m = store.statusMessage { Text(m).font(.callout).foregroundStyle(.orange).lineLimit(1) }
@@ -42,8 +45,13 @@ struct TimelinePane: View {
                     .padding(.horizontal, 10)
             }
             Divider()
+          }
+          .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
+              if h > 0, abs(h - EditorLayout.shared.timelineChrome) > 0.5 { EditorLayout.shared.timelineChrome = h }
+          }
             ZStack {
-                TimelineRepresentable(store: store, state: TimelineDrawState(store: store), pixelsPerFrame: store.timelineZoom)
+                TimelineRepresentable(store: store, state: TimelineDrawState(store: store), pixelsPerFrame: store.timelineZoom,
+                                      laneZoomRevision: LaneZoom.shared.revision)
                 if store.timeline.isEmpty && store.durationFrames == 0 {
                     Text(store.assets.isEmpty ? "영상·소리 파일을 가져온 뒤 여기로 끌어 놓거나 목록의 + 단추를 누르세요"
                                               : "왼쪽 목록의 미디어를 레인에 끌어 놓거나 + 단추를 누르세요")
@@ -104,6 +112,8 @@ struct TimelineRepresentable: NSViewRepresentable {
     let store: ProjectStore
     let state: TimelineDrawState
     let pixelsPerFrame: Double
+    /// LANE-VERTICAL-ZOOM-01: changes whenever a lane height changes, so SwiftUI lays the timeline out again
+    let laneZoomRevision: Int
 
     func makeNSView(context: Context) -> TimelineContainerView { TimelineContainerView(store: store) }
     func updateNSView(_ c: TimelineContainerView, context: Context) {
@@ -113,6 +123,7 @@ struct TimelineRepresentable: NSViewRepresentable {
         // 가로 확대(2026-10-24, 소유자 요청): 확대 배율이 바뀌면 기준 시각을 보이는 영역의 같은 가로 자리에 둔다(아래 zoomAnchor)
         let anchor = oldPPF != newPPF ? c.zoomAnchor(playhead: state.playhead, oldPPF: oldPPF) : nil
         v.pixelsPerFrame = newPPF
+        c.updateAutoFit()   // LANE-VERTICAL-ZOOM-01: lanes may have changed — fit before the document height is set below
         let w = max(sv.contentSize.width, TimelineNSView.inset * 2 + CGFloat(state.timeline.durationFrames) * v.pixelsPerFrame + 200)
         v.setFrameSize(NSSize(width: w, height: max(sv.contentSize.height, TimelineNSView.contentHeight(state.timeline.lanes))))
         if let anchor { c.applyZoomAnchor(anchor, ppf: newPPF) }
@@ -121,6 +132,7 @@ struct TimelineRepresentable: NSViewRepresentable {
         c.header.lanes = state.timeline.lanes
         c.header.selectedLane = state.selectedLane
         c.header.needsDisplay = true
+        c.header.syncZoomControls()
         c.ruler.needsDisplay = true   // TIMELINE-STICKY-RULER-01: same state, zoom and playhead as the lane content
     }
 }
@@ -134,7 +146,9 @@ final class TimelineContainerView: NSView {
     /// `rulerHeight` strip of the scroll area (the same strip the lane header keeps free), so vertical scrolling moves only the
     /// lane rows under it. It draws and scrubs through `timelineView` with the lane content's horizontal scroll origin.
     let ruler: TimelineRulerView
+    let store: ProjectStore
     init(store: ProjectStore) {
+        self.store = store
         header = LaneHeaderView(store: store)
         timelineView = TimelineNSView(store: store)
         ruler = TimelineRulerView(timelineView: timelineView, scrollView: scrollView)
@@ -211,6 +225,34 @@ final class TimelineContainerView: NSView {
         // LANE-SCROLL-CLIP-FIX-01: after a resize the clip view may clamp its scroll origin; keep the header rows on the same y.
         if header.verticalOffset != scrollView.contentView.bounds.minY { header.verticalOffset = scrollView.contentView.bounds.minY; header.needsDisplay = true }
         layoutRuler()
+        if updateAutoFit() { refreshLaneGeometry() }   // LANE-VERTICAL-ZOOM-01: the visible lane area may have changed
+    }
+
+    // MARK: 처음 맞춤(Auto Fit, LANE-VERTICAL-ZOOM-01)
+    //
+    // 자동 맞춤 상태(`LaneZoom.autoFit`, 수동 확대 전·"모두 맞춤" 뒤)에서만 한다. 실제로 보이는 레인 영역 높이(스크롤 영역의 clip view)에
+    // 모든 레인이 들어가도록 배율을 최소(0.7)…1 사이로 정한다. 최소 배율로도 넘치면 그 배율로 두고 세로 스크롤한다.
+    // 타임라인 패널 자체의 높이는 편집기 배치(`EditorLayout.upperHeight`)가 같은 레인 목록으로 정한다.
+    // 배치·상태 갱신 안에서 바로 계산하므로(관찰 상태를 바꾸지 않음) 같은 배치 패스에서 레인 머리·내용·문서 높이가 함께 맞는다.
+    // 끌기 중에는 하지 않는다(끝난 뒤의 상태 갱신·배치에서 다시 한다).
+
+    /// 보이는 레인 영역 높이(눈금자 띠 포함, 가로 스크롤 막대 제외)
+    var visibleLaneHeight: CGFloat { scrollView.contentView.frame.height }
+    /// 자동 맞춤 배율을 지금 보이는 영역과 레인 목록으로 다시 정한다. 바뀌었으면 true(호출 쪽이 `refreshLaneGeometry()`로 반영).
+    @discardableResult
+    func updateAutoFit() -> Bool {
+        let zoom = LaneZoom.shared
+        guard zoom.autoFit, window != nil, bounds.height > 0, store.gestureBase == nil else { return false }
+        return zoom.updateFit(timelineView.lanes, visibleHeight: visibleLaneHeight)
+    }
+    /// 레인 높이가 바뀐 뒤: 문서 보기 높이·그리기·레인 머리·커서 영역을 새 높이로 맞춘다(클립 시각·가로 좌표는 건드리지 않는다).
+    func refreshLaneGeometry() {
+        let v = timelineView
+        v.setFrameSize(NSSize(width: v.frame.width, height: max(scrollView.contentSize.height, TimelineNSView.contentHeight(v.lanes))))
+        v.needsDisplay = true
+        header.needsDisplay = true
+        header.syncZoomControls()
+        window?.invalidateCursorRects(for: v)
     }
 }
 
@@ -293,6 +335,7 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
         clipsToBounds = true
         editorClip.clipsToBounds = true
         addSubview(editorClip)
+        setUpZoomControls()
     }
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
@@ -302,7 +345,72 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
         super.layout()
         editorClip.frame = laneViewport
         if let f = editor, let id = editingLane { f.frame = editorFrameInClip(id) }
+        layoutZoomControls()
     }
+
+    // MARK: 세로 확대 조작(LANE-VERTICAL-ZOOM-01)
+    //
+    // 레인 머리 맨 위의 고정 띠(눈금자 왼쪽, 높이 24 pt — 세로로 스크롤해도 남는 빈 칸)에 둔다: 축소 · 슬라이더 · 확대 · 모두 맞춤.
+    // 대상은 선택으로 정한다(`ProjectStore.verticalZoomTarget`): 선택 없음 = 모든 레인, 레인 선택 = 그 레인, 클립 선택 = 그 클립의 레인.
+    // 단추·슬라이더는 단축키와 같은 저장소 함수를 부른다. 초점을 가져가지 않으므로 타임라인 단축키와 글 입력에 영향이 없다.
+    let zoomOutButton = NSButton(), zoomInButton = NSButton(), fitButton = NSButton(), zoomSlider = NSSlider()
+    private func setUpZoomControls() {
+        func configure(_ b: NSButton, symbol: String, fallback: String, label: String, action: Selector) {
+            b.isBordered = false
+            b.bezelStyle = .regularSquare
+            if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: label) {
+                b.image = img; b.imagePosition = .imageOnly; b.imageScaling = .scaleProportionallyDown
+            } else {
+                b.title = fallback; b.font = .systemFont(ofSize: 11, weight: .semibold)
+            }
+            b.target = self; b.action = action
+            b.toolTip = label; b.setAccessibilityLabel(label)
+            b.refusesFirstResponder = true
+            b.controlSize = .small
+            addSubview(b)
+        }
+        configure(zoomOutButton, symbol: "minus", fallback: "−", label: "레인 세로 축소 (⌥⌘−)", action: #selector(zoomOutPressed(_:)))
+        configure(zoomInButton, symbol: "plus", fallback: "+", label: "레인 세로 확대 (⌥⌘=)", action: #selector(zoomInPressed(_:)))
+        configure(fitButton, symbol: "arrow.up.and.down.square", fallback: "↕", label: "모든 레인 맞춤(자동 높이로 되돌리기)", action: #selector(fitPressed(_:)))
+        zoomSlider.minValue = Double(LaneZoom.minScale); zoomSlider.maxValue = Double(LaneZoom.maxScale)
+        zoomSlider.doubleValue = 1
+        zoomSlider.isContinuous = true
+        zoomSlider.controlSize = .mini
+        zoomSlider.target = self; zoomSlider.action = #selector(zoomSliderChanged(_:))
+        zoomSlider.refusesFirstResponder = true
+        zoomSlider.setAccessibilityLabel("레인 세로 확대 배율")
+        addSubview(zoomSlider)
+        syncZoomControls()
+    }
+    /// 고정 띠 안의 자리(레인 머리 폭 112 pt 기준): 축소 3–21 · 슬라이더 23–69 · 확대 71–89 · 맞춤 91–109
+    private func layoutZoomControls() {
+        let h = TimelineNSView.rulerHeight - 1, side: CGFloat = 18, y = ((h - side) / 2).rounded()
+        zoomOutButton.frame = NSRect(x: 3, y: y, width: side, height: side)
+        zoomSlider.frame = NSRect(x: 23, y: ((h - 16) / 2).rounded(), width: max(0, bounds.width - 66), height: 16)
+        zoomInButton.frame = NSRect(x: bounds.width - 41, y: y, width: side, height: side)
+        fitButton.frame = NSRect(x: bounds.width - 21, y: y, width: side, height: side)
+    }
+    /// 조작의 값·사용 가능 상태·도움말을 지금 대상과 배율에 맞춘다(선택·레인·배율이 바뀔 때마다)
+    func syncZoomControls() {
+        let zoom = LaneZoom.shared, target = store.verticalZoomTarget
+        let scale = zoom.scale(of: target, lanes: lanes)
+        if abs(CGFloat(zoomSlider.doubleValue) - scale) > 0.0005 { zoomSlider.doubleValue = Double(scale) }
+        let idle = store.gestureBase == nil
+        zoomOutButton.isEnabled = idle && scale > LaneZoom.minScale + 0.0005
+        zoomInButton.isEnabled = idle && scale < LaneZoom.maxScale - 0.0005
+        zoomSlider.isEnabled = idle
+        fitButton.isEnabled = idle
+        let name: String
+        switch target {
+        case .all: name = "모든 레인"
+        case .lane(let id): name = (lanes.first { $0.id == id }.map { "\(Timeline(lanes: lanes).laneLabel($0.id)) 레인" }) ?? "모든 레인"
+        }
+        zoomSlider.toolTip = "세로 확대: \(name) \(Int((scale * 100).rounded()))%" + (zoom.autoFit ? " (자동 맞춤)" : "")
+    }
+    @objc private func zoomOutPressed(_ sender: Any?) { store.verticalZoom(step: -1) }
+    @objc private func zoomInPressed(_ sender: Any?) { store.verticalZoom(step: 1) }
+    @objc private func fitPressed(_ sender: Any?) { store.fitAllLanes() }
+    @objc private func zoomSliderChanged(_ sender: Any?) { store.setVerticalZoom(CGFloat(zoomSlider.doubleValue)) }
 
     func rowRect(_ id: UUID) -> NSRect {
         let r = TimelineNSView.layout(lanes).first { $0.lane.id == id }?.rect ?? .zero
@@ -452,12 +560,17 @@ final class TimelineNSView: NSView {
     static func color(_ k: LaneKind) -> NSColor {
         switch k { case .video: .systemTeal; case .audio: .systemGreen; case .subtitle: .systemPurple; case .spectrum: .systemPink }
     }
+    /// LANE-VERTICAL-ZOOM-01: each lane's height is its kind's base height (`height(_:)`) times the lane's vertical zoom
+    /// (`LaneZoom`, UI state). This is the single place lane geometry comes from, so headers, clips, hit-testing, drops,
+    /// snap markers and the content height all follow the same effective heights. Gaps and the ruler are not scaled.
     static func layout(_ lanes: [Lane]) -> [(lane: Lane, rect: NSRect)] {
         var y = firstLaneY
+        let zoom = LaneZoom.shared
         return lanes.enumerated().map { i, l in
             let boundaryNext = l.kind == .video && i + 1 < lanes.count && lanes[i + 1].kind == .audio
-            defer { y += height(l.kind) + (boundaryNext ? boundaryGap : laneGap) }
-            return (l, NSRect(x: 0, y: y, width: 0, height: height(l.kind)))
+            let h = zoom.height(l)
+            defer { y += h + (boundaryNext ? boundaryGap : laneGap) }
+            return (l, NSRect(x: 0, y: y, width: 0, height: h))
         }
     }
     /// 가운데 경계선 위치(V1 아래와 A1 위의 가운데)

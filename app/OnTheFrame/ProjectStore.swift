@@ -3260,6 +3260,7 @@ extension ProjectStore {
         dropStill()
         history = EditHistory(t)
         savedTimeline = t
+        LaneZoom.shared.reset()   // 레인 높이는 화면 상태: 새 프로젝트·열기마다 자동 맞춤으로(LANE-VERTICAL-ZOOM-01, 저장하지 않음)
         projectURL = url; projectID = id
         projectSession += 1   // 같은 프로젝트를 다시 열어도 새 회차(그 전 회차에 묶인 확인은 동작하지 않음, CP-02)
         pendingImageRelinkID = nil
