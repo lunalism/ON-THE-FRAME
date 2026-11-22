@@ -468,11 +468,119 @@ extension CopyPasteSelfTest {
               gapPx.allSatisfy { near($0, past) } && !near(clipPx, past), "gap \(gapPx.map { $0?.description ?? "nil" }) past \(String(describing: past))")
         check("hit-testing unchanged: gap is empty, clip bodies still hit", view.clipHit(NSPoint(x: view.x(475), y: v1Mid)) == nil &&
               view.clipHit(NSPoint(x: view.x(400), y: v1Mid))?.0 == img.id && store.timeline.gaps(inLane: v.lane ?? UUID()).contains(450..<500))
+        // 8j. WAVEFORM-01 (separate helper, so its names cannot collide with this function's locals).
+        for r in await waveformChecks(store: store, view: view, soundID: sound.id, movieID: movie.id, wav: w, mp4Audio: a) { check(r.name, r.pass, r.detail) }
         // 9. Existing V / C tools.
         let cutOK = store.setTool(.cut) && store.tool == .cut && store.cutCheck(img.id, atFrame: 400) == .valid
         let selOK = store.setTool(.selection) && store.tool == .selection
         check("V/C tools unchanged (C cut check valid inside a clip, back to V)", cutOK && selOK)
         return checks
+    }
+
+    /// WAVEFORM-01 checks on the same project: real peaks for the WAV and for the MP4's linked audio, one analysis per
+    /// unchanged source, column mapping through a split, drawing, and (on separate stores) cancellation and failure.
+    static func waveformChecks(store: ProjectStore, view: TimelineNSView, soundID: UUID, movieID: UUID, wav: Clip, mp4Audio: Clip) async
+        -> [(name: String, pass: Bool, detail: String)] {
+        var out: [(name: String, pass: Bool, detail: String)] = []
+        func add(_ name: String, _ pass: Bool, _ detail: String = "") { out.append((name, pass, detail)) }   // printed once by the caller's check()
+        guard let sound = store.mediaByID[soundID], let movie = store.mediaByID[movieID] else { add("waveform: sources available", false); return out }
+        _ = store.waveforms.state(for: sound); _ = store.waveforms.state(for: movie)
+        func peaks(_ m: MediaAsset) -> WaveformPeaks? { if case .ready(let p) = store.waveforms.state(for: m) { return p }; return nil }
+        func short(_ s: WaveformStore.State) -> String {
+            switch s {
+            case .pending: return "pending"
+            case .ready(let p): return "ready \(p.channelCount) ch"
+            case .unavailable(let why): return "unavailable \(why)"
+            }
+        }
+        let ready = await LaneSelfTest.waitUntil(120) { peaks(sound) != nil && peaks(movie) != nil }
+        guard ready, let ps = peaks(sound), let pm = peaks(movie) else {
+            add("waveform: WAV and MP4 audio peaks ready", false, "\(short(store.waveforms.state(for: sound))) / \(short(store.waveforms.state(for: movie)))"); return out
+        }
+        let wavSeconds = Double(ps.sampleCount) / Double(ps.sampleRate)
+        let expected = sound.audioSampleCount.map { Double($0) / Double(sound.audioSampleRate ?? 48_000) } ?? -1
+        let loud = ps.envelope(channel: 0, samples: 0..<ps.sampleCount).map { $0.max > 0.01 } ?? false
+        add("waveform: WAV peaks are real stereo data of the source length", ps.channelCount == (sound.audioChannels ?? 2) && ps.channelCount == 2 &&
+            abs(wavSeconds - expected) < 0.05 && loud, "channels \(ps.channelCount) seconds \(wavSeconds) vs \(expected)")
+        let movieLoud = pm.envelope(channel: 0, samples: 0..<pm.sampleCount).map { $0.max > 0.01 } ?? false
+        add("waveform: linked MP4 audio clip has its own source peaks", pm.channelCount >= 1 && movieLoud && mp4Audio.mediaID == movieID,
+            "channels \(pm.channelCount) samples \(pm.sampleCount)")
+        let lr = (0..<ps.channelCount).map { ch in ps.envelope(channel: ch, samples: 0..<ps.sampleCount)?.max ?? -1 }
+        add("waveform: stereo channels are kept separately (not mixed)", lr.count == 2 && lr.allSatisfy { $0 >= 0 }, "L/R max \(lr)")
+        #if DEBUG
+        let started = store.waveforms.analysesStartedForTest
+        for _ in 0..<50 { _ = store.waveforms.state(for: sound); _ = store.waveforms.state(for: movie) }
+        add("waveform: an unchanged source is analysed once, not per redraw", store.waveforms.analysesStartedForTest == started && store.waveforms.isIdleForTest)
+        #endif
+        // Column mapping: the WAV clip's columns follow sourceIn + timeline offset at several zoom levels, and a split keeps them.
+        let state0 = TimelineDrawState(store: store)
+        view.state = state0
+        var mapOK = true, mapDetail = ""
+        for zoom in [0.5, 2.0, 12.0] {
+            view.pixelsPerFrame = CGFloat(zoom)
+            let cols = view.waveformColumns(wav, rate: ps.sampleRate, visible: view.bounds.union(NSRect(x: 0, y: 0, width: 100_000, height: 10)))
+            let first = cols.first?.samples.lowerBound, expectFirst = wav.sourceIn * 1_600
+            let mid = view.x(wav.start + 50)
+            let atMid = cols.first { $0.x <= mid && mid < $0.x + 1 }?.samples.lowerBound ?? -1
+            let expectMid = WaveformPeaks.sample(atSourceFrame: Double(wav.sourceIn + 50) + Double((mid.rounded(.down) - mid) / CGFloat(zoom)), rate: ps.sampleRate)
+            if first != expectFirst || abs(atMid - expectMid) > 1_600 { mapOK = false; mapDetail += "z\(zoom) first \(String(describing: first)) mid \(atMid)/\(expectMid) " }
+        }
+        add("waveform: columns follow the clip's source window at 0.5×/2×/12× zoom", mapOK, mapDetail)
+        view.pixelsPerFrame = 2
+        let before = view.waveformColumns(wav, rate: ps.sampleRate, visible: NSRect(x: 0, y: 0, width: 100_000, height: 10))
+        store.commit({ try $0.splitting(clip: wav.id, atFrame: wav.start + 70) }, focus: nil)
+        let pieces = store.timeline.audioClips.filter { $0.mediaID == soundID }.sorted { $0.start < $1.start }
+        let after = pieces.flatMap { view.waveformColumns($0, rate: ps.sampleRate, visible: NSRect(x: 0, y: 0, width: 100_000, height: 10)) }
+        let keyed = Dictionary(after.map { ($0.x, $0.samples) }, uniquingKeysWith: { a, _ in a })
+        let splitOK = pieces.count == 2 && before.allSatisfy { col in keyed[col.x].map { $0.lowerBound == col.samples.lowerBound } ?? true } &&
+            before.filter { keyed[$0.x] != nil }.count >= before.count - 2
+        store.undo()
+        add("waveform: split pieces show the same source samples at the same timeline position", splitOK && store.timeline.clip(wav.id) == wav,
+            "pieces \(pieces.count) columns \(before.count)/\(after.count)")
+        // Drawing: the WAV clip draws waveform pixels (compare with the same state without sources).
+        view.state = TimelineDrawState(store: store); view.fullDrawForTest = true
+        view.setFrameSize(NSSize(width: TimelineNSView.inset * 2 + 700 * 2, height: TimelineNSView.contentHeight(store.timeline.lanes)))
+        func column(_ x: CGFloat, _ r: NSRect) -> [NSColor?] {
+            stride(from: r.minY + 3, to: r.maxY - 3, by: 1).map { y -> NSColor? in
+                let q = NSRect(x: x.rounded(.down), y: y.rounded(.down), width: 1, height: 1)
+                guard let rep = view.bitmapImageRepForCachingDisplay(in: q) else { return nil }
+                view.cacheDisplay(in: q, to: rep); return rep.colorAt(x: 0, y: 0)?.usingColorSpace(.sRGB)
+            }
+        }
+        let laneR = view.laneRect(wav.lane) ?? .zero
+        // the three loudest frames of the clip (left channel), so the check does not depend on a quiet passage
+        let loudest = (0..<wav.length).map { f -> (Int, Float) in
+            let k = wav.sourceIn + f
+            return (f, ps.envelope(channel: 0, samples: (k * 1_600)..<((k + 1) * 1_600))?.max ?? 0)
+        }.sorted { $0.1 > $1.1 }.prefix(3)
+        let xs = loudest.map { view.x(wav.start + $0.0) + 0.5 }
+        let withWave = xs.map { column($0, laneR) }
+        var bare = TimelineDrawState(store: store); bare.media = [:]
+        view.state = bare
+        let without = xs.map { column($0, laneR) }
+        view.state = TimelineDrawState(store: store)
+        func same(_ p: NSColor?, _ q: NSColor?) -> Bool {
+            guard let p, let q else { return false }
+            return abs(p.redComponent - q.redComponent) < 0.02 && abs(p.greenComponent - q.greenComponent) < 0.02 && abs(p.blueComponent - q.blueComponent) < 0.02
+        }
+        let changed = zip(withWave, without).map { a, b in zip(a, b).filter { !same($0, $1) }.count }
+        add("waveform: the WAV clip draws a filled waveform (pixels differ from the clip without peaks)", xs.count == 3 && changed.allSatisfy { $0 >= 4 },
+            "changed px per column \(changed) at peak \(loudest.map(\.1))")
+        // Separate stores: cancellation of a pending analysis and an unreadable source.
+        let blocking = WaveformStore()
+        blocking.analyzer = { _, _ in
+            while !Task.isCancelled { try await Task.sleep(nanoseconds: 5_000_000) }
+            throw SpectrumAnalysisError.cancelled
+        }
+        let pendingFirst = blocking.state(for: sound) == .pending
+        blocking.retain([])
+        add("waveform: removing a source cancels its pending analysis", pendingFirst && blocking.isIdleForTest && blocking.revision > 0)
+        let failing = WaveformStore()
+        failing.analyzer = { _, _ in throw SpectrumAnalysisError.noAudioTrack }
+        _ = failing.state(for: sound)
+        let failed = await LaneSelfTest.waitUntil(5) { if case .unavailable = failing.state(for: sound) { return true }; return false }
+        add("waveform: an unreadable source becomes unavailable (no fabricated peaks)", failed)
+        return out
     }
 }
 #endif

@@ -68,6 +68,9 @@ struct TimelineDrawState: Equatable {
     var snap: Int?
     /// TIMELINE-UI-POLISH-01: clip edges a Shift playhead snap landed on (vertical ▼/▲ marker pairs)
     var snapMarkers: [ProjectStore.SnapMarker]
+    /// WAVEFORM-01: available sources (for waveform lookup) and the waveform result counter (redraw when peaks arrive)
+    var media: [UUID: MediaAsset]
+    var waveformRevision: Int
     /// 거부된 스펙트럼 트림 제안(2C-2, 같은 레인 겹침 — 빨간 상자): 항목과 제안 구간
     var trimRejectID: UUID?, trimRejectRange: Range<Int>?
     /// 찾을 수 없는 원본(미디어 id)
@@ -86,6 +89,8 @@ struct TimelineDrawState: Equatable {
         playhead = store.playhead
         snap = store.snapGuide
         snapMarkers = store.snapMarkers
+        media = store.mediaByID
+        waveformRevision = store.waveforms.revision
         trimRejectID = store.spectrumTrimRejected?.id; trimRejectRange = store.spectrumTrimRejected?.range
         proposalStart = store.freeMoveProposal?.start; proposalOK = store.freeMoveProposal?.ok ?? true; proposalID = store.freeMoveProposal?.id; proposalLane = store.freeMoveProposal?.lane
         missing = Set(store.missingMedia.keys)
@@ -325,11 +330,14 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
 final class TimelineNSView: NSView {
     static let inset: CGFloat = 12, rulerHeight: CGFloat = 24, edgeGrab: CGFloat = 6
     /// 레인 줄 배치(A-014): 눈금자 아래 위에서부터 레인 순서대로. 영상 레인 54pt, 오디오 레인 40pt, 사이 8pt.
-    static let firstLaneY: CGFloat = 30, laneGap: CGFloat = 8, videoHeight: CGFloat = 54, audioHeight: CGFloat = 40, subtitleHeight: CGFloat = 34, spectrumHeight: CGFloat = 34
+    static let firstLaneY: CGFloat = 30, laneGap: CGFloat = 8, videoHeight: CGFloat = 54, audioHeight: CGFloat = 64, subtitleHeight: CGFloat = 34, spectrumHeight: CGFloat = 34
     /// 마지막 레인 아래 빈 곳(여기에 놓으면 파일 이름의 새 레인)
     static let dropZoneHeight: CGFloat = 44
     /// 영상 레인 묶음과 오디오 레인 묶음 사이 가운데 경계(2026-10-11): 레인 사이보다 넓은 틈과 경계선
     static let boundaryGap: CGFloat = 18
+    /// WAVEFORM-01 (owner decision 2026-11-22): audio lanes are 64 pt (was 40) so the clip name keeps a strip of
+    /// `waveformLabelStrip` at the top and the stereo waveform halves are drawn below it.
+    static let waveformLabelStrip: CGFloat = 20
     /// 끌어 옮기기 붙음 거리(화면 포인트, 확대 배율과 무관)
     static let snapDistance: CGFloat = 8
     static func height(_ k: LaneKind) -> CGFloat {
@@ -459,7 +467,7 @@ final class TimelineNSView: NSView {
             NSRect(x: x(t.durationFrames) - 0.5, y: top - 6, width: 1, height: bottom - top + 12).fill()
         }
         // 보이는 프레임 범위에 걸친 클립·자막만(가장자리에 걸친 항목은 전체 모양 그대로 그려 잘린다). 순서는 그대로.
-        for c in t.clips + t.audioClips where c.end >= fr.lowerBound && c.start <= fr.upperBound { drawClip(c, st) }
+        for c in t.clips + t.audioClips where c.end >= fr.lowerBound && c.start <= fr.upperBound { drawClip(c, st, area: area) }
         for sub in t.subtitles where sub.end >= fr.lowerBound && sub.start <= fr.upperBound { drawSubtitle(sub, st) }
         for sp in t.spectra where sp.end >= fr.lowerBound && sp.start <= fr.upperBound { drawSpectrum(sp, st) }
         // 음소거한 오디오 레인: 클립 위를 어둡게
@@ -565,7 +573,7 @@ final class TimelineNSView: NSView {
         }
     }
 
-    private func drawClip(_ c: Clip, _ st: TimelineDrawState) {
+    private func drawClip(_ c: Clip, _ st: TimelineDrawState, area: NSRect) {
         let k = st.timeline.lane(of: c.id) ?? .video
         let r = rect(c)
         let selected = st.selected.contains(c.id), candidate = c.id == st.candidate
@@ -577,6 +585,9 @@ final class TimelineNSView: NSView {
         (selected ? NSColor.controlAccentColor : NSColor.separatorColor).setStroke()
         path.lineWidth = selected ? 2 : 1
         path.stroke()
+        if k == .audio, !st.missing.contains(c.mediaID), let a = st.media[c.mediaID] {   // WAVEFORM-01: under labels, envelope and handles
+            drawWaveform(c, r, store.waveforms.state(for: a), area: area, clip: path)
+        }
         if st.missing.contains(c.mediaID) {   // 찾을 수 없는 원본: 빗금·"원본 없음"(빈틈과 구별)
             NSGraphicsContext.saveGraphicsState()
             path.addClip()
@@ -722,6 +733,83 @@ final class TimelineNSView: NSView {
     // MARK: 소리 클립 음량·페이드(2026-10-11)
 
     /// 음량 선이 오가는 높이: 클립 아래(0%)에서 위 여백(100%)까지
+    /// WAVEFORM-01 colors: the clip's own green, darker on light backgrounds and lighter on dark ones (clip colors unchanged).
+    static let waveformFill = NSColor(name: nil) { ap in
+        ap.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor.systemGreen.blended(withFraction: 0.55, of: .white)!.withAlphaComponent(0.92)
+                                                         : NSColor.systemGreen.blended(withFraction: 0.45, of: .black)!.withAlphaComponent(0.85)
+    }
+    /// Pixel columns of a clip's waveform: for each column [x, x + step) of `visible` ∩ clip, the source sample range it
+    /// shows (Spectrum's mapping: sourceIn + timeline offset at 30 fps from file time 0, the peaks' rate; equals playback when the
+    /// reference track starts at time 0 — a later track start is an open limitation). Testable, no drawing.
+    func waveformColumns(_ c: Clip, rate: Int, visible: NSRect, step: CGFloat = 1) -> [(x: CGFloat, samples: Range<Int>)] {
+        let r = rect(c)
+        let x0 = max(r.minX, visible.minX).rounded(.down), x1 = min(r.maxX, visible.maxX)
+        guard x1 > x0 else { return [] }
+        var out: [(x: CGFloat, samples: Range<Int>)] = []
+        out.reserveCapacity(Int((x1 - x0) / step) + 1)
+        var px = x0
+        while px < x1 {
+            let f0 = Double((px - Self.inset) / pixelsPerFrame), f1 = Double((min(px + step, x1) - Self.inset) / pixelsPerFrame)
+            if let s = WaveformPeaks.sourceSamples(clipStart: c.start, sourceIn: c.sourceIn, length: c.length, timeline: f0, f1, rate: rate) {
+                out.append((px, s))
+            }
+            px += step
+        }
+        return out
+    }
+    /// Filled min/max waveform inside an audio clip: stereo = left in the upper half and right in the lower half with a
+    /// separator; mono = full height. Silence draws a thin centre line. Pending analysis draws a dashed centre line;
+    /// an unavailable source draws nothing. Only the visible part is drawn.
+    private func drawWaveform(_ c: Clip, _ r: NSRect, _ state: WaveformStore.State, area: NSRect, clip: NSBezierPath) {
+        // below the clip-name strip (label at minY + 4, 16 pt tall); full height only if a lane is ever too short for it
+        let strip = r.height >= Self.waveformLabelStrip + 24 ? Self.waveformLabelStrip : 2
+        let inner = NSRect(x: r.minX + 1, y: r.minY + strip, width: r.width - 2, height: r.height - strip - 2)
+        guard inner.height > 4, inner.width > 1 else { return }
+        NSGraphicsContext.saveGraphicsState()
+        clip.addClip()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        let visible = inner.intersection(area)
+        // A redraw area that misses this clip gives the null rect (infinite origin): drawing a line there raises in NSBezierPath.
+        guard !visible.isNull, visible.width > 0, visible.height > 0 else { return }
+        switch state {
+        case .unavailable:
+            return
+        case .pending:
+            let line = NSBezierPath(); line.lineWidth = 1; line.setLineDash([3, 3], count: 2, phase: 0)
+            line.move(to: NSPoint(x: visible.minX, y: inner.midY)); line.line(to: NSPoint(x: visible.maxX, y: inner.midY))
+            NSColor.secondaryLabelColor.withAlphaComponent(0.5).setStroke(); line.stroke()
+        case .ready(let peaks):
+            let n = min(peaks.channelCount, 2)
+            let laneH = inner.height / CGFloat(n)
+            let cols = waveformColumns(c, rate: peaks.sampleRate, visible: visible)
+            for ch in 0..<n {
+                let band = NSRect(x: inner.minX, y: inner.minY + CGFloat(ch) * laneH, width: inner.width, height: laneH)
+                let mid = band.midY, half = band.height / 2 - 0.5
+                var tops: [NSPoint] = [], bottoms: [NSPoint] = []
+                tops.reserveCapacity(cols.count * 2); bottoms.reserveCapacity(cols.count * 2)
+                for col in cols {
+                    guard let e = peaks.envelope(channel: ch, samples: col.samples) else { continue }
+                    // flipped view: positive amplitude is drawn upward (smaller y)
+                    let top = mid - CGFloat(e.max) * half, bottom = mid - CGFloat(e.min) * half
+                    tops.append(NSPoint(x: col.x, y: top)); tops.append(NSPoint(x: col.x + 1, y: top))
+                    bottoms.append(NSPoint(x: col.x, y: bottom)); bottoms.append(NSPoint(x: col.x + 1, y: bottom))
+                }
+                NSColor.labelColor.withAlphaComponent(0.25).setFill()   // centre (silence) line
+                NSRect(x: visible.minX, y: mid - 0.25, width: visible.width, height: 0.5).fill()
+                if let first = tops.first {
+                    let shape = NSBezierPath(); shape.move(to: first)
+                    tops.dropFirst().forEach { shape.line(to: $0) }
+                    bottoms.reversed().forEach { shape.line(to: $0) }
+                    shape.close()
+                    Self.waveformFill.setFill(); shape.fill()
+                }
+                if n == 2, ch == 0 {   // separation between the left (upper) and right (lower) halves
+                    NSColor.separatorColor.setFill()
+                    NSRect(x: visible.minX, y: band.maxY - 0.5, width: visible.width, height: 1).fill()
+                }
+            }
+        }
+    }
     private func envelopeY(_ g: Double, _ r: NSRect) -> CGFloat { r.maxY - 4 - CGFloat(g) * (r.height - 12) }
     /// 소리 클립 위: 클립 음량 × 페이드 모양의 선(레인 음량 제외), 줄어든 부분은 어둡게, 클립 음소거·음량 표시,
     /// 고른 소리 클립(연결된 쌍의 소리 포함)에는 페이드 손잡이(위쪽 모서리, 페이드 끝 위치).

@@ -15,6 +15,8 @@ final class ProjectStore {
     static let log = Logger(subsystem: "dev.ontheframe.app", category: "store")
 
     @ObservationIgnored let spectrumPreview: SpectrumPreviewSession
+    /// WAVEFORM-01: in-memory timeline waveform peaks per audio source (not saved; dropped when media leave the project).
+    let waveforms = WaveformStore()
 
     let settings = RenderSettings.m1
     /// 쓸 수 있는(찾은) 원본 미디어. 프로젝트의 미디어 목록(timeline.media)과 검사 결과 캐시에서 만든다(refreshAssets).
@@ -3111,6 +3113,7 @@ extension ProjectStore {
         }
         if list != assets { assets = list }
         if missing != missingMedia { missingMedia = missing }
+        waveforms.retain(list)   // WAVEFORM-01: forget sources no longer in the project (or changed/relinked)
         previewHost?.spectrumOverlay.invalidate()
         spectrumPreview.update(timeline: timeline, media: assets)
         VideoCadenceIndex.shared.preload(assets) // REAL-MEDIA-FIX-01: sample tables for repeated-image timing
