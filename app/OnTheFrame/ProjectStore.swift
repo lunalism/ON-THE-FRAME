@@ -34,7 +34,7 @@ final class ProjectStore {
         didSet { if relinkOp != nil { previewHost?.spectrumOverlay.discardNaturalEnd() } }
     }
     /// 마지막으로 저장하거나 연 상태. 지금 상태와 다르면 저장하지 않은 변경이 있다(실행 취소로 돌아오면 사라짐).
-    var savedTimeline = Timeline()
+    var savedTimeline = ProjectStore.newProjectTimeline()
     var isDirty: Bool { history.timeline != savedTimeline }
     var projectName: String { projectURL?.deletingPathExtension().lastPathComponent ?? "제목 없음" }
     /// 창 제목: 프로젝트 이름과 저장하지 않은 변경 표시
@@ -68,7 +68,44 @@ final class ProjectStore {
     /// 자체 검사 전용: 다음 프로젝트 저장을 승격 직전에 실패시킨다
     @ObservationIgnored var saveFailureForTest = false
     #endif
-    private(set) var history = EditHistory()
+    private(set) var history = EditHistory(ProjectStore.newProjectTimeline())
+    /// ON-THE-FRAME-DEFAULT-LANES-01: 앱 시작·새 프로젝트의 빈 타임라인. 기본 레인 둘 위·아래에 빈 영상 레인 둘·빈 오디오 레인 둘(모두 보통 레인).
+    /// 기존 파일을 열 때는 쓰지 않는다(저장된 레인 배치를 그대로 읽고 레인을 더하지 않음, 자동 보충 없음).
+    /// Release와 일반 Debug 실행(소유자 수동 시험의 `-OTFEnableImageImport`·`-OTFLayoutSuite` 포함)은 늘 이 여섯 레인 시작이다.
+    static func newProjectTimeline() -> Timeline {
+        #if DEBUG
+        if newProjectFixtureForTest(ProcessInfo.processInfo.arguments) == .legacyTwoLanes { return Timeline() }
+        #endif
+        return Timeline.newProject()
+    }
+    #if DEBUG
+    /// Debug 시험의 새 프로젝트 시작 fixture. 실행 인수 이름 모양으로 추측하지 않고 명시적으로 고른다(DEFAULT-LANES-REVIEW-02).
+    enum NewProjectFixture: Equatable { case productionSixLanes, legacyTwoLanes }
+    /// 명시 선택: `-OTFNewProjectLanes6`(여섯 레인 제품 경로) 또는 `-OTFNewProjectLanes2`(이전 두 레인). 둘 다 주면 여섯 레인이 이긴다.
+    /// 아무것도 주지 않으면 `legacyTwoLaneEntryPoints`의 진입 인수가 있을 때만 두 레인이다.
+    static func newProjectFixtureForTest(_ args: [String]) -> NewProjectFixture {
+        if args.contains("-OTFNewProjectLanes6") { return .productionSixLanes }
+        if args.contains("-OTFNewProjectLanes2") || args.contains(where: legacyTwoLaneEntryPoints.contains) { return .legacyTwoLanes }
+        return .productionSixLanes
+    }
+    /// DEFAULT-LANES-01 이전에 있던 Debug 자체 검사·진단·fixture 생성 진입 인수(OnTheFrameApp·SelfTest 진입점과 app/scripts에서 그대로 옮김).
+    /// 모두 두 레인 새 프로젝트를 전제로 쓰였으므로 기존 회귀 호환을 위해 두 레인 fixture를 쓴다. 고정 목록이다:
+    /// 새 시험은 여기에 넣지 않으며(기본으로 여섯 레인 제품 경로), 두 레인이 필요하면 `-OTFNewProjectLanes2`를 명시한다.
+    /// 실행 방식 인수(-OTFLayoutSuite·-OTFLayoutReset·-OTFLayoutInject·-OTFForceDirect·-OTFEnableImageImport·추적 인수 등)는 넣지 않는다.
+    static let legacyTwoLaneEntryPoints: Set<String> = [
+        "-OTFAudioLeadTest", "-OTFAudioTailTest", "-OTFClipAudioTest", "-OTFCloseTest", "-OTFColorLayoutTest", "-OTFContinuousParityTest",
+        "-OTFContinuousSpectrumTest", "-OTFCopyPasteTest", "-OTFEditFixTest", "-OTFFileGuardTest", "-OTFGestureGuardTest",
+        "-OTFGestureSwitchExperiment", "-OTFImageBookmarkTest", "-OTFImageEligibilityTest", "-OTFImageExportTest", "-OTFImageLiveAccessTest",
+        "-OTFImageRelinkTest", "-OTFImageSpectrumTest", "-OTFLaneTest", "-OTFLayerDiag", "-OTFLayoutTest", "-OTFMakeManualRelinkFixture",
+        "-OTFMakeSpectrumProjects", "-OTFManualRelinkCheck", "-OTFMultiLaneTest", "-OTFOpenFlowTest", "-OTFOpenImportTest", "-OTFPanelTest",
+        "-OTFPendingPressTest", "-OTFPreviewTest", "-OTFProjectTest", "-OTFPureAudioTest", "-OTFRealMediaCheck", "-OTFRelinkGuardTest",
+        "-OTFSavePanelTest", "-OTFSelfTest", "-OTFShortcutTest", "-OTFSpectrumLaneManual", "-OTFSpectrumLaneTest", "-OTFSpectrumLifecycleTest",
+        "-OTFSpectrumMarkerGeometry", "-OTFSpectrumOverlayManual", "-OTFSpectrumOverlayTest", "-OTFSpectrumPausePhase", "-OTFSpectrumPauseProbe",
+        "-OTFSpectrumPauseReconcile", "-OTFSpectrumPlaybackTest", "-OTFSpectrumPreviewManual", "-OTFSpectrumPreviewTest",
+        "-OTFStartupFrameContract", "-OTFStillFrameParityTest", "-OTFSubtitleBoundaryProbe", "-OTFSubtitleTest", "-OTFSubtitleWindowTest",
+        "-OTFTimelineDrawTest", "-OTFToolTest", "-OTFTransformPerfTest", "-OTFTransformTest", "-OTFVideoGapTest", "-OTFVisualTest",
+    ]
+    #endif
     var timeline: Timeline { history.timeline }
     /// 선택한 클립(주 선택). 연결된 짝도 함께 선택된 것으로 보인다(selectedIDs).
     private(set) var spectrumSelectionRevision = 0
@@ -3205,7 +3242,7 @@ extension ProjectStore {
     /// 빈 프로젝트로(창 배치·최근 목록은 그대로)
     func resetProject() {
         stopAllScopes()
-        replaceProject(timeline: Timeline(), url: nil, id: UUID(), cache: [:], bookmarks: [:], missing: [:])
+        replaceProject(timeline: Self.newProjectTimeline(), url: nil, id: UUID(), cache: [:], bookmarks: [:], missing: [:])
     }
     private func replaceProject(timeline t: Timeline, url: URL?, id: UUID, cache: [String: MediaAsset], bookmarks bm: [UUID: Data], missing: [UUID: String], relativePaths: [UUID: String] = [:], imageURLs: [UUID: URL] = [:]) {
         #if DEBUG

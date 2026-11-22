@@ -365,6 +365,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await LaneSelfTest.run(folder: folder) }
             return
         }
+        if args.contains("-OTFLaneHeaderClipTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {   // LANE-SCROLL-CLIP-FIX-01, six-lane start
+            Task { await LaneHeaderClipSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFStickyRulerTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {   // TIMELINE-STICKY-RULER-01, six-lane start
+            Task { await StickyRulerSelfTest.run(folder: folder) }
+            return
+        }
         if args.contains("-OTFSpectrumOverlayTest") || args.contains("-OTFSpectrumOverlayManual"),
            let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await SpectrumOverlaySelfTest.run(folder: folder, manual: args.contains("-OTFSpectrumOverlayManual")) }

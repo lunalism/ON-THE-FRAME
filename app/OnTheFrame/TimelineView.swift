@@ -121,6 +121,7 @@ struct TimelineRepresentable: NSViewRepresentable {
         c.header.lanes = state.timeline.lanes
         c.header.selectedLane = state.selectedLane
         c.header.needsDisplay = true
+        c.ruler.needsDisplay = true   // TIMELINE-STICKY-RULER-01: same state, zoom and playhead as the lane content
     }
 }
 
@@ -129,9 +130,14 @@ final class TimelineContainerView: NSView {
     let header: LaneHeaderView
     let scrollView = NSScrollView()
     let timelineView: TimelineNSView
+    /// TIMELINE-STICKY-RULER-01: the time ruler stays at the top of the timeline viewport. It is a sibling placed over the top
+    /// `rulerHeight` strip of the scroll area (the same strip the lane header keeps free), so vertical scrolling moves only the
+    /// lane rows under it. It draws and scrubs through `timelineView` with the lane content's horizontal scroll origin.
+    let ruler: TimelineRulerView
     init(store: ProjectStore) {
         header = LaneHeaderView(store: store)
         timelineView = TimelineNSView(store: store)
+        ruler = TimelineRulerView(timelineView: timelineView, scrollView: scrollView)
         super.init(frame: .zero)
         scrollView.hasHorizontalScroller = true
         scrollView.hasVerticalScroller = true
@@ -139,14 +145,29 @@ final class TimelineContainerView: NSView {
         scrollView.drawsBackground = true
         scrollView.backgroundColor = .underPageBackgroundColor
         scrollView.documentView = timelineView
-        addSubview(header); addSubview(scrollView)
+        scrollView.scrollerInsets.top = TimelineNSView.rulerHeight   // the vertical scroller starts below the fixed ruler
+        addSubview(header); addSubview(scrollView); addSubview(ruler)   // ruler last: above the scroll area
         // 세로 스크롤은 머리와 함께 움직이게 맞춘다(가로 스크롤은 머리에 영향 없음)
         scrollView.contentView.postsBoundsChangedNotifications = true
-        NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scrollView.contentView, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { guard let self else { return }; self.header.verticalOffset = self.scrollView.contentView.bounds.minY; self.header.needsDisplay = true }
+        scrollView.contentView.postsFrameChangedNotifications = true
+        for name in [NSView.boundsDidChangeNotification, NSView.frameDidChangeNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: scrollView.contentView, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.header.verticalOffset = self.scrollView.contentView.bounds.minY; self.header.needsDisplay = true
+                    self.layoutRuler(); self.ruler.needsDisplay = true   // horizontal scroll moves the ruler's ticks; vertical does not move it
+                    self.window?.invalidateCursorRects(for: self.timelineView)   // rows moved relative to the fixed ruler strip
+                }
+            }
         }
     }
     required init?(coder: NSCoder) { fatalError() }
+    /// The fixed ruler covers the top strip of the visible lane area (the clip view, so a legacy scroller column is excluded).
+    func layoutRuler() {
+        let r = convert(scrollView.contentView.frame, from: scrollView)
+        let f = NSRect(x: r.minX, y: r.minY, width: r.width, height: min(TimelineNSView.rulerHeight, r.height))
+        if ruler.frame != f { ruler.frame = f; ruler.needsDisplay = true }
+    }
 
     // MARK: 가로 확대 기준(2026-10-24, 소유자 요청: 0프레임이 아니라 빨간 재생 헤드를 기준으로 확대)
     //
@@ -187,7 +208,59 @@ final class TimelineContainerView: NSView {
         super.layout()
         header.frame = NSRect(x: 0, y: 0, width: LaneHeaderView.width, height: bounds.height)
         scrollView.frame = NSRect(x: LaneHeaderView.width, y: 0, width: max(0, bounds.width - LaneHeaderView.width), height: bounds.height)
+        // LANE-SCROLL-CLIP-FIX-01: after a resize the clip view may clamp its scroll origin; keep the header rows on the same y.
+        if header.verticalOffset != scrollView.contentView.bounds.minY { header.verticalOffset = scrollView.contentView.bounds.minY; header.needsDisplay = true }
+        layoutRuler()
     }
+}
+
+/// TIMELINE-STICKY-RULER-01: the fixed time ruler above the vertically scrolling lanes. It has no time mapping of its own:
+/// drawing calls `TimelineNSView.drawRuler`/`drawPlayhead` translated by the lane content's horizontal scroll origin, and
+/// scrubbing converts the pointer through the document view, so ticks, playhead and clips always share one frame ↔ x mapping
+/// (horizontal scroll and zoom included). Being opaque and on top, it also keeps clicks, context menus and cursors away from
+/// lane rows scrolled under it.
+final class TimelineRulerView: NSView {
+    unowned let timelineView: TimelineNSView
+    unowned let scrollView: NSScrollView
+    init(timelineView: TimelineNSView, scrollView: NSScrollView) {
+        self.timelineView = timelineView; self.scrollView = scrollView
+        super.init(frame: .zero)
+        clipsToBounds = true
+        registerForDraggedTypes([.string])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override var isFlipped: Bool { true }
+    override var isOpaque: Bool { true }
+    /// Horizontal scroll origin of the lane content (document x at this view's left edge).
+    var contentOffsetX: CGFloat { scrollView.contentView.bounds.minX }
+    /// x of a timeline frame in this view: the document mapping minus the horizontal scroll origin.
+    func viewX(_ frame: Int) -> CGFloat { timelineView.x(frame) - contentOffsetX }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.windowBackgroundColor.setFill(); bounds.fill()
+        guard let st = timelineView.state, let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let ox = contentOffsetX
+        ctx.saveGState()
+        ctx.translateBy(x: -ox, y: 0)   // document x coordinates from here on
+        let area = NSRect(x: ox, y: 0, width: bounds.width, height: bounds.height).insetBy(dx: -TimelineNSView.drawOverscan, dy: 0)
+        timelineView.drawRuler(st, area: area)
+        timelineView.drawPlayhead(st, height: bounds.height)
+        ctx.restoreGState()
+    }
+
+    // Scrubbing: the press starts a ruler scrub in the timeline view; drags and the release continue there (same code as before).
+    override func mouseDown(with e: NSEvent) { timelineView.rulerMouseDown(with: e) }
+    override func mouseDragged(with e: NSEvent) { timelineView.mouseDragged(with: e) }
+    override func mouseUp(with e: NSEvent) { timelineView.mouseUp(with: e) }
+    override func scrollWheel(with e: NSEvent) { scrollView.scrollWheel(with: e) }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .arrow) }
+
+    // Media dropped on the ruler goes to the base lane of its kind, as before (TimelineNSView.drop: "눈금자 위는 기본 레인").
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { timelineView.rulerDraggingUpdated(sender) }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { timelineView.rulerDraggingUpdated(sender) }
+    override func draggingExited(_ sender: NSDraggingInfo?) { timelineView.draggingExited(sender) }
+    override func draggingEnded(_ sender: NSDraggingInfo) { timelineView.draggingEnded(sender) }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool { timelineView.rulerPerformDrag(sender) }
 }
 
 /// 레인 머리: 레인 이름·종류, 오디오 레인 음소거·음량 표시. 누르면 레인을 고르고(정보 패널에 레인 설정), 두 번 누르거나 문맥 메뉴로 이름을 바꾼다
@@ -199,13 +272,37 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
     var lanes: [Lane] = Lane.defaults
     var selectedLane: UUID?
     /// 이름 바꾸는 칸도 세로 스크롤을 따라간다(2026-10-11 리뷰: 칸이 다른 레인 위에 남았다)
-    var verticalOffset: CGFloat = 0 { didSet { if let f = editor, let id = editingLane { f.frame = editorFrame(id) } } }
+    var verticalOffset: CGFloat = 0 { didSet { if let f = editor, let id = editingLane { f.frame = editorFrameInClip(id) } } }
     private(set) var editor: NSTextField?
     private(set) var editingLane: UUID?
     private var finishing = false
-    init(store: ProjectStore) { self.store = store; super.init(frame: .zero) }
+    /// LANE-SCROLL-CLIP-FIX-01: the rename field lives in this lane-area container (below the ruler strip, clipped), so a
+    /// field whose row scrolls out is clipped and hit-tested only inside the lane viewport (never over the ruler or outside).
+    let editorClip = FlippedClipView()
+    /// Clips its subviews and is transparent to hits itself: header clicks, double-clicks and context menus keep reaching
+    /// LaneHeaderView; only the rename field (inside the visible lane viewport) can be hit.
+    final class FlippedClipView: NSView {
+        override var isFlipped: Bool { true }
+        override func hitTest(_ point: NSPoint) -> NSView? { let v = super.hitTest(point); return v === self ? nil : v }
+    }
+    init(store: ProjectStore) {
+        self.store = store; super.init(frame: .zero)
+        // LANE-SCROLL-CLIP-FIX-01: rows are drawn at (lane y − vertical scroll), so scrolled-out rows lie outside the bounds.
+        // Since the macOS 14 SDK NSView.clipsToBounds defaults to false; without this the rows painted over the toolbar,
+        // ruler and preview above the timeline (and below it when rubber-banding).
+        clipsToBounds = true
+        editorClip.clipsToBounds = true
+        addSubview(editorClip)
+    }
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }
+    /// The lane viewport in header coordinates: below the ruler strip, inside the bounds (rows outside it are not visible).
+    var laneViewport: NSRect { NSRect(x: 0, y: TimelineNSView.rulerHeight, width: bounds.width, height: max(0, bounds.height - TimelineNSView.rulerHeight)) }
+    override func layout() {
+        super.layout()
+        editorClip.frame = laneViewport
+        if let f = editor, let id = editingLane { f.frame = editorFrameInClip(id) }
+    }
 
     func rowRect(_ id: UUID) -> NSRect {
         let r = TimelineNSView.layout(lanes).first { $0.lane.id == id }?.rect ?? .zero
@@ -213,7 +310,12 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
     }
     /// 그 종류의 첫 레인 줄(이전 자체 검사 호환)
     func rowRect(_ kind: LaneKind) -> NSRect { lanes.first { $0.kind == kind }.map { rowRect($0.id) } ?? .zero }
-    func lane(at p: NSPoint) -> Lane? { lanes.first { rowRect($0.id).contains(p) } }
+    /// Lane under a header point — only inside the visible lane viewport (not under the ruler strip or outside the bounds),
+    /// so clicks and context menus cannot reach a row that is scrolled out of view (LANE-SCROLL-CLIP-FIX-01).
+    func lane(at p: NSPoint) -> Lane? {
+        guard laneViewport.contains(p) else { return nil }
+        return lanes.first { rowRect($0.id).contains(p) }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         NSColor.windowBackgroundColor.setFill(); bounds.fill()
@@ -293,6 +395,8 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
     @objc private func addSubtitleFromMenu(_ sender: NSMenuItem) { store.addLane(.subtitle) }
 
     func editorFrame(_ id: UUID) -> NSRect { let r = rowRect(id); return r.insetBy(dx: 4, dy: max(2, (r.height - 22) / 2)) }
+    /// The same rect in `editorClip` coordinates (the clip starts at the ruler strip's bottom).
+    func editorFrameInClip(_ id: UUID) -> NSRect { editorFrame(id).offsetBy(dx: 0, dy: -editorClip.frame.minY) }
     func beginRename(_ id: UUID) {
         guard editor == nil, let l = lanes.first(where: { $0.id == id }), store.gestureBase == nil else { return }
         let f = NSTextField(string: l.name)
@@ -300,8 +404,9 @@ final class LaneHeaderView: NSView, NSTextFieldDelegate {
         f.delegate = self
         f.focusRingType = .default
         f.setAccessibilityLabel("레인 이름")
-        f.frame = editorFrame(id)
-        addSubview(f)
+        editorClip.frame = laneViewport
+        f.frame = editorFrameInClip(id)
+        editorClip.addSubview(f)
         editor = f; editingLane = id; finishing = false
         needsDisplay = true
         window?.makeFirstResponder(f)
@@ -537,9 +642,14 @@ final class TimelineNSView: NSView {
             let lanes = t.subtitle(h.id).map { [$0.lane] } ?? t.group(of: h.id).compactMap(\.lane)
             for l in lanes { if let r = laneRect(l) { NSRect(x: x(h.frame) - 1, y: r.minY - 2, width: 2, height: r.height + 4).fill() } }
         }
-        let ph = x(min(st.playhead, t.durationFrames))
+        drawPlayhead(st, height: bounds.height)
+    }
+    /// Playhead line from y 0 down to `height` and its top triangle, in document x coordinates. The fixed ruler
+    /// (TIMELINE-STICKY-RULER-01) draws the same shape over its own height so the triangle stays visible while lanes scroll.
+    func drawPlayhead(_ st: TimelineDrawState, height: CGFloat) {
+        let ph = x(min(st.playhead, st.timeline.durationFrames))
         NSColor.systemRed.setFill()
-        NSRect(x: ph - 0.75, y: 0, width: 1.5, height: bounds.height).fill()
+        NSRect(x: ph - 0.75, y: 0, width: 1.5, height: height).fill()
         let tri = NSBezierPath()
         tri.move(to: NSPoint(x: ph - 5, y: 0)); tri.line(to: NSPoint(x: ph + 5, y: 0)); tri.line(to: NSPoint(x: ph, y: 7)); tri.close()
         tri.fill()
@@ -883,7 +993,8 @@ final class TimelineNSView: NSView {
         return best.map { ($0.0, $0.1, $0.2) }
     }
 
-    private func drawRuler(_ st: TimelineDrawState, area: NSRect) {
+    /// Also called by the fixed `TimelineRulerView` (TIMELINE-STICKY-RULER-01) with the context translated to document x.
+    func drawRuler(_ st: TimelineDrawState, area: NSRect) {
         NSColor.windowBackgroundColor.setFill()
         NSRect(x: 0, y: 0, width: bounds.width, height: Self.rulerHeight).fill()
         let fps = Int(store.settings.fps)
@@ -942,7 +1053,7 @@ final class TimelineNSView: NSView {
         if store.gestureBase != nil { store.interruptGesture() }
         let p = convert(e.locationInWindow, from: nil)
         if p.y < Self.firstLaneY {
-            store.pauseForEdit(); drag = .scrub; scrub(p, shift: e.modifierFlags.contains(.shift)); return
+            beginScrub(p, shift: e.modifierFlags.contains(.shift)); return
         }
         if store.tool == .cut {
             // 자르기 도구(D-030): 수정 키 없는 왼쪽 누름이 클립 본문에 있으면 그 프레임에서 한 번 자른다. 이어지는 끌기는 무시한다
@@ -1041,6 +1152,18 @@ final class TimelineNSView: NSView {
     override func flagsChanged(with e: NSEvent) {
         if case .scrub = drag, let p = lastScrubPoint { scrub(p, shift: e.modifierFlags.contains(.shift)) }
         super.flagsChanged(with: e)
+    }
+    private func beginScrub(_ p: NSPoint, shift: Bool) { store.pauseForEdit(); drag = .scrub; scrub(p, shift: shift) }
+    /// TIMELINE-STICKY-RULER-01: a press on the fixed ruler. Same steps as a press in the document's ruler area; only the
+    /// pointer's document x is used, so the vertical scroll position does not matter. Drags and the release are forwarded
+    /// to `mouseDragged`/`mouseUp` by the ruler view; Shift changes and Esc arrive here as first responder.
+    func rulerMouseDown(with e: NSEvent) {
+        #if DEBUG
+        defer { store.traceGestureDebug("timeline rulerMouseDown phase=\(dragNameForTest)", event: e) }
+        #endif
+        window?.makeFirstResponder(self)
+        if store.gestureBase != nil { store.interruptGesture() }
+        beginScrub(convert(e.locationInWindow, from: nil), shift: e.modifierFlags.contains(.shift))
     }
     /// Ruler scrub (TIMELINE-OVERWRITE-PASTE-01): the same frame as `frame(atX:)`; Shift + magnet snaps to clip boundaries (8 pt).
     private func scrub(_ p: NSPoint, shift: Bool) {
@@ -1146,24 +1269,34 @@ final class TimelineNSView: NSView {
         return NSCursor(image: img, hotSpot: NSPoint(x: img.size.width / 2, y: img.size.height / 2))
     }()
 
+    /// TIMELINE-STICKY-RULER-01: the visible lane area in document coordinates — the visible rect without the top strip that the
+    /// fixed ruler covers. Cursor rects are limited to it so a clip scrolled under the ruler does not change the pointer there.
+    var laneVisibleRect: NSRect {
+        var v = visibleRect
+        guard !v.isEmpty else { return v }
+        let cut = min(Self.rulerHeight, v.height)
+        v.origin.y += cut; v.size.height -= cut
+        return v
+    }
     override func resetCursorRects() {
+        let lanesVisible = laneVisibleRect
+        // 보이는 부분만: 화면 밖 클립의 교집합은 null 사각형(원점 무한)이라 그대로 넣으면 AppKit 예외로 앱이 멈췄다(2026-10-23 검증 중 발견, 자르기 도구 + 화면 밖 항목)
+        func add(_ r: NSRect, _ cursor: NSCursor) { let v = r.intersection(lanesVisible); if !v.isEmpty { addCursorRect(v, cursor: cursor) } }
         if let st = state, st.tool == .cut {   // 자르기 도구: 클립 본문 위에서 가위 커서(트림·페이드 커서 없음)
-            // 보이는 부분만: 화면 밖 클립의 교집합은 null 사각형(원점 무한)이라 그대로 넣으면 AppKit 예외로 앱이 멈췄다(2026-10-23 검증 중 발견, 자르기 도구 + 화면 밖 항목)
-            func add(_ r: NSRect) { let v = r.intersection(visibleRect); if !v.isEmpty { addCursorRect(v, cursor: Self.cutCursor) } }
-            for c in st.timeline.clips + st.timeline.audioClips { add(rect(c)) }
-            for sub in st.timeline.subtitles { add(subtitleRect(sub)) }
+            for c in st.timeline.clips + st.timeline.audioClips { add(rect(c), Self.cutCursor) }
+            for sub in st.timeline.subtitles { add(subtitleRect(sub), Self.cutCursor) }
             return
         }
         if let st = state, st.tool == .text { _ = st; return }   // 텍스트 도구: 타임라인에서는 고르기만(트림·옮기기 커서 없음)
         guard let st = state, let sel = st.selection else { return }
         for id in fadeHandleClips(st) {   // 페이드 손잡이(트림 커서보다 위)
             guard let c = st.timeline.clip(id) else { continue }
-            for e in [ProjectStore.FadeEdge.fadeIn, .fadeOut] { addCursorRect(fadeHandleRect(c, e, rect(c)).insetBy(dx: -6, dy: -5), cursor: .crosshair) }
+            for e in [ProjectStore.FadeEdge.fadeIn, .fadeOut] { add(fadeHandleRect(c, e, rect(c)).insetBy(dx: -6, dy: -5), .crosshair) }
         }
         for r in st.timeline.group(of: sel).map({ rect($0) }) + (st.timeline.subtitle(sel).map { [subtitleRect($0)] } ?? [])
                     + (st.timeline.spectrum(sel).map { [spectrumRect($0)] } ?? []) {   // 스펙트럼 트림 커서(2C-2)
-            addCursorRect(NSRect(x: r.minX - 2, y: r.minY, width: Self.edgeGrab + 2, height: r.height), cursor: .resizeLeftRight)
-            addCursorRect(NSRect(x: r.maxX - Self.edgeGrab, y: r.minY, width: Self.edgeGrab + 2, height: r.height), cursor: .resizeLeftRight)
+            add(NSRect(x: r.minX - 2, y: r.minY, width: Self.edgeGrab + 2, height: r.height), .resizeLeftRight)
+            add(NSRect(x: r.maxX - Self.edgeGrab, y: r.minY, width: Self.edgeGrab + 2, height: r.height), .resizeLeftRight)
         }
     }
 
@@ -1182,6 +1315,20 @@ final class TimelineNSView: NSView {
         setHover(false)
         guard let id = mediaID(sender) else { return false }
         drop(id, windowPoint: sender.draggingLocation)
+        return true
+    }
+    /// TIMELINE-STICKY-RULER-01: media dragged over / dropped on the fixed ruler. The time is the pointer's document x; the y is
+    /// the ruler (0), so the drop goes to the base lane of the media's kind as a drop on the ruler always did, whatever the
+    /// vertical scroll position (never to a lane row hidden under the ruler).
+    func rulerDraggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let ok = mediaID(sender) != nil
+        setHover(ok); dropPoint = ok ? NSPoint(x: convert(sender.draggingLocation, from: nil).x, y: 0) : nil; needsDisplay = true
+        return ok ? .copy : []
+    }
+    func rulerPerformDrag(_ sender: NSDraggingInfo) -> Bool {
+        setHover(false)
+        guard let id = mediaID(sender) else { return false }
+        drop(id, at: NSPoint(x: convert(sender.draggingLocation, from: nil).x, y: 0))
         return true
     }
     /// 창 좌표의 놓은 위치(NSDraggingInfo.draggingLocation) → 문서 보기 좌표(가로·세로 스크롤 반영) → 레인·프레임

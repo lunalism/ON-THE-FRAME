@@ -138,9 +138,16 @@ enum MultiLaneSelfTest {
         guard let laneWid = laneW?.id else { return finish(folder, checks, nil) }
         // 5. 음소거(레인 머리 메뉴), 음량 50%(정보 패널 슬라이더를 놓을 때와 같은 동작). 각각 한 단계.
         let dM = s.history.undoDepth
-        let muted = headerItem(laneTB, "음소거")
+        // LANE-SCROLL-CLIP-FIX-01: 레인 머리 문맥 메뉴는 보이는 레인 영역 안의 줄에서만 열린다. 레인 5개에서 "otf-TB" 줄은 처음 화면 아래에
+        // 있으므로 먼저 세로로 스크롤해 보이게 하고(6단계와 같은 방법), 줄 가운데가 보이는 영역 안인지 확인한 뒤 메뉴를 요청한다.
+        if let r = tv.laneRect(laneTB) { tv.scrollToVisible(NSRect(x: tv.visibleRect.minX, y: r.minY - 4, width: 10, height: r.height + 8)) }
+        await LaneSelfTest.settle()
+        let tbRow = header.rowRect(laneTB)
+        let tbVisible = header.laneViewport.contains(NSPoint(x: 50, y: tbRow.midY))
+        let muted = tbVisible && headerItem(laneTB, "음소거")
         s.setLaneVolume(laneWid, 50)
-        check("lane.muteAndVolume", muted && s.timeline.laneInfo(laneTB)?.muted == true && s.timeline.laneInfo(laneWid)?.volumePercent == 50 && s.history.undoDepth == dM + 2 && s.isDirty)
+        check("lane.muteAndVolume", muted && s.timeline.laneInfo(laneTB)?.muted == true && s.timeline.laneInfo(laneWid)?.volumePercent == 50 && s.history.undoDepth == dM + 2 && s.isDirty,
+              "rowVisible \(tbVisible) row \(tbRow) viewport \(header.laneViewport) scrolled \(container.scrollView.contentView.bounds.minY)")
         _ = await LaneSelfTest.waitUntil(10) { s.appliedGeneration == s.generation }
         let mixApplied = s.player.currentItem?.audioMix?.inputParameters.count ?? 0
         check("preview.audioMixApplied", mixApplied >= 1 && s.currentPlan?.audioMix != nil, "params \(mixApplied)")

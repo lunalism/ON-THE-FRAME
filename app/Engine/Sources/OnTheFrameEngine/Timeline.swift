@@ -258,6 +258,19 @@ public struct Lane: Sendable, Equatable, Codable, Identifiable {
     public static let videoID = UUID(uuidString: "0F7EF0A0-0000-4000-8000-000000000001")!
     public static let audioID = UUID(uuidString: "0F7EF0A0-0000-4000-8000-000000000002")!
     public static let defaults = [Lane(id: videoID, kind: .video, name: "원본소스"), Lane(id: audioID, kind: .audio, name: "원본소리")]
+    /// ON-THE-FRAME-DEFAULT-LANES-01: 새 프로젝트에만 더하는 빈 레인 네 개의 고정 ID(V2·V3·A2·A3).
+    /// 고정 ID는 videoID·audioID와 같은 이유(새 프로젝트를 몇 번 만들어도 같은 시작 상태)이며 레인 ID는 프로젝트 안에서만 고유하면 된다.
+    public static let videoV2ID = UUID(uuidString: "0F7EF0A0-0000-4000-8000-000000000003")!
+    public static let videoV3ID = UUID(uuidString: "0F7EF0A0-0000-4000-8000-000000000004")!
+    public static let audioA2ID = UUID(uuidString: "0F7EF0A0-0000-4000-8000-000000000005")!
+    public static let audioA3ID = UUID(uuidString: "0F7EF0A0-0000-4000-8000-000000000006")!
+    /// 새 프로젝트의 시작 레인(화면 순서 위 → 아래): V3·V2(빈 영상) · V1 원본소스 · A1 원본소리 · A2·A3(빈 오디오).
+    /// 기존 기본 레인 둘(ID·이름·순서)은 그대로이고, 빈 영상 레인은 그 위(경계 바깥쪽), 빈 오디오 레인은 그 아래(바깥쪽)에 둔다.
+    /// 이름은 레인 추가와 같은 "영상"·"오디오"(번호는 위치에서 따로 보인다). 이 값은 새 프로젝트 시작에만 쓴다:
+    /// 기존 파일을 열 때 레인을 더하거나 빈 레인을 다시 채우지 않으며(자동 보충 없음), `defaults`와 `Timeline()`은 바꾸지 않는다.
+    public static let newProjectDefaults = [Lane(id: videoV3ID, kind: .video, name: "영상"), Lane(id: videoV2ID, kind: .video, name: "영상"),
+                                            Lane(id: videoID, kind: .video, name: "원본소스"), Lane(id: audioID, kind: .audio, name: "원본소리"),
+                                            Lane(id: audioA2ID, kind: .audio, name: "오디오"), Lane(id: audioA3ID, kind: .audio, name: "오디오")]
 }
 
 public enum EditError: Error, Equatable, CustomStringConvertible {
@@ -1067,6 +1080,12 @@ public struct Timeline: Sendable, Equatable {
         guard index(of: id) != nil, let p = partner(of: id), audioIndex(of: p.id) != nil else { return nil }
         return p.id
     }
+
+    // MARK: 새 프로젝트 시작 상태(ON-THE-FRAME-DEFAULT-LANES-01)
+
+    /// 새 프로젝트의 빈 타임라인: 기본 레인 둘에 빈 영상 레인 둘(위)과 빈 오디오 레인 둘(아래)을 더한 여섯 레인(`Lane.newProjectDefaults`).
+    /// 보통 레인이라 놓기·옮기기·선택·편집·이름·순서·삭제가 다른 레인과 같다. 파일 형식은 그대로(레인 수만 다르고 형식 2부터 허용된 모양).
+    public static func newProject() -> Timeline { Timeline(lanes: Lane.newProjectDefaults) }
 
     // MARK: 레인 편집(A-014)
 
