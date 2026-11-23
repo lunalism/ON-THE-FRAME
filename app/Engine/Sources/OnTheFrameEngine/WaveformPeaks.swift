@@ -179,7 +179,9 @@ public struct WaveformPeaks: Sendable, Equatable {
         let source = try await SpectrumFileSource.open(url: url, mediaID: mediaID)
         guard let track = try await AVURLAsset(url: url).loadTracks(withMediaType: .audio).first else { throw SpectrumAnalysisError.noAudioTrack }
         let range = try await track.load(.timeRange)
-        let end = CMTimeGetSeconds(range.end)   // PTS-based, the same time base the decoder places samples on
+        // PTS-based, the same time base the decoder places samples on: sample 0 is the playback reference start
+        // (SourceTimeOrigin), so the decoded length is counted from there. Unchanged when that start is zero.
+        let end = CMTimeGetSeconds(source.timeOrigin == .zero ? range.end : CMTimeSubtract(range.end, source.timeOrigin))
         guard end.isFinite, end > 0, end < 24 * 3600 else { throw SpectrumAnalysisError.decodeFailed("audio duration \(end)") }
         return try await build(provider: source, sampleCount: Int((end * Double(source.sampleRate)).rounded(.up)))
     }

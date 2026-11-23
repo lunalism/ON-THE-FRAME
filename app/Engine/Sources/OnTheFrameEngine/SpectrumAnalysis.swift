@@ -94,17 +94,25 @@ public enum SpectrumAnalysisError: Error, Equatable, Sendable {
 /// 표시되지 않아 공유 상태로 두지 않음). 부르는 쪽이 파일 접근(보안 범위)을 쥐고 있어야 한다.
 public final class SpectrumFileSource: SpectrumPCMProvider {
     public let url: URL, identity: SpectrumSourceIdentity, sampleRate: Int, channelCount: Int, chunkSamples: Int, marginSamples: Int
+    /// 표본 0의 파일 시각 = 재생의 기준 트랙 시작(SourceTimeOrigin). 표본 n은 파일 시각 timeOrigin + n / sampleRate다.
+    /// 재생(CompositionPlanner)이 클립 소리를 기준 트랙 시작 + sourceIn / 30 s에서 읽으므로 분석·파형도 같은 원점에서 센다.
+    public let timeOrigin: CMTime
     private let asset: AVURLAsset
     private let counter = OSAllocatedUnfairLock(initialState: 0)
     /// 디코딩한 덩어리 수(진단·시험용)
     public var decodeCount: Int { counter.withLock { $0 } }
 
-    private init(url: URL, identity: SpectrumSourceIdentity, sampleRate: Int, channelCount: Int, chunkSamples: Int, marginSamples: Int, asset: AVURLAsset) {
+    private init(url: URL, identity: SpectrumSourceIdentity, sampleRate: Int, channelCount: Int, chunkSamples: Int, marginSamples: Int, asset: AVURLAsset,
+                 timeOrigin: CMTime) {
         self.url = url; self.identity = identity; self.sampleRate = sampleRate; self.channelCount = channelCount
-        self.chunkSamples = chunkSamples; self.marginSamples = marginSamples; self.asset = asset
+        self.chunkSamples = chunkSamples; self.marginSamples = marginSamples; self.asset = asset; self.timeOrigin = timeOrigin
     }
     /// mediaID: 같은 경로라도 다른 미디어 항목이면 열쇠를 나눈다. 정체에는 경로·크기·수정 시각·표본율·격자가 들어간다(파일이 바뀌면 다른 열쇠).
     public static func open(url: URL, mediaID: UUID? = nil, sampleRate: Int = 48_000, chunkSamples: Int = 8 * 48_000, marginSamples: Int = 48_000) async throws -> SpectrumFileSource {
+        try await open(url: url, mediaID: mediaID, sampleRate: sampleRate, chunkSamples: chunkSamples, marginSamples: marginSamples, forcedOrigin: nil)
+    }
+    /// forcedOrigin: 시험용 — 파일에서 읽은 원점 대신 쓴다(제품 호출은 늘 nil).
+    static func open(url: URL, mediaID: UUID?, sampleRate: Int, chunkSamples: Int, marginSamples: Int, forcedOrigin: CMTime?) async throws -> SpectrumFileSource {
         precondition((8_000...384_000).contains(sampleRate) && chunkSamples > 0 && chunkSamples <= 1 << 26 && marginSamples >= 0 && marginSamples <= 1 << 26)
         let asset = AVURLAsset(url: url)
         guard let track = try await asset.loadTracks(withMediaType: .audio).first else { throw SpectrumAnalysisError.noAudioTrack }
@@ -116,10 +124,14 @@ public final class SpectrumFileSource: SpectrumPCMProvider {
         // 정체는 연 때의 파일 상태다(그 뒤 파일이 바뀌면 다시 열어야 함). 크기·수정 시각을 못 읽으면 이 열기에만 쓰는 값을 붙여 다른 열기와 나누지 않는다.
         let rv = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
         let stamp = rv.flatMap { v in v.fileSize.flatMap { n in v.contentModificationDate.map { "\(n)|\($0.timeIntervalSinceReferenceDate)" } } } ?? "unknown-\(UUID().uuidString)"
-        let id = SpectrumSourceIdentity([mediaID?.uuidString ?? "-", url.standardizedFileURL.path, stamp,
-                                         "\(sampleRate)", "\(chunkSamples)", "\(marginSamples)"].joined(separator: "|"))
+        let origin: CMTime
+        if let forcedOrigin { origin = SourceTimeOrigin.normalized(forcedOrigin) } else { origin = try await SourceTimeOrigin.load(asset) }
+        // 원점이 0이면 열쇠는 전과 같다. 0이 아니면 표본 번호의 뜻이 달라지므로 열쇠에 넣는다.
+        let originKey = origin == .zero ? [] : ["origin \(origin.value)/\(origin.timescale)"]
+        let id = SpectrumSourceIdentity(([mediaID?.uuidString ?? "-", url.standardizedFileURL.path, stamp,
+                                          "\(sampleRate)", "\(chunkSamples)", "\(marginSamples)"] + originKey).joined(separator: "|"))
         return SpectrumFileSource(url: url, identity: id, sampleRate: sampleRate, channelCount: Int(asbd.mChannelsPerFrame),
-                                  chunkSamples: chunkSamples, marginSamples: marginSamples, asset: asset)
+                                  chunkSamples: chunkSamples, marginSamples: marginSamples, asset: asset, timeOrigin: origin)
     }
     public func decodeChunk(_ c: Int) async throws -> [[Float]] {
         try await decodeRange(c * chunkSamples - marginSamples, (c + 1) * chunkSamples + marginSamples, keep: c * chunkSamples ..< (c + 1) * chunkSamples)
@@ -136,8 +148,9 @@ public final class SpectrumFileSource: SpectrumPCMProvider {
         var chans = [[Float]](repeating: [Float](repeating: 0, count: keep.count), count: channelCount)
         let reader: AVAssetReader
         do { reader = try AVAssetReader(asset: asset) } catch { throw SpectrumAnalysisError.decodeFailed("\(error)") }
-        reader.timeRange = CMTimeRange(start: CMTime(value: CMTimeValue(a), timescale: CMTimeScale(sampleRate)),
-                                       end: CMTime(value: CMTimeValue(b), timescale: CMTimeScale(sampleRate)))
+        let range = SourceTimeOrigin.fileRange(samples: a ..< b, rate: sampleRate, origin: timeOrigin)
+        guard range.duration > .zero else { return chans }   // 파일 시각 0보다 앞: 소리 없음
+        reader.timeRange = range
         let out = AVAssetReaderTrackOutput(track: track, outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: sampleRate, AVLinearPCMBitDepthKey: 32,
                                                                          AVLinearPCMIsFloatKey: true, AVLinearPCMIsNonInterleaved: false, AVLinearPCMIsBigEndianKey: false])
         out.alwaysCopiesSampleData = false
@@ -151,7 +164,7 @@ public final class SpectrumFileSource: SpectrumPCMProvider {
             let ch = Int(asbd.mChannelsPerFrame)
             guard ch == channelCount else { throw SpectrumAnalysisError.decodeFailed("channel count \(ch) ≠ \(channelCount)") }
             let pts = CMSampleBufferGetPresentationTimeStamp(sb)
-            let start = Int(CMTimeConvertScale(pts, timescale: CMTimeScale(sampleRate), method: .roundHalfAwayFromZero).value)   // 큰 시간 척도에서도 넘치지 않게
+            let start = SourceTimeOrigin.sample(atFileTime: pts, rate: sampleRate, origin: timeOrigin)
             let lo = max(start, keep.lowerBound), hi = min(start + n, keep.upperBound)
             guard lo < hi else { continue }
             var abl = AudioBufferList(), blk: CMBlockBuffer?
@@ -166,6 +179,36 @@ public final class SpectrumFileSource: SpectrumPCMProvider {
         }
         if reader.status == .failed { throw SpectrumAnalysisError.decodeFailed("\(reader.error.map { "\($0)" } ?? "reader failed")") }
         return chans
+    }
+}
+
+/// 원본 표본 번호와 파일 시각의 관계(E1, 2026-11-23). 재생과 같은 원점을 쓴다.
+///
+/// 재생(CompositionPlanner): 클립의 타임라인 프레임 f는 파일 시각 `기준 트랙 시작 + (sourceIn + f − start) / 30 s`의 소리를 낸다.
+/// 기준 트랙은 영상 트랙이 있으면 첫 영상 트랙, 없으면 첫 소리 트랙이다(`(vr ?? ar)?.start`). 소리 트랙이 덮지 않는 시각은 무음이다.
+/// 분석·파형: 원본 표본 n = (sourceIn + f − start) · rate / 30 → 파일 시각 `origin + n / rate`. 원점이 0이면 전과 같은 값이다.
+public enum SourceTimeOrigin {
+    /// 재생이 쓰는 기준 트랙 시작. 유효한 숫자 시각이 아니면 0으로 본다.
+    public static func load(_ asset: AVAsset) async throws -> CMTime {
+        let video = try await asset.loadTracks(withMediaType: .video).first
+        let audio = try await asset.loadTracks(withMediaType: .audio).first
+        guard let track = video ?? audio else { return .zero }
+        return normalized(try await track.load(.timeRange).start)   // 읽지 못하면 던진다 — 재생 구성도 같은 값을 읽지 못한다
+    }
+    static func normalized(_ t: CMTime) -> CMTime { t.isNumeric && t != .zero ? t : .zero }
+    /// 파일 시각의 표본 번호(가장 가까운 표본). 원점이 0이면 시각을 그대로 바꾼다(전과 같은 계산).
+    static func sample(atFileTime t: CMTime, rate: Int, origin: CMTime) -> Int {
+        let rel = origin == .zero ? t : CMTimeSubtract(t, origin)
+        return Int(CMTimeConvertScale(rel, timescale: CMTimeScale(rate), method: .roundHalfAwayFromZero).value)   // 큰 시간 척도에서도 넘치지 않게
+    }
+    /// 표본 [a, b)의 파일 시각 범위. 파일 시각 0보다 앞은 잘라 낸다(비면 길이 0).
+    static func fileRange(samples r: Range<Int>, rate: Int, origin: CMTime) -> CMTimeRange {
+        func time(_ n: Int) -> CMTime {
+            let t = CMTime(value: CMTimeValue(n), timescale: CMTimeScale(rate))
+            return origin == .zero ? t : CMTimeMaximum(.zero, CMTimeAdd(origin, t))
+        }
+        let a = time(r.lowerBound), b = time(r.upperBound)
+        return CMTimeRange(start: a, end: CMTimeMaximum(a, b))
     }
 }
 

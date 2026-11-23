@@ -1,5 +1,24 @@
 # 인계 요약 — ON THE FRAME
 
+## 2026-11-23 현행 인계 · SP-EXPORT-E1-CHECKPOINT
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 그 아래 이전 ‘현행’은 각 작성 시점 기준이다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 구현 체크포인트 | `feature/spectrum-effects`, 부모 `c40ee4a`. Spectrum 분석과 파형이 재생과 같은 원본 시각 원점(기준 트랙 시작)을 쓰도록 맞춘 방어적 정렬. 엔진 두 파일과 새 엔진 시험 세 파일. 프로젝트 형식·렌더링·앱 소스 변경 없음. [결정 기록](DECISIONS.md#2026-11-23-spectrum파형-원본-시각-원점-정렬sp-export-e1-소유자-수동-44-pass). 이 인계를 담은 커밋이 체크포인트다. |
+| 상태 | 구현됐고 시험한 범위 안에서 소유자가 수락했다. 실제로 0이 아닌 트랙 시작을 보고하는 미디어의 호환은 계속 OPEN이다. |
+| 게시 | 커밋·push는 소유자 승인 뒤에만 한다. 실제 결과는 원격 조회로 확인한다. |
+| 빌드·시험 | 외부 Debug `SpExportE1-Validate-20261123-01`(exit 0, 컴파일러 최대 RSS 약 1236 MiB): `SourceTimeOriginTests` 9/9, `WaveformPeaksTests` 8/8, Spectrum overlay 65/65·playback 203/203·lifecycle 25/25, 공개 Spectrum 검사 28개, 이미지 내보내기 사전 차단 검사 4개, 레인 확대 26/26, 타임라인 그리기 69/69 PASS. |
+| 소유자 수동 확인(소유자 보고) | 2026-11-23, 지정 오디오의 격리 사본으로 4/4 PASS(재생, 스테레오 파형, Digital·Analog Spectrum, 자르기·나누기·옮기기). |
+| Release 검증 | 없음(엔진 non-DEBUG 조건 타입 검사만). |
+| 사용 가능한 Debug 앱 | `/Volumes/Data/ON-THE-FRAME-Builds/DerivedData/SpExportE1-Validate-20261123-01/Build/Products/Debug/OnTheFrame.app` |
+| 빌드 산출물 | 관리 산출물은 마지막 시험 뒤 15.89 GiB였다(조기 중지 19.25 GiB). |
+
+**열린 문제.** 0이 아닌 트랙 시작을 보고하는 실제 미디어 미검증(생성 파일 12개에서 재현되지 않음), MP3·VFR·다른 표본율·여는 방식 차이 미검증, SwiftPM 의존 엔진 시험 57개 미실행, `korean.copyPaste` 1회 실패의 원인 미상(뒤이은 두 실행은 13/13), 공개 Spectrum Export 미구현과 Preview/Export 일치 미완료, 그리고 [이전 인계](#2026-11-23-현행-인계--sp-public-checkpoint-19)의 열린 문제.
+
+**다음 승인.** 후보는 일반 타임라인용 Spectrum Export 프레임 공급기(엔진, 공개 차단 유지)다. 범위·빌드·시험은 소유자가 정해 승인한다.
+
 ## 2026-11-23 현행 인계 · SP-PUBLIC-CHECKPOINT-19
 
 아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 그 아래 이전 ‘현행’은 각 작성 시점 기준이며, 바로 아래 두 인계(SP-PUBLIC-SELFTEST-ALIGN-17, SP-PUBLIC-UX-IMPLEMENT-04)의 "실행하지 않았다"·"소유자 수동 확인 없음"·일반 자체 검사 53/58은 이 인계로 대체된다.
