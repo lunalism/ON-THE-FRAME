@@ -1,5 +1,57 @@
 # 인계 요약 — ON THE FRAME
 
+## 2026-11-23 현행 인계 · SP-PUBLIC-CHECKPOINT-19
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 그 아래 이전 ‘현행’은 각 작성 시점 기준이며, 바로 아래 두 인계(SP-PUBLIC-SELFTEST-ALIGN-17, SP-PUBLIC-UX-IMPLEMENT-04)의 "실행하지 않았다"·"소유자 수동 확인 없음"·일반 자체 검사 53/58은 이 인계로 대체된다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 구현 체크포인트 | `feature/spectrum-effects`, 부모 `5dae148`. 공개 Spectrum 만들기(오디오 클립 문맥 메뉴 + 클립 조정 패널, 같은 저장소 명령), 저장 형식 안내(형식 8·11), 내보내기 사전 차단, 프로젝트와 함께 연 미디어 처리, 오류 글 두 건, non-DEBUG 컴파일 수정, 시험. 엔진 변경은 이미지 읽기 실패의 지역화된 설명 한 곳이며 프로젝트 형식·렌더링 변경은 없다. 이 인계를 담은 커밋이 체크포인트다. |
+| 게시 | 커밋·push는 소유자 승인 뒤에만 한다. 실제 결과는 원격 조회로 확인한다. |
+| 빌드·시험 | 마지막 외부 Debug `SpPublicSelfTest-Validate-20261123-01`(exit 0, 컴파일러 최대 RSS 약 1237 MiB, 조기 중지 1280 MiB): 일반 자체 검사 62/62, Spectrum overlay 65/65·playback 203/203·lifecycle 25/25, 이미지 적격성 34/34·3/3, `OpenImportSelfTest` 검사 18개 PASS. 직전 빌드 `SpPublicOpenImport-Validate-20261123-01`(다시 실행하지 않음): `ProjectSelfTest` 36/36, `ImageRelinkSelfTest` 79/79, 공개 Spectrum 검사 28개, 이미지 프로젝트 내보내기 사전 차단 검사 4개 PASS. 소유자 수동 9/9 PASS(소유자 보고). 2026-11-23의 Debug 빌드는 시도 6회·성공 5회·자원 안전 중지 1회이며, 별도의 단독 코드 생성 시도 1회는 결론이 없었고 Debug 빌드로 세지 않는다. 자동·수동 구분과 범주는 [체크포인트 기록](DECISIONS.md#2026-11-23-공개-spectrum-ux-체크포인트소유자-수동-99-pass)에 있다. 체크포인트 작업 자체는 빌드·시험을 실행하지 않았다. |
+| 소유자 승인(2026-11-23) | 공개 만들기와 두 입구·저장 형식 안내·내보내기 사전 차단, [함께 연 미디어](DECISIONS.md#2026-11-23-finder로-프로젝트와-미디어를-함께-열기소유자-승인), [알림 중 작업 대기열](DECISIONS.md#2026-11-23-알림-중-작업-대기열소유자-승인) |
+| 사용 가능한 Debug 앱 | `/Volumes/Data/ON-THE-FRAME-Builds/DerivedData/SpPublicSelfTest-Validate-20261123-01/Build/Products/Debug/OnTheFrame.app` |
+| 빌드 산출물 | 2026-11-23에 대체된 DerivedData 아홉 개를 삭제 없이 `/Volumes/Data/ON-THE-FRAME-Archives/derived-data-archive-20261123T064711Z`로 옮겼다(`.meta`에 원래 경로·복원 방법). 관리 산출물은 마지막 빌드·시험 뒤 14.91 GiB였다(조기 중지 19.25 GiB). 옮겨진 `DefaultLanes-Validate-20261122-01`을 가리키는 이전 타입 검사 인수 파일은 복원 전에는 그대로 다시 쓰지 않는다. Results의 보관 후보 목록은 `Results/SpPublicSelfTest-Validate-20261123-01/archive-manifest.txt`에 있고 옮기지 않았다. |
+
+**열린 문제.** 공개 Spectrum Export 미구현과 Preview/Export 일치 미완료, 기준 트랙 시작 오프셋(OPEN), 실제 Release 구성 빌드를 하지 않음(non-DEBUG 조건 타입 검사만), Spectrum 진단 대상 컴파일 자원 문제로 `SpectrumLaneSelfTest` 97개를 컴파일·실행하지 못함(형식 기대값 정정은 구문 검사만), `SpectrumNumericScrubSelfTest` 미실행(진입점 없음), 저장 실패·내용 검증 실패 알림의 원시 오류 표기, 컴파일러 최대 RSS 여유 약 40 MiB, Softness v1.1 유보, 그리고 [이전 인계](#2026-11-23-현행-인계--lane-zoom-checkpoint-01)의 열린 문제.
+
+**다음 승인.** 다음 구현·빌드·시험은 소유자가 범위를 정해 승인한다. 후보는 공개 Spectrum Export(내부 Debug Export 조각을 공개 경로로 잇기, Preview/Export 일치 확인, 사전 차단 해제 조건)다. 실제 Release 구성 빌드와 Results 보관 이동은 별도 승인이 필요하다.
+
+## 2026-11-23 현행 인계 · SP-PUBLIC-SELFTEST-ALIGN-17
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 그 아래 이전 ‘현행’은 각 작성 시점 기준이며, 바로 아래 SP-PUBLIC-UX-IMPLEMENT-04 인계의 "빌드·실행 시험 하지 않았다"는 그 뒤 이 인계의 내용으로 이어진다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 작업 상태 | `feature/spectrum-effects` @ `5dae148` 위의 **커밋하지 않은 작업 트리 변경**(작성 시점에 수정 20개, 새 파일 6개). 커밋·push는 소유자 승인 뒤에만 한다. |
+| 구현 | 공개 Spectrum 만들기(문맥 메뉴 + 클립 조정 패널), 저장 형식 안내(형식 8·11), 내보내기 사전 차단, 프로젝트와 함께 연 미디어 처리, 오류 글 두 건, non-DEBUG 컴파일 수정. [구현 결정](DECISIONS.md#2026-11-23-공개-spectrum-만들기저장-형식-안내내보내기-사전-차단) · [검증과 회귀 수정](DECISIONS.md#2026-11-23-공개-spectrum-실행-검증과-회귀-수정) |
+| 소유자 승인(2026-11-23) | 공개 만들기와 두 입구, 저장 형식 안내, 내보내기 사전 차단, [함께 연 미디어](DECISIONS.md#2026-11-23-finder로-프로젝트와-미디어를-함께-열기소유자-승인), [알림 중 작업 대기열](DECISIONS.md#2026-11-23-알림-중-작업-대기열소유자-승인) |
+| 타입 검사 | Debug 조건 오류 0, non-DEBUG 조건(Debug에서 얻은 설정) 오류 0. 실제 Release 구성 빌드가 아니다. |
+| Debug 빌드 | 외부 단일 작업 빌드 5회(1회 안전 중지, 4회 성공). 최신 사용 가능 앱: `/Volumes/Data/ON-THE-FRAME-Builds/DerivedData/SpPublicOpenImport-Validate-20261123-01/Build/Products/Debug/OnTheFrame.app`. 그 뒤에 바꾼 것은 일반 자체 검사의 시험 파일 둘뿐이라 이 앱의 제품 코드는 현재 소스와 같다. |
+| 자동 시험 | 공개 Spectrum 28 + 이미지 사전 차단 4, `ProjectSelfTest` 36, `ImageRelinkSelfTest` 79, `OpenImportSelfTest` 19, Spectrum overlay 65·playback 203·lifecycle 25, 타임라인 묶음 — 모두 PASS(빌드별 구분은 결정 기록의 표). 일반 자체 검사는 53/58. |
+| 소유자 수동 확인 | **없음.** |
+| Release 검증 | **없음.** |
+
+**열린 문제.** 일반 자체 검사를 승인된 대기열 계약에 맞췄으나(62줄 기대) 빌드·실행하지 않음 — 그 묶음의 내보내기 취소·시간 기준이 다른 원본·차례 실행 검사는 2026-10-11 뒤 실제로 확인된 적이 없다. `SpectrumLaneSelfTest` 97개(진단 대상 컴파일 차단)와 `SpectrumNumericScrubSelfTest`(진입점 없음) 미실행. 컴파일러 최대 RSS 약 1233~1242 MiB로 조기 중지 1280 MiB까지 여유 약 40 MiB. 관리 산출물 약 17.2 GiB(조기 중지 19.25 GiB) — 보관 후보 목록은 `Results/SpPublicSelfTest-Validate-20261123-01/archive-manifest.txt`에 있고 옮긴 것은 없다. 저장 실패·내용 검증 실패 알림의 원시 오류 표기. 공개 Spectrum Export 미구현, Preview/Export 일치·기준 트랙 시작 오프셋 OPEN, Softness v1.1 유보. 그리고 [이전 인계](#2026-11-23-현행-인계--lane-zoom-checkpoint-01)의 열린 문제.
+
+**다음 승인.** ① 소유자 수동 확인(두 입구로 만들기, 소스·모양·시간 편집, 저장 형식 안내의 취소와 저장, 다시 열기, 내보내기 단추와 ⌘E의 알림, 프리뷰). ② 감독 Debug 빌드 1회와 집중 시험(일반 자체 검사, Spectrum overlay·playback·lifecycle, 이미지 적격성). ③ 빌드 산출물 보관 이동. ④ 체크포인트 커밋. ⑤ 실제 Release 구성 빌드. 범위와 순서는 소유자가 정한다.
+
+## 2026-11-23 현행 인계 · SP-PUBLIC-UX-IMPLEMENT-04
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 그 아래 이전 ‘현행’은 각 작성 날짜 기준이다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 작업 상태 | `feature/spectrum-effects` @ `5dae148` 위의 **커밋하지 않은 작업 트리 변경**이다. 커밋·push는 소유자 승인 뒤에만 한다. |
+| 소스 구현 | Spectrum 만들기 공개(오디오 클립 문맥 메뉴 + 클립 조정 패널 단추, 같은 `addSpectrum`), 형식 8·11로 처음 올리는 저장 앞의 확인, Spectrum 항목이 있는 프로젝트의 내보내기 사전 차단, non-DEBUG 컴파일 수정(`AlertPresenter.cancelCurrent`). 엔진·프로젝트 형식·렌더링 변경 없음. [결정](DECISIONS.md#2026-11-23-공개-spectrum-만들기저장-형식-안내내보내기-사전-차단) |
+| 타입 검사 | 단일 `swift-frontend -typecheck`(RSS 최대 약 453 MiB, 조기 중지 1280 MiB). Debug 조건 오류 0, non-DEBUG 조건(앱 소스 71개 전체) 오류 0. non-DEBUG 검사는 Debug에서 얻은 설정을 쓴 것이며 **실제 Release 빌드가 아니다.** 증거 `/Volumes/Data/ON-THE-FRAME-Builds/Results/SpPublicUX-Typecheck-20261123-01/`. |
+| 빌드·실행 시험 | **하지 않았다.** `SpectrumPublicSelfTest`(만들기·소스·모양·시작/길이·삭제·저장/다시 열기·소스 없음, 내보내기 사전 차단, 저장 형식 안내, 낡은 확인 닫기)는 준비만 됐다. |
+| 소유자 수동 확인 | **없음.** |
+
+**열린 문제.** 실행 검증 전체, 실제 Release 구성 빌드, 이미지 프로젝트의 내보내기 사전 차단 실행 확인, Spectrum 진단 대상 컴파일 차단(2026-10-31 [IMG-BUILD-02](diagnostics/IMG-BUILD-02-MEMBERSHIP-RECOVERY.md))으로 `SpectrumLaneSelfTest` 실행 불가(형식 기대값 여덟 곳은 11로 정정했으나 실행·타입 검사 못 함), 저장 흐름을 거치는 이전 검사 두 곳(`ProjectSelfTest`, `SpectrumNumericScrubSelfTest`)을 새 안내에 맞췄으나 미실행, 공개 Spectrum Export·Preview/Export 일치 미완료, [README.md](../README.md)·[PRODUCT.md](PRODUCT.md)의 "만들기는 Debug 전용" 문장은 이번 범위 밖이라 그대로임, 그리고 [이전 인계](#2026-11-23-현행-인계--lane-zoom-checkpoint-01)의 열린 문제.
+
+**다음 승인.** 소유자가 감독하는 외부 Debug 빌드 1회와 집중 회귀(`spectrum-public-test`, Spectrum 엔진 XCTest, 기존 Preview·프로젝트·타임라인 묶음), 그 뒤 소유자 수동 확인. 실제 Release 빌드는 별도 승인이 필요하다.
+
 ## 2026-11-23 현행 인계 · LANE-ZOOM-CHECKPOINT-01
 
 아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 그 아래 이전 ‘현행’은 각 작성 날짜 기준이다.

@@ -189,7 +189,17 @@ import ImageIO
                     try check("enabled " + title, item.isEnabled)
                     edit.performActionForItem(at: edit.index(of: item))
                 }
-                s.editorWindow?.makeKeyAndOrderFront(nil)
+                // 메뉴의 실행 취소·다시 실행은 편집기가 메뉴 대상일 때만 타임라인에 적용된다(ProjectStore.menuUndo — 아니면 응답 체인으로 보낸다).
+                // 앱이 비활성이면 메뉴 동작이 타임라인을 바꾸지 않으므로, 메뉴를 쓰기 전에 편집기를 대상으로 만들고 그 전제를 검사로 남긴다
+                // (SP-PUBLIC-RELINK-UNDO-TRIAGE-12: 앱이 초점을 잃은 채 메뉴 실행 취소가 적용되지 않아 "undo availability"로 잘못 드러났다).
+                func focusEditor() async throws {
+                    NSApp.activate()
+                    s.editorWindow?.makeKeyAndOrderFront(nil)
+                    let end=Date().addingTimeInterval(3)
+                    while !KeyRouting.menuTargetsEditor(s),Date()<end {try await Task.sleep(nanoseconds:10_000_000)}
+                    try check("editor is the menu target", KeyRouting.menuTargetsEditor(s))
+                }
+                try await focusEditor()
                 try menu("실행 취소")
                 try await waitForPreview(true)
                 try check("undo restores timeline and preview generation",s.timeline==original && s.generation>gen)
@@ -216,11 +226,14 @@ import ImageIO
                     try check("keyboard redo protects unsaved relink", s.timeline == linked && !s.canCloseWithoutPrompt)
                 }
                 try FileManager.default.moveItem(at: displaced, to: a)
+                try await focusEditor()
                 try menu("실행 취소")
                 try await record("A-returned", source: a, missing: false)
                 try check("returned source revalidated", availabilityMatches)
                 s.applyImageAvailability(false, id: id, snapshot: original, session: linkedSession, generation: gen)
                 try check("late generation cannot mark returned source missing", s.missingMedia[id] == nil)
+                try await focusEditor()
+                try await focusEditor()
                 try menu("다시 실행")
                 try check("redo restores timeline",s.timeline==linked)
                 let redoFile=folder.appendingPathComponent("redo.ontheframe")
@@ -253,7 +266,25 @@ import ImageIO
                 // The external UI automation driver clicks Cancel on this panel.
                 // DispatchQueue.main callbacks are not a reliable modal-loop driver.
                 if !ProcessInfo.processInfo.arguments.contains("-OTFRelinkMenuRegression") {
+                    // 무인 실행에서 끝없이 기다리지 않게(SP-PUBLIC-RELINK-UNDO-TRIAGE-12): 이 검사가 띄운 바로 그 패널만, 패널의 모달 실행 루프 모드에서
+                    // 도는 타이머로 취소한다(저장 패널 자체 검사와 같은 방식). 승인(ok)은 하지 않고 다른 창·대화상자는 건드리지 않는다.
+                    // 10초 안에 패널이 보이지 않으면 타이머를 멈춘다 — 그때는 사람이 "취소"를 눌러야 하며 실행기가 그 요청을 알린다.
+                    var cancelTimer: Timer?
+                    s.panelWillRunForTest = { panel in
+                        var ticks = 0
+                        let timer = Timer(timeInterval: 0.25, repeats: true) { t in
+                            MainActor.assumeIsolated {
+                                ticks += 1
+                                if panel.isVisible { panel.cancel(nil); t.invalidate() }
+                                else if ticks >= 40 { t.invalidate() }
+                            }
+                        }
+                        RunLoop.main.add(timer, forMode: .modalPanel)
+                        cancelTimer = timer
+                    }
                     s.presentImageRelink(id)
+                    s.panelWillRunForTest = nil
+                    cancelTimer?.invalidate()
                     try check("native Open panel cancel unchanged",s.timeline==stable && starts-stops==owned)
                 }
                 var done=false,result=true
@@ -293,12 +324,20 @@ import ImageIO
                 try check("failed candidate keeps missing source", !rowFailed && s.pendingImageRelinkID == nil && s.alert?.title == "이미지를 다시 연결할 수 없습니다")
                 await dismiss()
                 try await checkRow("failed", missing: true, source: a)
+                let rowBefore = s.timeline
                 let rowLinked = try await relink(b)
                 try check("row relink committed", rowLinked)
                 try await checkRow("relink", missing: false, source: b)
+                let rowRelinked = s.timeline
+                // 실행 취소가 실제로 타임라인에 적용됐는지를 먼저 따로 본다(적용되지 않은 것과 적용 뒤 누락 상태가 틀린 것을 구분).
+                // 그 다음 누락 상태는 기다리지 않고 바로 본다: 실행 취소는 그 원본 리비전의 접근 정보(누락 사유 포함)를 같은 자리에서 되살려야 한다.
+                try await focusEditor()
                 try menu("실행 취소")
+                try check("row undo restores timeline", s.timeline == rowBefore && rowRelinked != rowBefore)
                 try await checkRow("undo", missing: true, source: a)
+                try await focusEditor()
                 try menu("다시 실행")
+                try check("row redo restores timeline", s.timeline == rowRelinked)
                 try await checkRow("redo", missing: false, source: b)
                 let rowFile = folder.appendingPathComponent("reopen-row.ontheframe")
                 try check("save row fixture", s.writeProject(to: rowFile))

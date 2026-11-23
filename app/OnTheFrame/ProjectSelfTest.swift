@@ -46,7 +46,12 @@ enum ProjectSelfTest {
         let p1 = out.appendingPathComponent("p1.ontheframe")
         s.savePanelResultForTest = p1
         s.saveProject()
-        let saved1 = FileManager.default.fileExists(atPath: p1.path) && !s.isDirty
+        // SP-PUBLIC-UX-IMPLEMENT-04(2026-11-23): 자른 소리의 계보로 형식 8이 되는 첫 저장은 쓰기·패널 앞에서 저장 형식 안내를 띄운다. "저장"을 눌러 기존 경로를 잇는다.
+        _ = await waitUntil(5) { s.alerts.isShowing }
+        let formatWarned = s.alert?.title == ProjectStore.formatWarningTitle && !FileManager.default.fileExists(atPath: p1.path) && s.isDirty
+        s.alerts.pressButton(0)
+        _ = await waitUntil(5) { !s.isDirty && !s.alerts.isShowing }
+        let saved1 = formatWarned && FileManager.default.fileExists(atPath: p1.path) && !s.isDirty
         let savedTimeline = s.timeline
         check("save.firstNoCompletion", saved1 && fm.fileExists(atPath: p1.path) && !s.isDirty && s.projectURL?.lastPathComponent == "p1.ontheframe" && s.windowTitle == "p1"
               && s.recentProjects.first?.path == p1.standardizedFileURL.path, "title \(s.windowTitle) recents \(s.recentProjects.map(\.name))")
@@ -91,7 +96,12 @@ enum ProjectSelfTest {
         let r3 = s.writeProject(to: p1)
         let msg3 = s.alert?.message ?? ""
         await dismiss()
-        check("save.failurePreserves", !r3 && sha(p1) == p1Hash && s.isDirty && s.recentProjects == recentsBefore && msg3.contains("그대로"), msg3)
+        // SP-PUBLIC-REGRESSION-FIX-10(2026-11-23): 알림 글의 기대를 현재 제품 글("…이전 파일과 편집 상태를 유지했습니다", 65c4d87부터)에 맞췄다(이전 기대 "그대로").
+        // 안전 조건과 글 조건을 따로도 적는다(글이 바뀌어도 안전 결과가 가려지지 않게). 합친 원래 검사도 그대로 둔다.
+        let failedSave = SaveFailureObservation(returnedFalse: !r3, bytesKept: sha(p1) == p1Hash, dirtyKept: s.isDirty,
+                                                recentsKept: s.recentProjects == recentsBefore, urlKept: s.projectURL == p1.standardizedFileURL, message: msg3)
+        checks += failedSave.rows
+        check("save.failurePreserves", failedSave.allSafe && failedSave.messageOK, msg3)
         // 5. 저장하지 않은 변경이 있을 때 새 프로젝트: 확인(저장·취소·저장 안 함), 취소는 그대로, 저장은 저장 뒤 진행
         s.requestNewProject()
         _ = await waitUntil(5) { s.alerts.isShowing }
@@ -133,12 +143,18 @@ enum ProjectSelfTest {
             o["version"] = 99; try? JSONSerialization.data(withJSONObject: o).write(to: newer)
         }
         let recents2 = s.recentProjects
+        let filesBefore = [sha(p1), sha(bad), sha(newer)]
         let okBad = await s.openProject(at: bad)
         let badMsg = s.alert?.message ?? ""; await dismiss()
         let okNewer = await s.openProject(at: newer)
         let newerMsg = s.alert?.message ?? ""; await dismiss()
-        check("open.rejectsMalformedAndNewer", !okBad && !okNewer && s.timeline == reopened && s.projectURL == p1.standardizedFileURL && s.recentProjects == recents2
-              && badMsg.contains("손상") && newerMsg.contains("더 새로운 버전"), "bad '\(badMsg)' newer '\(newerMsg)'")
+        // SP-PUBLIC-REGRESSION-FIX-10(2026-11-23): 더 새 형식의 기대 글을 현재 제품 글("더 새로운 프로젝트 형식(n)…", 65c4d87부터)에 맞췄다(이전 기대 "더 새로운 버전").
+        // 손상된 파일은 "손상" 설명이어야 하고 디코더 원문을 보이지 않아야 한다. 안전 조건과 글 조건을 따로도 적고, 합친 원래 검사도 그대로 둔다.
+        let rejectedOpen = RejectedOpenObservation(bothRejected: !okBad && !okNewer, timelineKept: s.timeline == reopened,
+                                                   urlKept: s.projectURL == p1.standardizedFileURL, recentsKept: s.recentProjects == recents2,
+                                                   filesKept: [sha(p1), sha(bad), sha(newer)] == filesBefore, badMessage: badMsg, newerMessage: newerMsg)
+        checks += rejectedOpen.rows
+        check("open.rejectsMalformedAndNewer", rejectedOpen.allSafe && rejectedOpen.malformedMessageOK && rejectedOpen.newerMessageOK, "bad '\(badMsg)' newer '\(newerMsg)'")
         // 7b. 스펙트럼이 든 형식 8(SP-1A 2B-1, 2026-10-26 — 1단계의 임시 열기 거부를 뺌): 열리고 타임라인이 그대로(스펙트럼 레인 포함), 저장 상태, 파일 그대로.
         //     같은 내용을 형식 7로 적은 파일은 잘못된 파일로 거부한다(현재 상태·파일 그대로). 그 뒤 p1을 다시 열어 아래 검사를 잇는다.
         let spec = out.appendingPathComponent("spectrum.ontheframe"), spec7 = out.appendingPathComponent("spectrum-v7.ontheframe")
@@ -238,6 +254,46 @@ enum ProjectSelfTest {
         while Date() < end { if cond() { return true }; try? await Task.sleep(nanoseconds: 20_000_000) }
         return cond()
     }
+    /// 저장 실패 뒤의 관찰(SP-PUBLIC-REGRESSION-FIX-10): 안전 조건마다 한 줄, 알림 글 한 줄. run 밖의 작은 타입으로 둔다(큰 비동기 함수를 더 키우지 않게).
+    struct SaveFailureObservation {
+        let returnedFalse: Bool, bytesKept: Bool, dirtyKept: Bool, recentsKept: Bool, urlKept: Bool
+        let message: String
+        var allSafe: Bool { returnedFalse && bytesKept && dirtyKept && recentsKept && urlKept }
+        /// 현재 제품 글: 교체 전 실패이며 이전 파일과 편집 상태를 유지했다고 알린다
+        var messageOK: Bool { message.contains("교체 전 실패") && message.contains("유지했습니다") }
+        var rows: [Check] {
+            [Check(name: "save.failure.reportsFailure", pass: returnedFalse, detail: ""),
+             Check(name: "save.failure.fileBytesPreserved", pass: bytesKept, detail: ""),
+             Check(name: "save.failure.dirtyStatePreserved", pass: dirtyKept, detail: ""),
+             Check(name: "save.failure.recentsPreserved", pass: recentsKept, detail: ""),
+             Check(name: "save.failure.projectURLPreserved", pass: urlKept, detail: ""),
+             Check(name: "save.failure.message", pass: messageOK, detail: message)]
+        }
+    }
+    /// 거부한 열기(손상된 파일, 더 새 형식) 뒤의 관찰: 안전 조건마다 한 줄, 알림 글 두 줄.
+    struct RejectedOpenObservation {
+        let bothRejected: Bool, timelineKept: Bool, urlKept: Bool, recentsKept: Bool, filesKept: Bool
+        let badMessage: String, newerMessage: String
+        var allSafe: Bool { bothRejected && timelineKept && urlKept && recentsKept && filesKept }
+        /// 손상·형식 불일치 설명이고 현재 프로젝트가 그대로임을 알리며, 디코더 원문(DecodingError·NSCocoaErrorDomain)을 보이지 않는다
+        var malformedMessageOK: Bool {
+            badMessage.contains("손상") && badMessage.contains("현재 프로젝트는 그대로") && !badMessage.contains("DecodingError") && !badMessage.contains("NSCocoaErrorDomain")
+        }
+        /// 더 새 형식은 손상과 구별되는 설명(형식 번호 포함)
+        var newerMessageOK: Bool {
+            newerMessage.contains("더 새로운 프로젝트 형식") && newerMessage.contains("99") && newerMessage.contains("현재 프로젝트는 그대로") && !newerMessage.contains("손상")
+        }
+        var rows: [Check] {
+            [Check(name: "open.rejected.bothRefused", pass: bothRejected, detail: ""),
+             Check(name: "open.rejected.timelinePreserved", pass: timelineKept, detail: ""),
+             Check(name: "open.rejected.projectURLPreserved", pass: urlKept, detail: ""),
+             Check(name: "open.rejected.recentsPreserved", pass: recentsKept, detail: ""),
+             Check(name: "open.rejected.fileBytesPreserved", pass: filesKept, detail: ""),
+             Check(name: "open.rejected.malformedMessage", pass: malformedMessageOK, detail: badMessage),
+             Check(name: "open.rejected.newerFormatMessage", pass: newerMessageOK, detail: newerMessage)]
+        }
+    }
+
     static func finish(_ folder: URL, _ checks: [Check], _ m: LaneSelfTest.Manifest?) {
         let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let m, let d = try? enc.encode(m) { try? d.write(to: folder.appendingPathComponent("project-manifest.json")) }

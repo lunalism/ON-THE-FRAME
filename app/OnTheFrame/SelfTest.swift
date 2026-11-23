@@ -236,35 +236,22 @@ enum SelfTest {
         check("export.unconfirmedRejected", (store.alert?.message ?? "").contains("확인하지 않아"), store.alert?.message ?? "")
         await dismissAlert()
 
-        // 4i. 알림 경로 반복(2026-10-10 충돌 경로): 즉시 실패하는 내보내기·거부 가져오기 묶음을 겹쳐 반복하고,
-        //     알림이 떠 있는 동안 생긴 알림은 바꾸지 않고 대기열에 쌓였다가 닫을 때마다 하나씩 나오는지 본다.
-        var shown: [String] = []
-        for k in 0..<8 {
-            store.startExport(.fromSavePanel(src.appendingPathComponent("otf-B.mp4")))    // 원본 대상 → 즉시 실패 알림
-            store.importFiles([src.appendingPathComponent("reject-prores.mov"), src.appendingPathComponent("reject-500fps.mp4")])
-            store.seek(to: k * 7)                                                          // 같은 시점의 다른 화면 갱신
-            _ = await waitUntil(10) { store.exportPhase == .idle && store.importing == 0 }
-        }
-        _ = await waitUntil(10) { store.alert != nil }
-        _ = await waitUntil(5) { store.importing == 0 }
-        var guardCount = 0
-        while let a = store.alert, guardCount < 40 {
-            shown.append(a.title); guardCount += 1
-            await dismissAlert()
-        }
-        let fails = shown.filter { $0 == "내보내기 실패" }.count, rejects = shown.filter { $0 == ProjectStore.rejectTitle }.count
-        check("alert.queuedNotReplaced", fails == 8 && rejects == 8 && store.alert == nil, "shown \(shown.count): fail \(fails) reject \(rejects)")
+        // 4i. 알림과 작업 대기열(2026-10-10 충돌 경로 → 2026-11-23 소유자 승인 계약에 맞춤, SelfTestQueueChecks.swift):
+        //     알림이 떠 있는 동안 대기 작업은 시작하지 않고, 닫으면 차례대로 이어진다. 떠 있는 알림은 바뀌지 않고 하나씩 나온다.
+        checks += await alertGatedQueueChecks(store, src: src)
         // 4j. 취소 반복
-        var cancelOK = 0
+        var cancelOK = 0, cancelRan = 0
         for k in 0..<4 {
             let u = out.appendingPathComponent("cancel-\(k).mp4")
             store.startExport(.fromSavePanel(u))
-            _ = await waitUntil(10) { if case .running(let p) = store.exportPhase { return p > 0.05 } else { return false } }
+            if await waitUntil(10, { if case .running(let p) = store.exportPhase { return p > 0.05 } else { return false } }) { cancelRan += 1 }
             store.cancelExport()
             _ = await waitUntil(30) { store.exportPhase == .idle }
             if !fm.fileExists(atPath: u.path) && store.alert == nil { cancelOK += 1 }
         }
         check("export.cancelRepeated", cancelOK == 4, "\(cancelOK)/4")
+        // 취소한 것이 실제로 진행 중이던 내보내기였는지 따로 적는다(시작되지 않은 내보내기를 "취소 성공"으로 세지 않게 — SP-PUBLIC-SELFTEST-ALIGN-17)
+        check("export.cancelRepeated.exportsRan", cancelRan == 4, "\(cancelRan)/4")
 
         // 4k. A-010: 30 fps가 아닌 원본(29.97·가변)을 같은 앱 경로로 붙이고 자르기·앞 트림 뒤 내보낸다. 판정은 otf-dev verify(독립 기대값).
         if let nt = store.assets.first(where: { $0.name == "otf-N2997.mp4" }), let vf = store.assets.first(where: { $0.name == "otf-VFR.mp4" }) {

@@ -25,9 +25,9 @@ ON THE FRAME은 음악을 중심으로 이미지·영상·오디오를 배치하
 
 **2026-11-18 게시된 main 기준:** `90ce4db48ea07e216afe709a5f920628f005eb2a`에 Spectrum 체크포인트와 문서 정렬이 통합됐다. 아래 기능 설명은 이 게시본 기준이다. 로컬 개발 브랜치의 구현·수락 범위는 [날짜별 인계](docs/HANDOFF.md), 기능별 검증 기록은 [로드맵](docs/ROADMAP.md#현행-기능과-검증-경계), 저장·읽기 경계는 [형식 표](docs/PRODUCT.md#현행-프로젝트-형식과-기능-경계)를 참조한다.
 
-- **편집기([app/](app/)):** 영상·오디오 가져오기, 여러 레인·연결·트림·분할·이동·복사/붙여넣기·Undo/Redo, 영상 변형·오디오 gain/mute/fade, 자막·효과·자막 포함 FHD 30 fps SDR H.264/AAC MP4 내보내기, 프로젝트 저장/열기·재연결이 구현돼 있다. `.ontheframe`은 콘텐츠와 경로에 따라 형식을 선택하며 현재 앱 persistence 경계는 Format 10이다.
+- **편집기([app/](app/)):** 영상·오디오 가져오기, 여러 레인·연결·트림·분할·이동·복사/붙여넣기·Undo/Redo, 영상 변형·오디오 gain/mute/fade, 자막·효과·자막 포함 FHD 30 fps SDR H.264/AAC MP4 내보내기, 프로젝트 저장/열기·재연결이 구현돼 있다. `.ontheframe`은 콘텐츠와 경로에 따라 형식을 선택한다(자막·효과·소리 계보·이미지·Spectrum 유무에 따라 정해진다). 현재 앱이 읽고 쓰는 최신 형식은 Format 11이며 실제 Spectrum 항목이 있을 때 쓴다([형식 표](docs/PRODUCT.md#현행-프로젝트-형식과-기능-경계)).
 - **이미지:** 사용자 정의 Debug 빌드 조건과 명시적 실행 인수가 필요한 내부 경로다. 한정된 고해상도·Display P3 입력을 허용하고 Preview 표현을 sRGB로 정규화하지만, 임의 해상도·모든 이미지·공개 Release 지원을 뜻하지 않는다.
-- **Spectrum:** 생성은 Debug 전용이며 기존 항목 편집·소스 계보·Digital/Analog·정수 숫자와 직접 mouse scrubbing·live Preview·Undo/Redo가 구현돼 있다. 유효하게 완료된 Digital 0높이 분석은 밴드별 최소 점을 그린다. Seek 연속성과 이미지 재구성 중 playback intent 수정도 게시됐다. **공개 Spectrum Export는 비활성**이며 내부 공유 렌더링 검증과 구분한다.
+- **Spectrum:** 생성은 2026-11-23부터 Debug·Release 공통이다(오디오 클립 문맥 메뉴와 클립 조정 패널 단추 — Debug 자동 검증 통과, 소유자 수동 확인 9/9 PASS, 실제 Release 구성 빌드는 아직 없음, [인계](docs/HANDOFF.md)). 기존 항목 편집·소스 계보·Digital/Analog·정수 숫자와 직접 mouse scrubbing·live Preview·Undo/Redo가 구현돼 있다. 유효하게 완료된 Digital 0높이 분석은 밴드별 최소 점을 그린다. Seek 연속성과 이미지 재구성 중 playback intent 수정도 게시됐다. **공개 Spectrum Export는 비활성**이며 내부 공유 렌더링 검증과 구분한다.
 - **수락과 게시:** scrubbing과 ZERO의 소유자 수락은 각각 시험한 조건의 **6/6 PASS**이며 관련 체크포인트는 feature에 게시됐다. 이전 자동 검증·소유자 수락·커밋/푸시는 서로 다른 상태다. 이번 문서 작업에서 제품 검사를 재실행하지 않았다.
 - **후속 개발:** 2026-11-17에 제안한 순서는 `SPECTRUM-UX-02 → SPECTRUM-FX-01 → SPECTRUM-FX-02 → SPECTRUM-SHADOW-01`이었다. 이후의 UX-02 유보와 로컬 FX 진행 상태는 인계에 기록했다.
 - **실험:** E1(짧은 FHD)과 E3-1(10분 FHD)은 각 실험 범위에서 완료, E2(짧은 4K)는 원본 프레임 불일치로 미완료다. E3-2 이후는 시작하지 않았고 과거 실험의 통과가 현재 제품 전체의 수락은 아니다.

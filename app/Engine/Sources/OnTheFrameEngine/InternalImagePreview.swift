@@ -82,8 +82,10 @@ public enum InternalImagePreview {
         let work=Task.detached { try await build(t,media:media,settings:settings,resolvedImages:resolvedImages,cache:cache,onSourceAvailability:onSourceAvailability) }
         return try await withTaskCancellationHandler(operation:{let result=try await work.value;try Task.checkCancellation();return result},onCancel:{work.cancel()})
     }
-    enum SecondReadFailure: Error, Equatable, CustomStringConvertible {
+    enum SecondReadFailure: Error, Equatable, CustomStringConvertible, LocalizedError {
         case missing, inaccessible, changed, decoder, resources, unverified(Int32)
+        /// 사용자 알림이 `localizedDescription`으로 이 설명을 쓰게 한다(SP-PUBLIC-REGRESSION-FIX-10: 지역화된 설명이 없어 타입 이름이 섞인 일반 문구가 보였다).
+        var errorDescription: String? { description }
 
         var sourceUnavailable: Bool {
             switch self {

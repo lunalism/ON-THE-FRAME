@@ -75,7 +75,7 @@ open /Volumes/Data/ON-THE-FRAME-Builds/DerivedData/scripts-default/Build/Product
 
 - Xcode 프로젝트의 기존 진입점은 `app/OnTheFrame.xcodeproj`와 OnTheFrame 스킴이다. 일반 ⌘R도 현재 자원 guard를 보장하는 실행 절차는 아니다.
 - `scripts/build.sh Release`는 Release 구성을 요청하는 인터페이스다. 성공 여부는 위와 같이 별도 판정한다. Debug 전용 자체 검사·내부 진입점이 Release에서 제공된다고 주장하지 않는다.
-- 이미지 가져오기는 Debug의 `OTF_IMAGE_IMPORT` 컴파일 조건과 명시적 `-OTFEnableImageImport` 실행 인자가 모두 필요하다. 일반 Debug 빌드라는 이유만으로 이 기능이 켜지지 않으며 Release 지원으로 일반화하지 않는다. Spectrum 생성은 Debug 전용이다. 기존 Spectrum 편집·소스 선택과 생성 gate는 구분하고, 공개 Spectrum Export는 계속 비활성이다. 내부 Export 검사는 공개 내보내기 지원 승인이 아니다.
+- 이미지 가져오기는 Debug의 `OTF_IMAGE_IMPORT` 컴파일 조건과 명시적 `-OTFEnableImageImport` 실행 인자가 모두 필요하다. 일반 Debug 빌드라는 이유만으로 이 기능이 켜지지 않으며 Release 지원으로 일반화하지 않는다. Spectrum 생성은 2026-11-23부터 Debug·Release 공통이다(오디오 클립 문맥 메뉴, 클립 조정 패널 단추 — [결정](../docs/DECISIONS.md#2026-11-23-공개-spectrum-만들기저장-형식-안내내보내기-사전-차단), 그 전에는 Debug 전용). 실제 Release 구성 빌드로 확인한 것은 아니다. 공개 Spectrum Export는 계속 비활성이며 Spectrum 항목이 있으면 대상 파일을 고르기 전에 막는다. 내부 Export 검사는 공개 내보내기 지원 승인이 아니다.
 
 ### 기존 테스트 인터페이스 예
 

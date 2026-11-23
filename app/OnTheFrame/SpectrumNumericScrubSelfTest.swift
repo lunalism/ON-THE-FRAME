@@ -495,6 +495,7 @@ import OnTheFrameEngine
             let url = folder.appendingPathComponent(property.rawValue + "-active-save.ontheframe")
             // Existing menu save path, with a task-owned destination and no panel.
             x.store.projectURL = url
+            x.store.setLastPersistedFormatForTest(11)   // 이미 형식 11로 저장된 프로젝트처럼(저장 형식 안내가 아니라 끌기 중 저장을 보는 검사 — SP-PUBLIC-UX-IMPLEMENT-04)
             x.store.saveProject()
             check(property.rawValue + ".active save finalizes once", x.store.spectrumNumericScrubToken == nil &&
                   x.store.history.undoDepth == 1 && !x.store.isDirty && x.store.timeline == saved, "")

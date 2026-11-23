@@ -18,6 +18,8 @@ final class AlertPresenter: NSObject {
         let onButton: (Int) -> Void }
     private var queue: [Request] = []
     private(set) var current: NSAlert?
+    /// 떠 있는 NSAlert의 취소 단추 번호(요청의 cancelIndex). 없으면 nil.
+    private var currentCancelIndex: Int?
     /// 떠 있는 완료 시트(NSAlert 대신)
     private(set) var currentSheet: CompletionSheet?
     private var sheetEndObserver: NSObjectProtocol?
@@ -96,6 +98,7 @@ final class AlertPresenter: NSObject {
             a.buttons[d].keyEquivalent = ""
         }
         current = a
+        currentCancelIndex = r.cancelIndex
         a.beginSheetModal(for: window) { [weak self] resp in
             MainActor.assumeIsolated { self?.sheetEnded(window, r, resp) }
         }
@@ -114,6 +117,7 @@ final class AlertPresenter: NSObject {
         let i = resp.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
         pendingFinish = { [weak self] in
             self?.current = nil
+            self?.currentCancelIndex = nil
             self?.currentSheet = nil
             r.onButton(i)
             self?.showNext()
@@ -153,6 +157,13 @@ final class AlertPresenter: NSObject {
 
     func windowAvailable() { showNext() }
 
+    /// 떠 있는 알림을 그 알림의 취소 단추로 닫는다(사용자가 "취소"를 누른 것과 같은 NSButton 경로, Debug·Release 공통).
+    /// 요청이 낡아 더는 물을 수 없는 확인을 치울 때만 쓴다(이미지 재연결 확인 — ProjectStore.relinkStillImage).
+    /// 취소 단추를 지정하지 않은 알림과 완료 시트는 닫지 않는다. 승인·기본 단추는 절대 대신 누르지 않는다.
+    func cancelCurrent() {
+        guard let a = current, let c = currentCancelIndex, a.buttons.indices.contains(c) else { return }
+        a.buttons[c].performClick(nil)
+    }
     /// 대기 중 알림 수(진단 기록용)
     var queuedCount: Int { queue.count }
     #if DEBUG

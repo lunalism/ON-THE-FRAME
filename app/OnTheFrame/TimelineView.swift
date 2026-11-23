@@ -1309,8 +1309,7 @@ final class TimelineNSView: NSView {
         add(linked ? "재생 헤드에서 자르기(연결된 쌍)" : "재생 헤드에서 자르기", store.gestureBase == nil, #selector(menuSplit))
         add(linked ? "삭제 — 빈틈 남김(연결된 쌍)" : "삭제 — 빈틈 남김", store.gestureBase == nil, #selector(menuLift))
         add(linked ? "리플 삭제(연결된 쌍, 모든 레인)" : "리플 삭제(모든 레인)", store.gestureBase == nil, #selector(menuRipple))
-        #if DEBUG
-        // 스펙트럼 추가(SP-1A 2B-2): Debug 전용(4단계 전 노출 정책), 누른 것이 소리 클립일 때만. 누른 클립과 메뉴를 만든 때의 프로젝트 회차를 항목에 묶는다.
+        // 스펙트럼 추가(SP-1A 2B-2. SP-PUBLIC-01 2026-11-23부터 Debug·Release 공통): 누른 것이 소리 클립일 때만. 누른 클립과 메뉴를 만든 때의 프로젝트 회차를 항목에 묶는다.
         if store.timeline.audioClips.contains(where: { $0.id == id }) {
             m.addItem(.separator())
             let it = NSMenuItem(title: "스펙트럼 추가", action: #selector(menuAddSpectrum(_:)), keyEquivalent: "")
@@ -1318,16 +1317,13 @@ final class TimelineNSView: NSView {
             it.representedObject = SpectrumMenuTarget(clip: id, session: store.projectSession)
             m.addItem(it)
         }
-        #endif
         return m
     }
-    #if DEBUG
     final class SpectrumMenuTarget: NSObject { let clip: UUID, session: Int; init(clip: UUID, session: Int) { self.clip = clip; self.session = session } }
     @objc func menuAddSpectrum(_ sender: NSMenuItem) {
         guard let t = sender.representedObject as? SpectrumMenuTarget else { return }
         store.addSpectrum(fromAudioClip: t.clip, session: t.session)
     }
-    #endif
     @objc private func menuUnlink() { store.unlinkSelection() }
     @objc private func menuLink() { store.linkSelection() }
     @objc private func menuSplit() { store.splitAtPlayhead() }

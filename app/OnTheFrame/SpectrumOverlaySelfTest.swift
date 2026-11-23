@@ -17,6 +17,15 @@ enum SpectrumOverlaySelfTest {
         }
         func release() { released = true; let all = waiters; waiters = []; all.forEach { $0.resume() } }
     }
+    /// 재생 tick마다 본 "재생 시작 유지" 상태(playStartContract — SP-PUBLIC-REGRESSION-FIX-10)
+    @MainActor final class PlayStartObserver {
+        private(set) var ticks = 0, retainedTicks = 0
+        private(set) var lastRetainedAt: CFTimeInterval?
+        func note(retaining: Bool, at time: CFTimeInterval) {
+            ticks += 1
+            if retaining { retainedTicks += 1; lastRetainedAt = time }
+        }
+    }
     struct PixelProbe {
         let context: CGContext
         let painted: Int
@@ -419,11 +428,14 @@ enum SpectrumOverlaySelfTest {
             view.subtitleSeekFinished(token: replacedSeekToken, frame: 31, finished: false)
             check("seek.oldCancelCallbackCannotClearNewest", overlay.confirmedFrame == 33
                   && self.image(high) === newestImage && overlay.assignments == newestAssignments)
-            check("play.noSchedulingOrRetainedImage", {
-                s.play(); return overlay.layers.isEmpty && overlay.confirmedFrame == nil
-            }())
+            // 재생 시작(SP-PUBLIC-REGRESSION-FIX-10, 2026-11-23): 이전 검사 play.noSchedulingOrRetainedImage는 재생을 시작하면 정지 그림이 바로 사라진다고 봤다.
+            // 소유자가 수락한 FX-02C "재생 시작 유지"(7c4c7bb, DECISIONS 2026-11-21)는 확인된 정지 표시를 첫 완전한 재생 프레임까지(최대 0.25 s) 유지한다.
+            // 그 계약을 playStartContract가 네 검사로 본다. 그 뒤 같은 프레임으로 돌아와, 이전과 같은 조건(재생 직후 바로 멈춤)에서 다음 검사를 잇는다.
+            await playStartContract()
+            let returned = await self.seek(33, count: 2)
+            s.play()
             s.pause()
-            check("pause.uncertainFrameSuppressed", overlay.layers.isEmpty && overlay.confirmedFrame == nil)
+            check("pause.uncertainFrameSuppressed", returned && overlay.layers.isEmpty && overlay.confirmedFrame == nil)
             _ = await self.seek(30, count: 2)
             let deletionGate = Gate()
             s.spectrumPreview.beforeDeliveryForTest = { _ in await deletionGate.wait() }
@@ -461,6 +473,49 @@ enum SpectrumOverlaySelfTest {
             temporaryWindow.close()
             check("window.closeClears", temporaryView.spectrumOverlay.layers.isEmpty && temporaryView.spectrumOverlay.confirmedFrame == nil)
             s.previewHost = view; window.makeKeyAndOrderFront(nil); _ = await self.seek(30, count: 2)
+        }
+
+        /// FX-02C 재생 시작 유지(제품 계약, 바꾸지 않음): 확인된 정지 프레임(여기서는 33)에서 재생을 시작하면
+        ///  1) 그 정지 표시가 재생 직후에도 그대로 보일 수 있고(같은 그림 객체, 유지 상태 "start"), 정지용 확인 표식과 정지 묶음 일정은 남지 않는다.
+        ///  2) 첫 완전한 재생 프레임이 오면 유지가 끝나고 재생 그림이 보인다.
+        ///  3) 유지는 승인된 한도(0.25 s)를 넘지 않는다 — 재생 tick마다 본 유지 상태로 판정한다(임의로 기다리지 않음).
+        ///  4) 멈추면 유지 상태가 남지 않고 정지 표시가 다시 확인된다.
+        /// 한도 판정의 여유 0.05 s는 디스플레이 링크 콜백이 목표 시각보다 늦게 불릴 수 있는 한 프레임 남짓이다(제품은 목표 시각으로 한도를 본다).
+        func playStartContract() async {
+            let s: ProjectStore = self.s
+            let overlay: PausedSpectrumOverlay = self.overlay
+            let high: UUID = self.high
+            let limit: CFTimeInterval = 0.25, callbackSlack: CFTimeInterval = 0.05
+            let pausedImage = self.image(high)
+            let pausedFrame = overlay.confirmedFrame
+            let assignmentsBefore = overlay.assignments
+            let previousObservation = overlay.playbackObservationForTest
+            let observer = PlayStartObserver()
+            let owner = UUID()
+            overlay.playbackObservationForTest = (owner, { [weak overlay] in
+                observer.note(retaining: overlay?.transitionRetentionForTest == "start", at: CACurrentMediaTime())
+            })
+            s.play()
+            let started = CACurrentMediaTime()
+            let retainedNow = overlay.transitionRetentionForTest == "start" && pausedImage != nil && self.image(high) === pausedImage
+            let noPausedScheduling = overlay.confirmedFrame == nil && overlay.assignments == assignmentsBefore
+            check("play.retainsConfirmedPausedFrame", s.isPlaying && pausedFrame == 33 && retainedNow,
+                  "retention \(overlay.transitionRetentionForTest ?? "none") sameImage \(self.image(high) === pausedImage)")
+            check("play.noPausedSchedulingAtStart", noPausedScheduling, "confirmed \(overlay.confirmedFrame.map(String.init) ?? "nil") assignments +\(overlay.assignments - assignmentsBefore)")
+            let replaced = await LaneSelfTest.waitUntil(6) {
+                overlay.transitionRetentionForTest == nil && s.spectrumPreview.playback.currentFrame != nil && self.image(high) != nil
+            }
+            check("play.firstPlayingFrameReplacesRetained", replaced && s.isPlaying && overlay.assignments == assignmentsBefore,
+                  "retainedTicks \(observer.retainedTicks) ticks \(observer.ticks)")
+            let lastRetained = observer.lastRetainedAt.map { $0 - started }
+            check("play.retentionWithinTransitionLimit", replaced && observer.ticks > 0 && (lastRetained ?? 0) <= limit + callbackSlack,
+                  "lastRetained \(lastRetained.map { String(format: "%.3f", $0) } ?? "none") s of limit \(limit) s")
+            if overlay.playbackObservationForTest?.owner == owner { overlay.playbackObservationForTest = previousObservation }
+            s.pause()
+            let settled = await LaneSelfTest.waitUntil(8) {
+                !s.isPlaying && overlay.transitionRetentionForTest == nil && overlay.confirmedFrame == s.playhead
+            }
+            check("play.pauseLeavesNoRetentionState", settled, "retention \(overlay.transitionRetentionForTest ?? "none") confirmed \(overlay.confirmedFrame.map(String.init) ?? "nil") playhead \(s.playhead)")
         }
 
         func projectAndReport() async throws {

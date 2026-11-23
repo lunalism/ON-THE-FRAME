@@ -69,7 +69,9 @@ struct ContentView: View {
                 Button { store.presentImportPanel() } label: { Label("미디어 가져오기", systemImage: "square.and.arrow.down") }.disabled(!store.fileCommandsAvailable)
                     .help(ProjectStore.imageImportEnabled ? "영상·소리·이미지 파일 가져오기(⌘I)" : "영상·소리 파일 가져오기(⌘I)")
                 Button { store.presentExportPanel() } label: { Label("내보내기", systemImage: "square.and.arrow.up") }
-                    .help("MP4로 내보내기(⌘E)").disabled(!store.canExport || !store.fileCommandsAvailable)
+                    .help("MP4로 내보내기(⌘E)")
+                    // 스펙트럼 때문에 막힌 내보내기는 단추를 끄지 않는다: 누르면 대상 파일을 고르기 전에 이유를 알린다(SP-PUBLIC-UX-IMPLEMENT-04)
+                    .disabled(!store.fileCommandsAvailable || (!store.canExport && store.spectrumExportBlockReason == nil))
             }
         }
         .navigationTitle(store.windowTitle)
@@ -893,6 +895,7 @@ struct AdjustmentsView: View {
                         AdjustSection(title: kind == .audio ? "이 클립만 — 클립 소리" : "연결된 소리 클립만 — 클립 소리") {
                             ClipAudioAdjust(store: store, clip: ac, lane: ac.lane.flatMap { store.timeline.laneInfo($0) }, laneText: laneText(ac.lane))
                         }
+                        AdjustSection(title: "스펙트럼") { SpectrumCreateAdjust(store: store, clip: ac) }
                     }
                     AdjustSection(title: "레인") { LaneDestinationAdjust(store: store, id: id, clip: c) }
                 } else if let l = store.selectedLane.flatMap({ store.timeline.laneInfo($0) }) {
@@ -1623,6 +1626,22 @@ struct ClipAudioAdjust: View {
     func sync() {
         let a = clip.effectiveAudio
         fadeIn = Double(a.fadeIn.visible(in: clip.length)) / 30; fadeOut = Double(a.fadeOut.visible(in: clip.length)) / 30
+    }
+}
+
+/// 스펙트럼 만들기(SP-PUBLIC-01, 2026-11-23): 고른 소리 클립(또는 고른 영상에 연결된 소리)을 소스로 하는 스펙트럼을 만든다. 타임라인 문맥 메뉴의
+/// "스펙트럼 추가"와 같은 저장소 명령(`addSpectrum`)이며 새 편집 경로가 아니다. 구간 = 그 소리 클립의 구간, 소스 = 그 클립의 계보, 한 단계(실행 취소).
+struct SpectrumCreateAdjust: View {
+    @Bindable var store: ProjectStore
+    let clip: Clip
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button("이 소리로 스펙트럼 추가") { store.addSpectrum(fromAudioClip: clip.id, session: store.projectSession) }
+                .controlSize(.small).accessibilityLabel("이 소리로 스펙트럼 추가")
+            Text("이 소리 클립의 구간에, 이 소리를 소스로 하는 스펙트럼을 만들고 선택합니다. 소스·모양·위치는 만든 뒤 여기에서 바꿉니다. 스펙트럼이 있는 프로젝트는 아직 내보낼 수 없고, 새 저장 형식으로 저장됩니다.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .disabled(store.gestureBase != nil)
     }
 }
 

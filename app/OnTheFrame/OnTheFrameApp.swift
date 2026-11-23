@@ -207,10 +207,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Finder에서 연 프로젝트 파일(A-013): 같은 저장하지 않은 변경 처리. 여러 개면 첫 파일만(창 하나에 프로젝트 하나).
         let projects = urls.filter { $0.pathExtension.lowercased() == ProjectFile.fileExtension }
         if let p = projects.first {
-            ProjectStore.shared.requestOpenProject(p)
+            let accepted = ProjectStore.shared.requestOpenProject(p)
             if projects.count > 1 { ProjectStore.shared.statusMessage = "프로젝트는 한 번에 하나만 엽니다: \(p.lastPathComponent)" }
             let rest = urls.filter { $0.pathExtension.lowercased() != ProjectFile.fileExtension && !$0.hasDirectoryPath }
-            if !rest.isEmpty { ProjectStore.shared.importFiles(rest) }
+            // 함께 연 미디어는 그 프로젝트가 열린 뒤에 들어간다(대기열). 열기 요청이 거절됐으면 현재 프로젝트에 넣지 않고 알린다(2026-11-23 소유자 결정).
+            if !rest.isEmpty {
+                if accepted { ProjectStore.shared.importFiles(rest) } else { ProjectStore.shared.noteMediaNotImportedWithUnopenedProject(rest.count) }
+            }
             return
         }
         #if DEBUG
@@ -394,6 +397,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if args.contains("-OTFSpectrumLifecycleTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await SpectrumLifecycleSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFSpectrumPublicTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {   // SP-PUBLIC-01(2026-11-23, 보통 Debug 앱)
+            Task { await SpectrumPublicSelfTest.run(folder: folder) }
+            return
+        }
+        if args.contains("-OTFSpectrumImageExportGuardTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {   // SP-PUBLIC-VALIDATE-05(이미지 gate 필요)
+            Task { await SpectrumPublicSelfTest.runImageExportGuard(folder: folder) }
             return
         }
         #if OTF_SPECTRUM_DIAGNOSTICS

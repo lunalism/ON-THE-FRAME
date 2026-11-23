@@ -165,6 +165,9 @@ enum OpenImportSelfTest {
               "fractions \(allBad.fractions) done \(String(describing: allBad.done))")
         try? FileManager.default.removeItem(at: notMedia)
 
+        // 7b. 열리지 않은 프로젝트와 함께 들어온 가져오기(2026-11-23 소유자 결정): 현재 프로젝트에 넣지 않고 버리며 알린다.
+        checks += await unopenedProjectChecks(s, folder: folder, src: src)
+        LaneSelfTest.checkCountForMode = checks.count
         // 8. 2026-10-11 리뷰: Finder에서 프로젝트와 미디어를 함께 연 경로(열기 요청 직후 가져오기). 가져오기는 열기가 끝난 뒤 새 프로젝트에 들어가야 한다.
         _ = await menu("새 프로젝트")
         if s.alerts.isShowing { s.alerts.pressButton(2); _ = await LaneSelfTest.waitUntil(3) { !s.alerts.isShowing } }
@@ -196,6 +199,61 @@ enum OpenImportSelfTest {
         if s.alerts.isShowing { await dismissAlert() }
         check("open.blocksExport", exportOff, "canExport during open \(!exportOff)")
         finish(folder, checks)
+    }
+
+    /// 열기 요청 직후 가져오기를 넣었는데 프로젝트가 열리지 않은 두 경우(SP-PUBLIC-OPENIMPORT-VALIDATE-15). run을 더 키우지 않게 따로 둔다.
+    ///  (가) 저장하지 않은 변경 확인에서 "취소": 현재(바뀐) 프로젝트 그대로, 미디어는 들어오지 않고 알림.
+    ///  (나) 손상된 프로젝트 파일: 열기 실패 알림에 이어 알림, 빈 프로젝트에 미디어가 들어오지 않음.
+    /// 알림은 뜬 차례대로 제목을 모으며 닫는다(가져오기가 시작되지 않았는지는 대기열·진행·미디어 목록으로 본다).
+    static func unopenedProjectChecks(_ s: ProjectStore, folder: URL, src: URL) async -> [Check] {
+        var rows: [Check] = []
+        let media = src.appendingPathComponent("otf-TA.mp4")
+        func drainAlerts() async -> [String] {
+            var titles: [String] = []
+            while await LaneSelfTest.waitUntil(2, { s.alerts.isShowing }) {
+                titles.append(s.alert?.title ?? "")
+                s.alerts.pressButton(0)
+                _ = await LaneSelfTest.waitUntil(3) { !s.alerts.isShowing }
+                await LaneSelfTest.settle()
+                if titles.count > 6 { break }
+            }
+            return titles
+        }
+        func idle() -> Bool { !s.openRequested && s.openProgress == nil && s.importProgress == nil && s.importing == 0 && s.pendingOps.isEmpty }
+
+        // (가) 바뀐 프로젝트에서 열기 요청 → 가져오기 대기 → 확인에서 "취소"
+        let dirtyBefore = s.isDirty, timelineA = s.timeline, urlA = s.projectURL, assetsA = s.assets.map(\.name).sorted()
+        let acceptedA = s.requestOpenProject(folder.appendingPathComponent("p-v5.ontheframe"))
+        s.importFiles([media])
+        let queuedA = s.pendingOps.count == 1 && s.importProgress == nil
+        let promptA = await LaneSelfTest.waitUntil(3) { s.alert?.title == "변경 사항을 저장할까요?" }
+        if promptA { s.alerts.pressButton(1) }   // 취소
+        _ = await LaneSelfTest.waitUntil(5) { !s.openRequested }
+        let titlesA = await drainAlerts()
+        _ = await LaneSelfTest.waitUntil(3) { idle() }
+        let keptA = s.timeline == timelineA && s.projectURL == urlA && s.assets.map(\.name).sorted() == assetsA && s.isDirty == dirtyBefore
+        rows.append(Check(name: "open.cancelledDiscardsQueuedImportWithAlert",
+                          pass: dirtyBefore && acceptedA && queuedA && promptA && keptA && idle() && titlesA == [ProjectStore.unopenedProjectMediaTitle],
+                          detail: "dirty \(dirtyBefore) accepted \(acceptedA) queued \(queuedA) prompt \(promptA) kept \(keptA) alerts \(titlesA)"))
+
+        // (나) 빈 새 프로젝트에서 손상된 프로젝트 열기 요청 → 가져오기 대기 → 열기 실패
+        _ = LaneSelfTest.menuItem("새 프로젝트"); await LaneSelfTest.settle()
+        if s.alerts.isShowing { s.alerts.pressButton(2); _ = await LaneSelfTest.waitUntil(3) { !s.alerts.isShowing } }
+        _ = await LaneSelfTest.waitUntil(3) { s.projectURL == nil && s.assets.isEmpty && !s.isDirty }
+        let timelineB = s.timeline
+        let bad = folder.appendingPathComponent("bad.ontheframe")
+        try? Data("{ not a project".utf8).write(to: bad)
+        let acceptedB = s.requestOpenProject(bad)
+        s.importFiles([media])
+        let queuedB = s.pendingOps.count == 1 && s.importProgress == nil
+        _ = await LaneSelfTest.waitUntil(10) { !s.openRequested }
+        let titlesB = await drainAlerts()
+        _ = await LaneSelfTest.waitUntil(3) { idle() }
+        let keptB = s.timeline == timelineB && s.projectURL == nil && s.assets.isEmpty && !s.isDirty
+        rows.append(Check(name: "open.failedDiscardsQueuedImportWithAlert",
+                          pass: acceptedB && queuedB && keptB && idle() && titlesB == ["프로젝트를 열 수 없습니다", ProjectStore.unopenedProjectMediaTitle],
+                          detail: "accepted \(acceptedB) queued \(queuedB) kept \(keptB) alerts \(titlesB)"))
+        return rows
     }
 
     static func finish(_ folder: URL, _ checks: [Check]) {

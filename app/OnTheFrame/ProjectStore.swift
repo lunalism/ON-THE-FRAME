@@ -36,6 +36,15 @@ final class ProjectStore {
     /// 마지막으로 저장하거나 연 상태. 지금 상태와 다르면 저장하지 않은 변경이 있다(실행 취소로 돌아오면 사라짐).
     var savedTimeline = ProjectStore.newProjectTimeline()
     var isDirty: Bool { history.timeline != savedTimeline }
+    /// 이 프로젝트를 마지막으로 성공해 저장했거나 열었을 때의 파일 형식 버전(SP-PUBLIC-UX-IMPLEMENT-04, 2026-11-23). 한 번도 저장하지 않은 새 프로젝트는 nil.
+    /// 연 파일의 머리 버전(ProjectPersistence.decode) 또는 성공한 쓰기의 버전에서만 정한다 — 추측하지 않는다. 저장 형식 안내(saveProject)가 쓴다. 파일에 저장하지 않는 값.
+    private(set) var lastPersistedFormat: Int?
+    /// 저장 형식 안내가 떠 있거나 그 뒤 저장을 잇는 중(겹친 저장을 받지 않는다)
+    @ObservationIgnored private var formatWarningPending = false
+    #if DEBUG
+    /// 자체 검사 전용: 이미 이 형식으로 저장된 프로젝트처럼 둔다(저장 형식 안내가 아닌 것을 보는 이전 검사가 그 경로를 그대로 쓰게)
+    func setLastPersistedFormatForTest(_ v: Int?) { lastPersistedFormat = v }
+    #endif
     var projectName: String { projectURL?.deletingPathExtension().lastPathComponent ?? "제목 없음" }
     /// 창 제목: 프로젝트 이름과 저장하지 않은 변경 표시
     var windowTitle: String { projectName + (isDirty ? " — 편집됨" : "") }
@@ -207,7 +216,27 @@ final class ProjectStore {
     /// 열기 요청부터 끝(적용·실패·취소)까지(2026-10-11 리뷰): 그동안 가져오기·내보내기를 시작하지 않고 대기열에 둔다.
     /// openProgress는 열기 작업이 실제로 시작될 때에야 생겨, Finder에서 프로젝트와 미디어를 함께 열면 가져오기가 먼저 시작돼 이전 프로젝트에 들어갔다.
     private(set) var openRequested = false
-    private func endOpenRequest() { openRequested = false; runNextOp() }
+    /// 열기 요청의 끝. 프로젝트가 열리지 않았으면(실패·취소·파일 없음) 그 요청 동안 대기열에 들어온 가져오기는 이전 프로젝트에 넣지 않고 버리며 알린다
+    /// (2026-11-23 소유자 결정 — DECISIONS "Finder로 프로젝트와 미디어를 함께 열기"). 열렸으면 대기한 가져오기가 열린 프로젝트에 들어간다.
+    private func endOpenRequest(opened: Bool = false) {
+        openRequested = false
+        if !opened { discardImportsQueuedForUnopenedProject() }
+        runNextOp()
+    }
+    static let unopenedProjectMediaTitle = "미디어를 가져오지 않았습니다"
+    /// 열리지 않은 프로젝트와 함께 들어온 가져오기를 대기열에서 빼고 알린다(조용히 버리거나 현재 프로젝트에 넣지 않는다). 내보내기 대기는 건드리지 않는다.
+    private func discardImportsQueuedForUnopenedProject() {
+        let count = pendingOps.reduce(0) { if case .importFiles(let urls) = $1 { return $0 + urls.count }; return $0 }
+        guard count > 0 else { return }
+        pendingOps.removeAll { if case .importFiles = $0 { return true }; return false }
+        noteMediaNotImportedWithUnopenedProject(count)
+    }
+    /// 프로젝트가 열리지 않아 함께 열려던 미디어를 가져오지 않았음을 알린다(대기열을 거치지 않은 경우에도 쓴다 — Finder 열기 요청이 거절됐을 때).
+    func noteMediaNotImportedWithUnopenedProject(_ count: Int) {
+        statusMessage = "프로젝트를 열지 않아 함께 열려던 미디어 \(count)개를 가져오지 않았습니다."
+        presentAlert(AlertInfo(title: Self.unopenedProjectMediaTitle,
+                               message: "프로젝트를 열지 않아, 함께 열려던 미디어 \(count)개를 가져오지 않았습니다.\n\n현재 프로젝트는 그대로입니다. 필요하면 미디어 가져오기로 다시 넣어 주세요."))
+    }
     @ObservationIgnored private var openTask: Task<Void, Never>?
     /// 열기 회차. 취소마다 1 늘고, 이전 회차의 늦은 결과는 버린다.
     @ObservationIgnored private var openEpoch = 0
@@ -649,8 +678,16 @@ final class ProjectStore {
         guard Self.imageImportEnabled, !fileCommandBlocked() else { return }
         importFiles([url])
     }
+    /// 가져오기 취소(사용자 취소·버리기): 대기 중인 가져오기 묶음을 버리고 진행 중인 이미지 가져오기를 취소한다.
     func cancelImageImport() {
         pendingOps.removeAll { if case .importFiles = $0 { return true }; return false }
+        cancelInFlightImageImport()
+    }
+    /// 진행 중인 이미지 가져오기만 취소한다(회차를 올려 늦은 결과를 버림). 대기열은 건드리지 않는다.
+    /// 프로젝트 교체가 쓴다(SP-PUBLIC-OPENIMPORT-TRIAGE-14, 2026-11-23): 열기 요청부터 끝까지 대기열에서 기다린 가져오기는 열린 프로젝트에 들어가야 한다
+    /// (2026-10-11 리뷰 — Finder로 프로젝트와 미디어를 함께 연 경우). a153b99에서 `cancelImageImport`가 대기열까지 비우게 되면서
+    /// 교체 때 그 가져오기가 알림 없이 사라졌다. 교체 전에 대기 중이던 가져오기는 있을 수 없다(대기열이 있으면 교체 요청을 거절한다 — projectReplaceBlocked).
+    private func cancelInFlightImageImport() {
         imageImportEpoch += 1
         imageImportTask?.cancel()
         if imageImportBusy { statusMessage = "이미지 가져오기를 취소하는 중입니다." }
@@ -940,9 +977,8 @@ final class ProjectStore {
         }
     }
 
-    #if DEBUG
-    /// 스펙트럼 추가(SP-1A 2B-2, Debug 전용 — 4단계 내보내기 그리기 전 노출 정책 2026-10-26): 타임라인 문맥 메뉴가 누른 소리 클립 ID와 메뉴를 만든 때의
-    /// 프로젝트 회차를 넘긴다(그 뒤 고른 클립이 아니라 누른 클립). 프로젝트가 바뀌었거나 클립이 없어졌거나 끌기·알림 중이면 아무것도 하지 않는다.
+    /// 스펙트럼 추가(SP-1A 2B-2. SP-PUBLIC-01 2026-11-23: Debug 전용 gate를 풀어 Debug·Release 공통 — 내보내기는 여전히 막힘): 타임라인 문맥 메뉴나
+    /// 클립 조정 패널이 대상 소리 클립 ID와 메뉴·패널을 만든 때의 프로젝트 회차를 넘긴다(그 뒤 고른 클립이 아니라 누른 클립). 프로젝트가 바뀌었거나 클립이 없어졌거나 끌기·알림 중이면 아무것도 하지 않는다.
     /// 구간·소스는 엔진 그대로(누른 조각의 구간, 그 조각의 계보 키). 알맞은 스펙트럼 레인이 없으면 새 레인과 함께 한 단계. 만든 스펙트럼을 고른다.
     func addSpectrum(fromAudioClip id: UUID, session: Int) {
         guard session == projectSession, gestureBase == nil, alert == nil, timeline.audioClips.contains(where: { $0.id == id }) else {
@@ -952,7 +988,6 @@ final class ProjectStore {
         let sid = UUID()
         commit({ try $0.addingSpectrum(fromAudioClip: id, id: sid, newLaneName: newLaneName(.spectrum)) }, focus: sid)
     }
-    #endif
 
     // MARK: 스펙트럼 소스(SP-1A 2B-3, 2026-10-26 — Debug·Release)
 
@@ -2591,7 +2626,8 @@ final class ProjectStore {
             } catch {
                 guard !Task.isCancelled,g==self.generation,session==self.projectSession else{return}
                 self.invalidateImageEligibility(.failed)
-                self.imagePreviewError = "이미지 프리뷰를 표시할 수 없습니다: \(error.localizedDescription). 프로젝트와 클립은 유지했습니다."
+                Self.trace.error("image preview error: \(String(describing: error), privacy: .private)")
+                self.imagePreviewError = "이미지 프리뷰를 표시할 수 없습니다: \(Self.imagePreviewFailureText(error)). 프로젝트와 클립은 유지했습니다."
             }
         }
     }
@@ -3168,14 +3204,19 @@ extension ProjectStore {
         let ids = (timeline.clips + timeline.audioClips).filter { playhead >= $0.start && playhead < $0.end }.map(\.mediaID)
         return ids.first { missingMedia[$0] != nil }.flatMap { id in ProjectPersistence.references(timeline).first { $0.id == id }?.name }
     }
+    /// 스펙트럼 항목이 있으면 내보낼 수 없는 이유(공개 Spectrum Export 미구현). 내보내기 단추는 이 이유가 있을 때 꺼지지 않고 눌러서 설명을 본다.
+    var spectrumExportBlockReason: String? {
+        timeline.spectra.isEmpty ? nil : "이 프로젝트에는 스펙트럼이 있어 아직 내보낼 수 없습니다. 스펙트럼 없이 내보내려면 스펙트럼을 삭제해 주세요."
+    }
     /// 내보내기를 할 수 없는 이유(찾을 수 없는 원본, 또는 영상 원본이 하나도 없음)
     var exportBlockReason: String? {
+        // 스펙트럼(SP-PUBLIC-UX-IMPLEMENT-04, 2026-11-23): 영상·이미지 프로젝트 모두 대상 파일을 고르기 전에 막는다(엔진 거부는 마지막 방어선으로 그대로).
+        if let r = spectrumExportBlockReason { return r }
         let internalImages = Self.imageImportEnabled && InternalImagePreview.containsImages(timeline)
         if !internalImages {
             do { _ = try ProductionContent(timeline).supportedTimeline() }
             catch { return String(describing:error) }
         } else {
-            if !timeline.spectra.isEmpty { return "스펙트럼 내보내기는 아직 지원하지 않습니다." }
             if !missingMedia.isEmpty { return "원본 접근·검증이 필요해 이미지 프로젝트를 내보낼 수 없습니다." }
         }
         let names = timeline.media.filter { missingUsedMedia.contains($0.id) }.map(\.name)
@@ -3244,11 +3285,11 @@ extension ProjectStore {
         stopAllScopes()
         replaceProject(timeline: Self.newProjectTimeline(), url: nil, id: UUID(), cache: [:], bookmarks: [:], missing: [:])
     }
-    private func replaceProject(timeline t: Timeline, url: URL?, id: UUID, cache: [String: MediaAsset], bookmarks bm: [UUID: Data], missing: [UUID: String], relativePaths: [UUID: String] = [:], imageURLs: [UUID: URL] = [:]) {
+    private func replaceProject(timeline t: Timeline, url: URL?, id: UUID, cache: [String: MediaAsset], bookmarks bm: [UUID: Data], missing: [UUID: String], relativePaths: [UUID: String] = [:], imageURLs: [UUID: URL] = [:], persistedFormat: Int? = nil) {
         #if DEBUG
         SpectrumContinuityTrace.ownerProjectWillChange(self)
         #endif
-        cancelImageImport()
+        cancelInFlightImageImport()   // 진행 중인 이미지 가져오기만(이전 프로젝트 대상). 열기 동안 대기한 가져오기는 새 프로젝트에 들어간다.
         pauseForEdit()
         interruptGesture(reason: "replaceProject", clearViewDrags: true)   // 끌기 중이면 취소하고 보기의 끌기 상태(옮기기 누름 대기 포함)도 지운다(D-031)
         inlineEdit = nil   // 남은 글 편집은 이 프로젝트에 넣지 않고 버린다(교체 요청 앞에서 이미 확정했다, §44)
@@ -3262,6 +3303,7 @@ extension ProjectStore {
         savedTimeline = t
         LaneZoom.shared.reset()   // 레인 높이는 화면 상태: 새 프로젝트·열기마다 자동 맞춤으로(LANE-VERTICAL-ZOOM-01, 저장하지 않음)
         projectURL = url; projectID = id
+        lastPersistedFormat = persistedFormat; formatWarningPending = false   // 새 프로젝트는 nil, 연 프로젝트는 그 파일의 형식(저장 형식 안내의 기준)
         projectSession += 1   // 같은 프로젝트를 다시 열어도 새 회차(그 전 회차에 묶인 확인은 동작하지 않음, CP-02)
         pendingImageRelinkID = nil
         relinkOp = nil        // 진행 중이던 재연결은 늦은 결과가 된다(CP-04, 바쁨 표식은 새 프로젝트에 남기지 않음)
@@ -3291,9 +3333,60 @@ extension ProjectStore {
     /// 인자 계산까지 건너뛰어 writeProject가 불리지 않는다. 결과를 먼저 계산한 뒤 done에 넘긴다.
     /// 사용자가 시작한 저장(메뉴·⌘S·⇧⌘S, done 없음)은 시트·알림·패널 중이면 하지 않는다(CP-03). done이 있는 호출은 확인 시트가 사라진 뒤 잇는
     /// 내부 흐름(저장 → 새 프로젝트·열기·닫기·종료)이라 막지 않는다.
+    /// 저장 형식 안내(SP-PUBLIC-UX-IMPLEMENT-04, 2026-11-23 소유자 승인): 이 저장이 프로젝트를 형식 8(소리 계보·스펙트럼 레인) 또는 형식 11(스펙트럼 항목)로
+    /// 처음 올리면 쓰기·저장 패널 앞에서 한 번 묻는다. "취소"면 아무것도 쓰지 않고 저장 위치·저장 상태·편집 내용이 그대로이며 done(false). "저장"이면 아래 기존 경로 그대로.
     func saveProject(saveAs: Bool = false, done: (@MainActor (Bool) -> Void)? = nil) {
         commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
         if done == nil, fileCommandBlocked() { return }
+        if formatWarningPending { done?(false); return }   // 안내가 떠 있거나 잇는 중: 겹친 저장은 하지 않는다
+        if let target = Self.formatUpgradeNeedingWarning(target: saveTargetFormat(), last: lastPersistedFormat) {
+            confirmFormatUpgrade(to: target) { [weak self] proceed in
+                guard let self else { return }
+                if proceed { self.performSave(saveAs: saveAs, done: done) } else {
+                    self.statusMessage = "프로젝트 저장을 취소했습니다. 저장하지 않은 변경 사항은 그대로입니다."
+                    done?(false)
+                }
+            }
+            return
+        }
+        performSave(saveAs: saveAs, done: done)
+    }
+    /// 이 저장이 쓸 형식 버전: 실제 쓰기(writeProject)와 같은 판정(ProjectPersistence.make). 판정할 수 없으면 nil(안내하지 않고 기존 저장 경로가 오류를 알린다).
+    func saveTargetFormat() -> Int? {
+        (try? ProjectPersistence.make(timeline: timeline, projectID: projectID, settings: settings, bookmarks: bookmarks, relativePaths: relativePaths))?.version
+    }
+    /// 안내할 형식 올림: 쓸 형식이 8 또는 11이고, 마지막으로 저장된 형식이 없거나(새 프로젝트의 첫 저장) 그보다 낮을 때 그 형식. 같은 형식·더 낮은 형식으로의 저장은 nil.
+    /// 8을 안내받은 프로젝트가 뒤에 11로 올라가면 다시 안내한다(8 < 11). 그 밖의 형식(5·6·7·이미지 9)은 안내 대상이 아니다.
+    static func formatUpgradeNeedingWarning(target: Int?, last: Int?) -> Int? {
+        guard let target, target == ProjectFile.spectrumVersion || target == ProjectFile.appearanceVersion else { return nil }
+        if let last, last >= target { return nil }
+        return target
+    }
+    static let formatWarningTitle = "프로젝트 저장 형식 안내"
+    static func formatWarningMessage(_ target: Int) -> String {
+        let why = target == ProjectFile.appearanceVersion ? "스펙트럼이 들어 있어" : "자른 소리 클립의 연결 정보나 스펙트럼 레인이 들어 있어"
+        return "이 프로젝트는 \(why) 새로운 저장 형식(형식 \(target))으로 저장됩니다. 이전 버전의 ON THE FRAME에서는 열리지 않을 수 있습니다.\n\n원본 미디어는 바뀌지 않습니다. \"취소\"를 누르면 아무것도 저장하지 않습니다."
+    }
+    /// 안내 시트. 처리는 시트가 완전히 사라진 뒤에 잇는다(저장 패널을 시트 처리기 안에서 띄우지 않게 — afterSheetSettles 주석 참조).
+    /// 그 사이 프로젝트가 바뀌었으면(다른 회차) 저장하지 않는다.
+    private func confirmFormatUpgrade(to target: Int, decide: @escaping @MainActor (Bool) -> Void) {
+        formatWarningPending = true
+        let session = projectSession
+        presentAlert(AlertInfo(title: Self.formatWarningTitle, message: Self.formatWarningMessage(target), buttons: ["저장", "취소"], cancelIndex: 1, bringToFront: true,
+                               onButton: { [weak self] i in
+            guard let self else { return }
+            guard i == 0, self.projectSession == session else { self.formatWarningPending = false; decide(false); return }
+            self.afterSheetSettles({
+                self.formatWarningPending = false
+                decide(self.projectSession == session)
+            }, abort: {
+                self.formatWarningPending = false
+                decide(false)
+                self.statusMessage = "확인 창이 닫히지 않아 저장하지 않았습니다. 현재 프로젝트와 변경 사항은 그대로입니다."
+            })
+        }))
+    }
+    private func performSave(saveAs: Bool, done: (@MainActor (Bool) -> Void)?) {
         SaveTrace.note("saveProject saveAs=\(saveAs) hasURL=\(projectURL != nil) dirty=\(isDirty)")
         if let u = projectURL, !saveAs {
             let ok = writeProject(to: u)
@@ -3392,6 +3485,7 @@ extension ProjectStore {
                 return false // Do not proceed through a discard prompt as though verification succeeded.
             }
             projectURL = dest; savedTimeline = timeline; bookmarks = candidateBookmarks
+            lastPersistedFormat = project.version   // 확인된 성공 뒤에만(실패·후속 확인 실패는 그대로)
             relativePaths = Dictionary(uniqueKeysWithValues:receipt.project.media.compactMap { r in r.relativePath.map { (r.id,$0) } })
             addRecent(dest); updateWindowDocumentState()
             statusMessage = "프로젝트를 저장했습니다: \(dest.lastPathComponent)"
@@ -3433,12 +3527,37 @@ extension ProjectStore {
         return nil
     }
 
+    // MARK: 오류 설명(SP-PUBLIC-REGRESSION-FIX-10, 2026-11-23)
+
+    static let malformedProjectText = "프로젝트 파일이 손상되었거나 형식이 맞지 않습니다."
+    /// 프로젝트를 읽은 뒤 해석하지 못했을 때 알림에 쓸 설명. 종류를 구분한다(모두 "손상"으로 묶지 않는다):
+    /// - 더 새로운 형식·지원하지 않는 형식·내용 검증 실패: 엔진이 주는 설명 그대로(`ProjectFile.LoadError`, `ProjectPersistence.Failure`).
+    /// - 디코더 오류(JSON이 아님, 필요한 값이 없거나 형식이 다름): 손상·형식 불일치. 디코더 원문(DecodingError)은 싣지 않는다.
+    /// - 그 밖의 엔진 오류: 이전처럼 그 설명. 다만 디코더 원문이 그대로 든 설명은 손상·형식 불일치로 바꾼다.
+    /// 파일 읽기 실패(없음·권한 등 입출력)는 이 함수가 아니라 읽기 단계에서 시스템 설명으로 따로 알린다.
+    static func projectDecodeFailureText(_ error: Error) -> String {
+        if let e = error as? ProjectFile.LoadError { return e.description }
+        if let e = error as? ProjectPersistence.Failure { return e.description }
+        if error is DecodingError { return malformedProjectText }
+        let text = String(describing: error)
+        return text.contains("DecodingError") ? malformedProjectText : text
+    }
+    /// 이미지 프리뷰 실패 설명: 오류의 지역화된 설명 그대로(끝 마침표만 뗀다 — 알림 글이 붙인다). 엔진의 두 번째 읽기 실패(`SecondReadFailure`)는
+    /// 종류마다 설명(없음·권한 없음·검증 뒤 변경·디코딩 실패·자원·재확인 실패)을 지역화된 설명으로 내놓는다(InternalImagePreview.swift). 오류의 종류는 바꾸지 않는다.
+    static func imagePreviewFailureText(_ error: Error) -> String {
+        var text = error.localizedDescription
+        while text.hasSuffix(".") { text.removeLast() }
+        return text
+    }
+
     // MARK: 열기
 
     /// 프로젝트 열기(메뉴·최근·Finder). url이 nil이면 열기 패널. 가져오기·내보내기 중이면 거절, 저장하지 않은 변경은 확인.
-    func requestOpenProject(_ url: URL?, scoped: Bool = false) {
+    /// 돌려주는 값: 열기 요청을 받아들였는가(거절되면 거짓 — 확인 창·패널 중이거나 다른 작업 중).
+    @discardableResult
+    func requestOpenProject(_ url: URL?, scoped: Bool = false) -> Bool {
         commitInlineEditIfAny()   // 프리뷰 위 글 편집을 먼저 확정(§44)
-        guard !fileCommandBlocked(), !projectReplaceBlocked() else { if scoped { url?.stopAccessingSecurityScopedResource() }; return }
+        guard !fileCommandBlocked(), !projectReplaceBlocked() else { if scoped { url?.stopAccessingSecurityScopedResource() }; return false }
         Self.trace.info("open requested fromRecent=\(url != nil, privacy: .public)")
         openRequested = true
         requestDiscard(.openProject, proceed: { [weak self] in
@@ -3472,13 +3591,14 @@ extension ProjectStore {
                 if scoped, !ok { target.stopAccessingSecurityScopedResource() }
                 if scoped, ok { self.scopedURLs.append(target) }   // 최근 목록 북마크로 연 프로젝트 파일: 프로젝트가 바뀔 때 멈춘다
                 self.openTask = nil
-                self.endOpenRequest()
+                self.endOpenRequest(opened: ok)
             }
         }, cancel: { [weak self] in
             Self.trace.info("open cancelled at unsaved-changes prompt")
             self?.endOpenRequest()
             if scoped { url?.stopAccessingSecurityScopedResource() }
         })
+        return true
     }
     #if DEBUG
     private var openPanelOverridden: Bool { openPanelOverrideForTest != nil }
@@ -3527,9 +3647,11 @@ extension ProjectStore {
         do { data = try await Task.detached { try Data(contentsOf: url) }.value } catch { return fail(error.localizedDescription, "read") }
         if cancelled() { return abandon([]) }
         Self.trace.info("open read bytes=\(data.count, privacy: .public) at \(self.monoSeconds() - t0, format: .fixed(precision: 3), privacy: .public)s")
-        do { decoded = try ProjectPersistence.decode(data, settings:s) } catch let e as ProjectFile.LoadError {
-            return fail(e.description, "decode")
-        } catch { return fail(String(describing:error), "decode") }
+        do { decoded = try ProjectPersistence.decode(data, settings:s) } catch {
+            // 기술 오류 원문은 로그에만 남기고 알림에는 종류에 맞는 설명을 쓴다(SP-PUBLIC-REGRESSION-FIX-10).
+            Self.trace.error("open decode error: \(String(describing: error), privacy: .private)")
+            return fail(Self.projectDecodeFailureText(error), "decode")
+        }
         // 스펙트럼(형식 8): 2026-10-25 SP-1A 1단계의 임시 열기 거부는 2B-1(2026-10-26)에서 뺐다 — 타임라인이 스펙트럼 레인·항목을 제 종류로
         // 읽기 전용 표시하고(2A), 엔진 편집·저장이 스펙트럼을 그대로 들고 간다. 검사는 decode 그대로(지원하지 않는 미래 형식·형식 7 이하의 형식 8 값·잘못된 값 거부).
         // 소스 키는 바꾸지 않는다(조각이 없으면 "소스 없음", 원본 파일이 없으면 missingMedia — 서로 다른 상태). 내보내기는 엔진이 계속 거부한다.
@@ -3640,7 +3762,7 @@ extension ProjectStore {
         #if DEBUG
         spectrumLifecycleEventForTest?("candidateScopesTransferred", scopedURLs.count)
         #endif
-        replaceProject(timeline: t, url: url.standardizedFileURL, id: decoded.projectID, cache:cache,bookmarks:bm,missing:missing,relativePaths:relative,imageURLs:imageURLs)
+        replaceProject(timeline: t, url: url.standardizedFileURL, id: decoded.projectID, cache:cache,bookmarks:bm,missing:missing,relativePaths:relative,imageURLs:imageURLs,persistedFormat:decoded.version)
         addRecent(url.standardizedFileURL)
         Self.trace.info("open applied missing=\(missing.count, privacy: .public) total \(self.monoSeconds() - t0, format: .fixed(precision: 3), privacy: .public)s")
         if !missing.isEmpty {
@@ -3723,6 +3845,9 @@ extension ProjectStore {
         panel.allowedContentTypes=[.jpeg,.png];panel.allowsMultipleSelection=false
         panel.directoryURL=URL(fileURLWithPath:ref.path).deletingLastPathComponent()
         panel.message="‘\(ref.name)’ 대신 쓸 JPEG 또는 PNG를 고르세요. 클립과 편집 내용은 유지됩니다."
+        #if DEBUG
+        panelWillRunForTest?(panel)   // 자체 검사 전용: 이 패널을 띄우기 직전에 넘긴다(프로젝트 열기 패널과 같은 연결점). 보통 실행에서는 nil.
+        #endif
         guard runPanel(panel) == .OK, let url=panel.url, session == projectSession else { return }
         Task { @MainActor in _ = await self.relinkStillImage(id,to:url) }
     }
@@ -3760,7 +3885,7 @@ extension ProjectStore {
                     try? await Task.sleep(nanoseconds:10_000_000)
                 }
                 guard accepted == true, current() else {
-                    if alert?.id == prompt.id { alerts.pressButton(1) }
+                    if alert?.id == prompt.id { alerts.cancelCurrent() }   // 낡은 확인을 그 알림의 취소 단추로 치운다(승인 단추는 누르지 않음)
                     return false
                 }
             }

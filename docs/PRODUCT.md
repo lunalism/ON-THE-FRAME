@@ -30,7 +30,7 @@
 | 영상·오디오·타임라인 | 기존 가져오기·여러 레인·트림/분할/이동/복사/붙여넣기/삭제·Undo/Redo 경로가 있다. 영상·소리의 기존 비리플 배치/리플 명령 의미를 유지한다 |
 | 이미지 | `DEBUG && OTF_IMAGE_IMPORT`와 `-OTFEnableImageImport`가 모두 필요한 제한된 가져오기·등록/명시적 + 배치·편집·Preview다. 일반 Debug가 자동으로 켜지는 기능도 public Release 지원도 아니다. 파일 8 MiB·각 변 4096 px·총 16,777,216픽셀과 검증된 주영상/색상 정책 범위다. 원본 descriptor·소스는 보존하지만 일시적 검증/Preview 표현은 최대 변 2048 px proxy를 사용하므로 전체 원본 해상도의 4K Preview/Export 지원 주장과 구분한다. 지원 Display P3는 원본을 보존하고 Preview 작업 표현을 sRGB로 변환하며, HDR 출력·임의 프로필 지원을 뜻하지 않는다 |
 | 자막 | 기존 생성·직접 편집·타이밍/모양·효과·Undo/Redo와 일반 자막 Export 경로가 있다. 완전한 모든 Preview/Export parity를 입증했다는 뜻은 아니다 |
-| Spectrum | 만들기는 Debug 전용이다. 기존 항목 고르기/소스/편집, Digital/Analog, 선택 소스 계보, 정수 UI와 직접 numeric scrubbing을 별도로 구분한다. 유효하게 완료된 Digital 0높이는 기존 위치/밴드 수/두께/색/알파의 최소 원이며 missing/pending/stale나 비활성 항목의 대체 그림이 아니다 |
+| Spectrum | 만들기는 2026-11-23부터 Debug·Release 공통이다(오디오 클립 문맥 메뉴, 클립 조정 패널 단추 — Debug 자동 검증 통과, 소유자 수동 확인 9/9 PASS, 실제 Release 구성 빌드 없음, [결정](DECISIONS.md#2026-11-23-공개-spectrum-만들기저장-형식-안내내보내기-사전-차단) · [체크포인트](DECISIONS.md#2026-11-23-공개-spectrum-ux-체크포인트소유자-수동-99-pass)). Spectrum 항목이 있는 프로젝트는 형식 11로 저장되며 처음 올릴 때 확인을 받는다. 기존 항목 고르기/소스/편집, Digital/Analog, 선택 소스 계보, 정수 UI와 직접 numeric scrubbing을 별도로 구분한다. 유효하게 완료된 Digital 0높이는 기존 위치/밴드 수/두께/색/알파의 최소 원이며 missing/pending/stale나 비활성 항목의 대체 그림이 아니다 |
 | Preview 전환 | temporary timing nil의 유효 작업 보존과 generation/session에 묶인 이미지 reconstruction 중 Play 의도 처리가 구현됐다. 새 frame/source/정확 PTS 검사를 통과해야 표시·재생하며 과거 그림을 현재로 취급하지 않는다. owner 수락은 시험한 조건에 한정한다 |
 | Export | 일반 영상/소리/자막 Export, gate가 켜진 제한된 내부 이미지 Export, 내부 Debug Spectrum slice는 서로 다른 경로다. **public Spectrum Export는 비활성**이며 내부 공유 renderer·제한된 래스터 비교가 전체 parity나 공개 지원을 뜻하지 않는다. 소리 파일만의 Preview가 일반 검정 영상 Export 지원 승인인 것도 아니다 |
 

@@ -194,7 +194,7 @@ enum SpectrumLaneSelfTest {
         let opened = await s.openProject(at: proj)
         let openAlert = s.alert?.message
         await dismiss()
-        check("open.savedSpectrumProject", saved && ver == 8 && opened && openAlert == nil && s.timeline == before && s.timeline.spectrum(spID)?.sourceKey == sp0.sourceKey
+        check("open.savedSpectrumProject", saved && ver == 11 && opened && openAlert == nil && s.timeline == before && s.timeline.spectrum(spID)?.sourceKey == sp0.sourceKey
               && !s.isDirty && s.history.undoDepth == 0 && s.projectURL == proj.standardizedFileURL && (try? Data(contentsOf: proj)) == bytes,
               "saved \(saved) version \(ver ?? -1) opened \(opened) alert '\(openAlert ?? "")'")
 
@@ -215,7 +215,7 @@ enum SpectrumLaneSelfTest {
         guard let rich = await makeProject(s, file: pR, media: ta, build: richTimeline) else { return finish(folder, checks + [Check(name: "persist.setup", pass: false, detail: s.statusMessage ?? "")]) }
         let richBytes = try? Data(contentsOf: pR)
         let richDoc = richBytes.flatMap { try? ProjectFile.decode($0) }
-        check("persist.richSaved", richDoc?.document.version == 8 && richDoc?.timeline == rich && Self.states(rich) == Self.richStates,
+        check("persist.richSaved", richDoc?.document.version == 11 && richDoc?.timeline == rich && Self.states(rich) == Self.richStates,
               "version \(richDoc?.document.version ?? -1) states \(Self.states(rich))")
         s.resetProject()
         let o1 = await s.openProject(at: pR)
@@ -245,7 +245,7 @@ enum SpectrumLaneSelfTest {
         let resaved = s.writeProject(to: pR)
         let resavedBytes = try? Data(contentsOf: pR)
         let resavedDoc = resavedBytes.flatMap { try? ProjectFile.decode($0) }
-        check("persist.resaveSameDocument", resaved && resavedDoc?.timeline == rich && resavedDoc?.document.version == 8 && resavedDoc?.document.projectID == richDoc?.document.projectID
+        check("persist.resaveSameDocument", resaved && resavedDoc?.timeline == rich && resavedDoc?.document.version == 11 && resavedDoc?.document.projectID == richDoc?.document.projectID
               && resavedDoc?.document.spectra == richDoc?.document.spectra && !s.isDirty, "bytesIdentical \(resavedBytes == richBytes)")
         // 같은 위치·같은 내용의 다시 저장은 바이트도 같다(이 Mac에서 북마크가 같게 다시 만들어짐 — 3회 실행에서 같음을 본 뒤 검사로 둠)
         check("persist.resaveIdenticalBytes", resavedBytes != nil && resavedBytes == richBytes, "\(resavedBytes?.count ?? -1) vs \(richBytes?.count ?? -1) bytes")
@@ -417,9 +417,10 @@ enum SpectrumLaneSelfTest {
         // 실패한 만들기(영상 클립 ID)는 타임라인 그대로
         s.addSpectrum(fromAudioClip: base10.clips[0].id, session: s.projectSession)
         check("create.invalidTargetNoChange", s.timeline == tD && s.history.undoDepth == 0)
-        // 10g. 저장·다시 열기: 만든 스펙트럼의 ID·소스 키·구간·모양·레인 그대로(위 r4 — 형식 8)
+        // 10g. 저장·다시 열기: 만든 스펙트럼의 ID·소스 키·구간·모양·레인 그대로(위 r4). 스펙트럼 항목이 있는 저장은 형식 11(ProjectFile.version(for:) — SP-PUBLIC-PREBUILD-02
+        //      2026-11-23 기대값 정정, 이전 기대 8은 Format 10·11 도입 전 계약). 항목 없이 스펙트럼 레인·계보만 남으면 형식 8(아래 delete.persistAndExportGuard의 vEmpty).
         let v4 = (try? Data(contentsOf: p10b)).flatMap { try? ProjectFile.decode($0).document.version }
-        check("create.persisted", v4 == 8 && r4.spectra.map(\.id) == tD.spectra.map(\.id) && r4.spectra.map(\.sourceKey) == tD.spectra.map(\.sourceKey)
+        check("create.persisted", v4 == 11 && r4.spectra.map(\.id) == tD.spectra.map(\.id) && r4.spectra.map(\.sourceKey) == tD.spectra.map(\.sourceKey)
               && r4.spectra.map(\.style) == tD.spectra.map(\.style) && r4.spectra.map(\.lane) == tD.spectra.map(\.lane) && r4.audioClips == tD.audioClips && r4.clips == tD.clips)
         // 10h. 고르기: 누름 판정 경계(이어 붙은 두 항목의 경계는 오른쪽), 빈 곳·끝 밖은 없음, 고른 그림, 바꿔 고르기, ⌘-클릭은 보통 고르기, 끌기·자르기 도구는 바꾸지 않음
         await LaneSelfTest.settle()
@@ -707,7 +708,7 @@ enum SpectrumLaneSelfTest {
             s.select(sW.id); await LaneSelfTest.settle()
             let popW = sourcePopup()?.titleOfSelectedItem
             let vP = (try? Data(contentsOf: pP)).flatMap { try? ProjectFile.decode($0).document.version }
-            check("persist.sourceAssignment", wP && oP && vP == 8 && s.timeline == tP && s.timeline.spectrum(sA.id)?.sourceKey == kOther && s.timeline.spectrum(sW.id)?.sourceKey == nil
+            check("persist.sourceAssignment", wP && oP && vP == 11 && s.timeline == tP && s.timeline.spectrum(sA.id)?.sourceKey == kOther && s.timeline.spectrum(sW.id)?.sourceKey == nil
                   && popA == label(kOther) && popW == "(고르지 않음)" && s.timeline.audioClips.map(\.lineageKey) == tP.audioClips.map(\.lineageKey),
                   "popA '\(popA ?? "-")' popW '\(popW ?? "-")'")
             // 11g. 원본 파일 없음(2B-1 missing-media.ontheframe): 소스는 정상·키 그대로, 패널 경고는 "원본 파일" — 지워진 소스와 다름, 타임라인 빨강
@@ -888,7 +889,7 @@ enum SpectrumLaneSelfTest {
             let r12 = await s.openProject(at: p12b); await dismiss()
             let v12 = (try? Data(contentsOf: p12b)).flatMap { try? ProjectFile.decode($0).document.version }
             let rm = s.timeline.spectrum(m1.id)
-            check("move.persisted", o12 && w12 && r12 && v12 == 8 && s.timeline == tS && rm?.lane == L2 && rm?.start == 160 && rm?.sourceKey == m1.sourceKey && rm?.style == m1.style
+            check("move.persisted", o12 && w12 && r12 && v12 == 11 && s.timeline == tS && rm?.lane == L2 && rm?.start == 160 && rm?.sourceKey == m1.sourceKey && rm?.style == m1.style
                   && othersSame(s.timeline, b12) && s.timeline.spectrumSourceState(rm ?? m1) == .ok,
                   "lane \(rm?.lane == L2) start \(rm?.start ?? -1) version \(v12 ?? -1) moved \(movedQ) keyStable \(keyStable) key \(keyQ) interrupts \(intQ)")
             // 12r. 옮긴 뒤에도 소스 상태·경고·내보내기 막음 그대로: m1은 소스 범위(0–120) 밖이어도 정상(무음 — 2C 결정 1), 경고 없음,
@@ -1118,7 +1119,7 @@ enum SpectrumLaneSelfTest {
             let w13 = s.writeProject(to: p13b); s.resetProject()
             let r13 = await s.openProject(at: p13b); await dismiss()
             let v13 = (try? Data(contentsOf: p13b)).flatMap { try? ProjectFile.decode($0).document.version }
-            let saveAsOK = o13 && reopenedBase && w13 && r13 && v13 == 8 && s.timeline == tS && only(t1.id, t1, 10, 80) && only(t3.id, t3, 0, 200)
+            let saveAsOK = o13 && reopenedBase && w13 && r13 && v13 == 11 && s.timeline == tS && only(t1.id, t1, 10, 80) && only(t3.id, t3, 0, 200)
                 && s.timeline.audioClips == b13.audioClips && s.timeline.lanes == b13.lanes && s.projectURL == p13b
             _ = await LaneSelfTest.regainFocus(w); w.makeFirstResponder(tv)
             _ = await LaneSelfTest.waitUntil(3) { w.isKeyWindow && NSApp.isActive && tv.spectrumHit(NSPoint(x: tv.x(60), y: ly(L1))) == t1.id }
@@ -1131,7 +1132,7 @@ enum SpectrumLaneSelfTest {
             s.resetProject()
             let rN = await s.openProject(at: p13b); await dismiss()
             let vN = (try? Data(contentsOf: p13b)).flatMap { try? ProjectFile.decode($0).document.version }
-            let saveOK = saved && cleanAfterSave && rN && vN == 8 && s.timeline == tN && only(t1.id, t1, 10, 70) && only(t3.id, t3, 0, 200)
+            let saveOK = saved && cleanAfterSave && rN && vN == 11 && s.timeline == tN && only(t1.id, t1, 10, 70) && only(t3.id, t3, 0, 200)
                 && s.timeline.audioClips == b13.audioClips && item(t1.id)?.sourceKey == key
             check("trim.persisted", saveAsOK && saveOK, "saveAs \(saveAsOK) (open \(o13) base \(reopenedBase) version \(v13 ?? -1)) save \(saveOK) (saved \(saved) clean \(cleanAfterSave) version \(vN ?? -1))")
             // 13n. 경고·내보내기 막음 그대로: t1·t3 경고 없음(소스 정상, 무음 구간은 경고가 아님), t2 고르지 않음, 엔진 막음 판정 t2 하나, 내보내기는 대상 파일 전 거부
