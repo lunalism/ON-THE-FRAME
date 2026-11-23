@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreGraphics
 import Foundation
+import os
 
 /// 일반 타임라인의 스펙트럼 내보내기 프레임 공급(SP-EXPORT-E2, 2026-11-23, 엔진 내부).
 /// 공개 내보내기에는 아직 이어져 있지 않다 — ExportService와 앱의 스펙트럼 거부는 그대로다.
@@ -59,6 +60,13 @@ final class SpectrumTimelineFrames: ExportFrameOverlay, @unchecked Sendable {
     private let assets: [MediaAsset]
     private let worker: SpectrumTimelineWorker
     private let scopes: [URL]
+    private let failure = OSAllocatedUnfairLock<(any Error)?>(initialState: nil)
+    /// 프레임을 준비하다 처음 난 오류(취소 제외). 내보내기 결과의 이유를 분류할 때 쓴다.
+    var lastError: (any Error)? { failure.withLock { $0 } }
+    #if DEBUG
+    /// 단계 시간 집계(DEBUG 전용, 동작을 바꾸지 않는다)
+    var profiler: SpectrumExportProfiler? { worker.profiler }
+    #endif
 
     /// 만들 때 모두 확인한다: 한도, 타임라인, 막는 스펙트럼(D-S3·D-S8), 소스 원본의 존재·정체.
     /// assets는 내보내기에 쓰는 원본 전체다(스펙트럼 소스가 아닌 것도 정체를 본다 — 기존 내부 조각과 같음).
@@ -99,12 +107,25 @@ final class SpectrumTimelineFrames: ExportFrameOverlay, @unchecked Sendable {
     }
     /// 요청 앞뒤로 취소와 원본 정체를 본다. 디코더가 취소를 알아챈 경우도 취소로 돌려준다.
     private func guarded<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T {
-        try Task.checkCancellation(); try validateSources()
-        let result: T
-        do { result = try await body() }
-        catch SpectrumAnalysisError.cancelled { throw CancellationError() }
-        try Task.checkCancellation(); try validateSources()
-        return result
+        do {
+            try Task.checkCancellation(); try checkedSources()
+            let result: T
+            do { result = try await body() }
+            catch SpectrumAnalysisError.cancelled { throw CancellationError() }
+            try Task.checkCancellation(); try checkedSources()
+            return result
+        } catch {
+            if !(error is CancellationError) { failure.withLock { if $0 == nil { $0 = error } } }
+            throw error
+        }
+    }
+    /// validateSources 그대로(DEBUG에서는 걸린 시간만 더한다)
+    private func checkedSources() throws {
+        #if DEBUG
+        let start = SpectrumExportProfiler.now()
+        defer { worker.profiler.record(.sourceValidation, since: start) }
+        #endif
+        try validateSources()
     }
     /// 마지막으로 처리한 프레임의 메모리 장부(계산한 상한)
     func memory() async -> SpectrumFrameMemoryReport { await worker.lastMemory }
@@ -136,6 +157,9 @@ actor SpectrumTimelineWorker {
     private var renderer: SpectrumFrameRenderer?
     private var busy = false, closed = false
     private(set) var lastMemory = SpectrumFrameMemoryReport()
+    #if DEBUG
+    nonisolated let profiler = SpectrumExportProfiler()
+    #endif
     struct Output: Sendable { var layers: [SpectrumTimelineLayer] = [], footprints: [SubtitleFootprint] = [] }
 
     init(timeline: Timeline, sources: [UUID: MediaAsset], limits: SpectrumTimelineExportLimits) {
@@ -159,12 +183,22 @@ actor SpectrumTimelineWorker {
         let visible = timeline.spectra.reversed().filter { $0.visible(atFrame: k) }
         lastMemory = SpectrumFrameMemoryReport()
         guard !visible.isEmpty else { chunks = [:]; return Output() }
+        #if DEBUG
+        let began = SpectrumExportProfiler.now()
+        defer { profiler.record(.prepare, since: began) }
+        #endif
         var budget = SpectrumFrameBudget(limit: limits.frameMemoryBudgetBytes)
         do {
             // 원본을 열거나 소리를 디코딩하기 전에: 그림 하나도 들일 수 없으면 여기서 멈춘다
             try budget.admit(transient: SpectrumFootprintCost.maxImageBytes)
+            #if DEBUG
+            let preparationStart = SpectrumExportProfiler.now()
+            #endif
             let plans = try await plans(visible, frame: k)
             try await load(plans)
+            #if DEBUG
+            profiler.record(.sourcePreparation, since: preparationStart)
+            #endif
             var out = Output()
             for p in plans {
                 try Task.checkCancellation()
@@ -173,11 +207,23 @@ actor SpectrumTimelineWorker {
                 if makeFootprints {
                     guard let r = rendered else { continue }
                     // 발자국을 만들기 전: 실제 크기와 칠한 화소 수로. 세는 동안에는 그림과 그 복사가 함께 있을 수 있다.
+                    #if DEBUG
+                    let countStart = SpectrumExportProfiler.now()
+                    #endif
                     let image = SpectrumFootprintCost.imageBytes(r.image)
                     try budget.admit(transient: SpectrumFootprintCost.add(image, image))
                     try budget.admit(transient: SpectrumFootprintCost.constructionPeak(r, painted: SpectrumFootprintCost.paintedPixels(r.image)))
+                    #if DEBUG
+                    profiler.record(.pixelCount, since: countStart)
+                    #endif
                     try Task.checkCancellation()
+                    #if DEBUG
+                    let footprintStart = SpectrumExportProfiler.now()
+                    #endif
                     let footprint = SpectrumTimelineFrames.footprint(r, lane: p.entry.lane, frame: k)
+                    #if DEBUG
+                    profiler.record(.footprint, since: footprintStart)
+                    #endif
                     try budget.retain(footprint.retainedBytes)
                     out.footprints.append(footprint)   // 그림 r은 이 반복이 끝나면 놓인다
                 } else {
@@ -186,10 +232,16 @@ actor SpectrumTimelineWorker {
                 }
             }
             lastMemory = SpectrumFrameMemoryReport(layers: plans.count, retainedBytes: budget.retained, peakBytes: budget.peak)
+            #if DEBUG
+            profiler.noteFrame(layers: plans.count, ledgerPeak: budget.peak)
+            #endif
             return out
         } catch {
             chunks = [:]
             lastMemory = SpectrumFrameMemoryReport(layers: 0, retainedBytes: 0, peakBytes: budget.peak)
+            #if DEBUG
+            profiler.noteLedger(budget.peak)
+            #endif
             throw error
         }
     }
@@ -247,8 +299,16 @@ actor SpectrumTimelineWorker {
         if renderer == nil { renderer = try SpectrumFrameRenderer(width: SubtitleFootprint.w, height: SubtitleFootprint.h) }
         guard let renderer, let f = files[p.media] else { throw SpectrumTimelineExportError.sourceUnavailable(spectrum: p.entry.id) }
         let cache = chunks[p.media] ?? [:]
+        #if DEBUG
+        let analysisStart = SpectrumExportProfiler.now()
+        #endif
         let bands = try SpectrumAnalysis.bands(frame: k, pieces: p.pieces, fps: SpectrumTimelineFrames.fps, rate: f.sampleRate, channelCount: f.channelCount,
                                                chunkSamples: f.chunkSamples, settings: p.entry.style.analysisSettings) { cache[$0] }
+        #if DEBUG
+        profiler.record(.analysis, since: analysisStart)
+        let rasterStart = SpectrumExportProfiler.now()
+        defer { profiler.record(.raster, since: rasterStart) }
+        #endif
         return (bands, try renderer.render(bands: bands, style: p.entry.style))
     }
 }

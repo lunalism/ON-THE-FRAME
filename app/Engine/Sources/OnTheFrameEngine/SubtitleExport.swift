@@ -201,6 +201,9 @@ enum SubtitleExporter {
         private var preparing = false, prepared = false
         private var spectrumFootprints: [SubtitleFootprint] = []   // 아래에서 위 차례(자막보다 아래)
         private var prepareTask: Task<Void, Never>?
+        #if DEBUG
+        private var writerNotReadySince: UInt64?   // 단계 시간 집계용(영상 큐에서만 쓴다)
+        #endif
         func checkFrameDeadline(_ seconds: Double) {
             lock.withLock {
                 if let start = waitingSince, ProcessInfo.processInfo.systemUptime - start > seconds, _error == nil {
@@ -211,6 +214,10 @@ enum SubtitleExporter {
         func wakeAfterFailure() { videoWake?(); audioWake?() }
         func videoStep(_ io: IO, _ footprints: FootprintWindow, _ spectrum: (any ExportFrameOverlay)?, _ queue: DispatchQueue, done: @escaping @Sendable () -> Void) {
             func finish() { if !videoDone { videoDone = true; io.vIn.markAsFinished(); done() } }
+            #if DEBUG
+            let profiler = spectrum?.profiler
+            if let since = writerNotReadySince { writerNotReadySince = nil; profiler?.record(.writerWait, since: since) }
+            #endif
             if error != nil { prepareTask?.cancel(); spectrumFootprints = []; finish(); return }
             if videoDone || preparing { return }
             #if DEBUG
@@ -224,10 +231,16 @@ enum SubtitleExporter {
                     preparing = true
                     lock.withLock { waitingSince = ProcessInfo.processInfo.systemUptime }
                     let frame = k
+                    #if DEBUG
+                    let asked = SpectrumExportProfiler.now()
+                    #endif
                     prepareTask = Task.detached {
                         let result: Result<[SubtitleFootprint], Error>
                         do { result = .success(try await spectrum.prepareFootprints(frame)) } catch { result = .failure(error) }
                         queue.async {
+                            #if DEBUG
+                            profiler?.record(.prepareWait, since: asked)
+                            #endif
                             self.preparing = false; self.prepareTask = nil
                             self.lock.withLock { self.waitingSince = nil }
                             guard !self.videoDone else { return }
@@ -241,7 +254,13 @@ enum SubtitleExporter {
                     return
                 }
                 let t = CMTime(value: CMTimeValue(k), timescale: 30)
+                #if DEBUG
+                let sourceStart = SpectrumExportProfiler.now()
+                #endif
                 while let s = next, CMTimeCompare(s.0, t) <= 0 { current = s.1; currentTime = s.0; next = nextSample(io) }
+                #if DEBUG
+                profiler?.record(.sourceFrame, since: sourceStart)
+                #endif
                 if strictFrameGrid && CMTimeCompare(currentTime,t) != 0 {
                     fail(ExportFailure.export("이미지 합성 프레임 PTS가 다릅니다(\(k)).")); finish(); return
                 }
@@ -252,14 +271,24 @@ enum SubtitleExporter {
                 var out = src
                 let vis = footprints.visible(at: k)
                 if !vis.isEmpty || !spectrumFootprints.isEmpty {
+                    #if DEBUG
+                    let copyStart = SpectrumExportProfiler.now()
+                    #endif
                     var o: CVPixelBuffer?
                     guard let pool = io.adaptor.pixelBufferPool, CVPixelBufferPoolCreatePixelBuffer(nil, pool, &o) == kCVReturnSuccess, let ob = o,
                           CVPixelBufferGetPixelFormatType(ob) == SubtitleExporter.pixelFormat else { fail(ExportFailure.export("자막 프레임 버퍼를 만들지 못했습니다.")); finish(); return }
                     SubtitleFootprint.copyPlanes(src, ob)
+                    #if DEBUG
+                    profiler?.record(.frameCopy, since: copyStart)
+                    let compositeStart = SpectrumExportProfiler.now()
+                    #endif
                     CVPixelBufferLockBaseAddress(ob, [])
                     for f in spectrumFootprints { f.composite(ob) }
                     for f in vis { f.composite(ob) }
                     CVPixelBufferUnlockBaseAddress(ob, [])
+                    #if DEBUG
+                    profiler?.record(.composite, since: compositeStart)
+                    #endif
                     CVBufferPropagateAttachments(src, ob)
                     out = ob
                 }
@@ -268,11 +297,21 @@ enum SubtitleExporter {
                 CVBufferSetAttachment(out, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
                 CVBufferSetAttachment(out, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
                 CVBufferSetAttachment(out, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
-                if !io.adaptor.append(out, withPresentationTime: t) { fail(ExportFailure.export("프레임 \(k)을 쓰지 못했습니다.")); finish(); return }
+                #if DEBUG
+                let appendStart = SpectrumExportProfiler.now()
+                #endif
+                let appended = io.adaptor.append(out, withPresentationTime: t)
+                #if DEBUG
+                profiler?.record(.append, since: appendStart)
+                #endif
+                if !appended { fail(ExportFailure.export("프레임 \(k)을 쓰지 못했습니다.")); finish(); return }
                 spectrumFootprints = []; prepared = false
                 k += 1
                 lock.lock(); _written = k; lock.unlock()
             }
+            #if DEBUG
+            if !videoDone && !io.vIn.isReadyForMoreMediaData { writerNotReadySince = SpectrumExportProfiler.now() }
+            #endif
         }
         func audioStep(_ io: IO, done: () -> Void) {
             func finish() { if !audioDone { audioDone = true; io.aIn!.markAsFinished(); done() } }

@@ -14,6 +14,8 @@ protocol ExportFrameOverlay: Sendable {
     #if DEBUG
     func checkpoint(_ point: SpectrumExportCheckpoint) async
     func pausesWriter(at frame: Int) -> Bool
+    /// 단계 시간 집계(없으면 재지 않는다 — SpectrumExportProfile.swift)
+    var profiler: SpectrumExportProfiler? { get }
     #endif
 }
 

@@ -148,6 +148,49 @@ public enum ExportService {
                                         stage: { _ in }, progress: progress, spectrum: frames)
         } catch { return Task.isCancelled || error is CancellationError ? .cancelled : .failed(.export(String(describing: error))) }
     }
+    /// Explicit test-only capability (SP-EXPORT-E4a, 2026-11-23): exports an ordinary timeline that contains Spectrum items through the
+    /// production path (CompositionPlanner.plan → exportPrepared → SubtitleExporter.encode → Pump.videoStep), supplying the general
+    /// timeline frame provider. Internal and compiled only in DEBUG: the app and the public `export` entry cannot reach it, and
+    /// normal export continues to reject every plan that contains Spectrum items. The caller must supply finite limits
+    /// (frame memory budget, per-frame and whole-job timeouts); there are no product defaults.
+    static func exportSpectrumTimeline(_ timeline: Timeline, media: [UUID: MediaAsset], enabled: Bool, to destination: ExportDestination,
+                                       limits: SpectrumTimelineExportLimits, options: Options = Options(),
+                                       stage: @escaping @Sendable (ExportStage) async -> Void = { _ in },
+                                       progress: @escaping @Sendable (Double) async -> Void = { _ in },
+                                       profile: (@Sendable (SpectrumExportProfile) -> Void)? = nil) async -> ExportOutcome {
+        guard enabled else { return .failed(.export("Internal spectrum timeline export is disabled.")) }
+        guard !InternalImagePreview.containsImages(timeline) else { return .failed(.export("스펙트럼 내보내기는 이미지 프로젝트를 아직 지원하지 않습니다.")) }
+        let frames: SpectrumTimelineFrames
+        do { frames = try SpectrumTimelineFrames(timeline: timeline, assets: Array(media.values), limits: limits) }
+        catch { return .failed(.export(spectrumFailureText(error, timeline: timeline))) }
+        // 단계 시간 집계(E4b): 끝난 뒤(성공·실패·취소 모두) 한 번 넘긴다. 결과에는 영향을 주지 않는다.
+        let wallStart = SpectrumExportProfiler.now(), cpuStart = clock_gettime_nsec_np(CLOCK_PROCESS_CPUTIME_ID)
+        func report() {
+            guard let profile, var p = frames.profiler?.snapshot else { return }
+            p.exportWallNanos = SpectrumExportProfiler.now() - wallStart
+            p.processCPUNanos = clock_gettime_nsec_np(CLOCK_PROCESS_CPUTIME_ID) - cpuStart
+            profile(p)
+        }
+        let outcome: ExportOutcome
+        do {
+            let plan = try await CompositionPlanner.plan(timeline, media: media, settings: .m1)
+            try Task.checkCancellation()
+            outcome = await exportPrepared(plan, to: destination, sources: Array(media.values), options: options, stage: stage, progress: progress, spectrum: frames)
+        } catch {
+            await frames.close()
+            report()
+            return Task.isCancelled || error is CancellationError ? .cancelled : .failed(.export(String(describing: error)))
+        }
+        await frames.close()   // 원본과 디코딩한 소리를 놓는다(성공·실패·취소 모두)
+        report()
+        // 쓰는 도중 공급기가 낸 오류는 펌프를 거치며 일반 실패 글이 된다 — 분류한 이유의 글로 바꾼다
+        if case .failed(.export) = outcome, let cause = frames.lastError { return .failed(.export(spectrumFailureText(cause, timeline: timeline))) }
+        return outcome
+    }
+    static func spectrumFailureText(_ error: Error, timeline: Timeline) -> String {
+        let issues = SpectrumExportIssue.issues(for: error, timeline: timeline)
+        return issues.isEmpty ? String(describing: error) : issues.map(\.message).joined(separator: " ")
+    }
     #endif
 
     private static func exportPrepared(_ p: PlannedComposition, to d: ExportDestination, sources: [MediaAsset],

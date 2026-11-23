@@ -1,5 +1,25 @@
 # 인계 요약 — ON THE FRAME
 
+## 2026-11-23 현행 인계 · SP-EXPORT-E4-CHECKPOINT
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 그 아래 이전 ‘현행’은 각 작성 시점 기준이다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 구현 체크포인트 | `feature/spectrum-effects`, 부모 `7f01bbe`. E4-a: DEBUG 전용 내부 진입점으로 Spectrum 프레임 공급기를 제품 쓰기 경로에 잇고 실제 H.264 MP4를 만들어 디코딩하는 엔진 시험 13개. E4-b: 그 경로의 DEBUG 전용 단계 시간 집계. E4-c: 최적화를 켠 DEBUG 엔진으로 한 번 측정(소스 변경 없음). 엔진 다섯 파일과 엔진 시험 세 파일. 프로젝트 형식·앱 소스 변경 없음. [결정 기록](DECISIONS.md#2026-11-23-debug-전용-spectrum-mp4-내보내기-연결과-단계-시간-계측sp-export-e4-abc). 이 인계를 담은 커밋이 체크포인트다. |
+| 상태 | DEBUG 전용 제품 경로 Spectrum MP4 내보내기가 시험한 fixture 범위에서 검증됐다. E4 단계 전체가 끝난 것은 아니다. **공개 Spectrum Export는 계속 막혀 있다.** 128 MiB 예산과 30초·300초 시간 한도는 시험용 값이다. |
+| 게시 | 커밋·push는 소유자 승인 뒤에만 한다. 실제 결과는 원격 조회로 확인한다. |
+| 빌드·시험 | E4-b 외부 Debug `SpExportE4b-Profile-20261123-01`(exit 0, 컴파일러 최대 RSS 약 1231 MiB): 엔진 시험 한 실행 72/72(Spectrum MP4 13, E3 14, E2 21, E1 17, 자막 펌프 7), 일반 자체 검사 62/62, 이미지 내보내기 사전 차단 검사 4개, 이미지 내보내기 8/8, Spectrum overlay 65/65·playback 203/203·lifecycle 25/25 PASS. 공개 Spectrum 검사는 첫 실행 INCOMPLETE, 소유자가 따로 승인한 재실행에서 28개 PASS. E4-c 엔진만의 최적화 빌드 `SpExportE4c-Optimized-20261123-01`(`-O`, `-DDEBUG`, `-enable-testing` 확인): Spectrum MP4 13/13 PASS. E4-a의 이력(첫 실행 71 PASS·1 FAIL, 시험 기대값 정정 뒤 13/13)은 결정 기록에 있다. |
+| 측정(한 번의 실행, 2초 fixture) | 최적화 없는 Debug: 내보내기 11.34·22.32·44.30·12.55초(Digital과 자막·Analog·두 층·옮긴 소스와 무음), 발자국 생성이 층·프레임당 약 296 ms. 최적화 켠 DEBUG 엔진: 0.63·1.27·1.75·0.69초, 발자국 생성 약 3.4 ms. Release 성능이 아니다. |
+| 소유자 수동 확인 | **대기 중:** 내보낸 MP4의 육안 확인. 파일은 `/Volumes/Data/ON-THE-FRAME-Builds/Results/SpExportE4c-Optimized-20261123-01/work-spectrum/`의 `digital-subtitle/`, `analog/`, `two-layers-offset/`, `moved-silence-15/` 아래 `out.mp4`(같은 장면이 `SpExportE4b-Profile-20261123-01/`, `SpExportE4a-Tighten-20261123-01/`에도 있다). |
+| Release 검증 | 없음(엔진 non-DEBUG 조건 타입 검사만). 내부 진입점은 Release에서 컴파일되지 않는다. |
+| 사용 가능한 Debug 앱 | `/Volumes/Data/ON-THE-FRAME-Builds/DerivedData/SpExportE4b-Profile-20261123-01/Build/Products/Debug/OnTheFrame.app` |
+| 빌드 산출물 | 이 조각 뒤 관리 산출물은 약 8.59 GiB(조기 중지 19.25 GiB)다. 이 조각에서 지운 것은 없다. E4-c의 설정 조회 때 `app/Engine/.swiftpm/configuration` 빈 폴더(Git이 무시하는 경로)와 시스템 임시 폴더의 작은 오류 결과 묶음 하나가 생겼고 그대로 두었다. 삭제·이동은 소유자가 경로별로 승인한 뒤에만 한다. |
+
+**열린 문제.** 소유자의 MP4 육안 확인 대기, Preview와 내보낸 프레임의 직접 비교 미검증, 긴 내보내기·실제 미디어·실제 Release 성능 미검증, Instruments 누수 점검 대기, 제품 메모리 예산과 시간 한도 정책 미정, 이미지 배경 Spectrum 내보내기 범위 미승인, 공개 Spectrum 자체 검사의 시작 단계 무응답 1회(원인 불명, 재실행은 통과했으나 미해결), 최적화 없는 빌드에서의 실행 간 시간 차이와 CPU 시간이 벽시계의 약 2배였던 이유, 그리고 [이전 인계](#2026-11-23-현행-인계--sp-export-e3-checkpoint)의 열린 문제. 발자국 생성 코드의 좁은 최적화는 보류했다.
+
+**다음 승인.** 후보는 Preview와 Export의 직접 비교 조각: 앱의 Preview가 실제로 올린 Spectrum 그림과 같은 프레임의 내보낸 화소를 비교한다. 앱의 DEBUG 자체 검사가 내부 내보내기 진입점을 부르게 되므로(지금은 앱에서 호출하는 곳이 없다) 범위와 경계는 소유자가 정해 승인한다. 그 밖에 긴 재료와 실제 미디어 측정, Release 측정 방법, 제품 예산·시간 한도·안내 글. v1.0 최종 수락 전에는 Instruments로 메모리 누수와 안정성을 점검한다.
+
 ## 2026-11-23 현행 인계 · SP-EXPORT-E3-CHECKPOINT
 
 아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 그 아래 이전 ‘현행’은 각 작성 시점 기준이다.
