@@ -1,5 +1,24 @@
 # 인계 요약 — ON THE FRAME
 
+## 2026-11-23 현행 인계 · SP-EXPORT-E3-CHECKPOINT
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 그 아래 이전 ‘현행’은 각 작성 시점 기준이다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 구현 체크포인트 | `feature/spectrum-effects`, 부모 `fab6674`. Spectrum 프레임 공급기의 발자국 메모리 예산(할당 전 검사, 층을 하나씩 처리)과 내보내기 자격 분류·한국어 안내 글(앱에 이어지지 않음). 엔진 세 파일과 엔진 시험 다섯 파일. 프로젝트 형식·앱 소스·쓰기 펌프 변경 없음. [결정 기록](DECISIONS.md#2026-11-23-spectrum-발자국-메모리-예산과-자격-분류sp-export-e3-엔진-전용). 이 인계를 담은 커밋이 체크포인트다. |
+| 상태 | 내부 발자국 예산과 자격 판정 장치가 시험한 한도 안에서 검증됐다. **공개 Spectrum Export는 계속 막혀 있다.** 128 MiB는 시험용 값이며 제품 한도가 아니다. |
+| 게시 | 커밋·push는 소유자 승인 뒤에만 한다. 실제 결과는 원격 조회로 확인한다. |
+| 빌드·시험 | 외부 Debug `SpExportE3-Validate-20261123-01`(exit 0, 컴파일러 최대 RSS 약 1236 MiB): 엔진 시험 59/59(E3 14, E2 21, E1 17, 자막 펌프 7), 일반 자체 검사 62/62, 공개 Spectrum 검사 28개, 이미지 내보내기 사전 차단 검사 4개, 이미지 내보내기 8/8, Spectrum overlay 65/65·playback 203/203·lifecycle 25/25 PASS. |
+| 소유자 수동 확인 | 이 조각에는 없다(사용자에게 보이는 변화 없음). |
+| Release 검증 | 없음(엔진 non-DEBUG 조건 타입 검사만). |
+| 사용 가능한 Debug 앱 | `/Volumes/Data/ON-THE-FRAME-Builds/DerivedData/SpExportE3-Validate-20261123-01/Build/Products/Debug/OnTheFrame.app` |
+| 빌드 산출물 | 마지막 시험 뒤 관리 산출물은 17.50 GiB였다. 2026-11-23 소유자 승인(ARTIFACT-CLEANUP-16)으로 정확한 경로 28개를 지웠다: 보관된 옛 DerivedData 두 묶음, 대체된 활성 DerivedData 넷(`SpPublicOpenImport-Validate`·`SpPublicSelfTest-Validate`·`SpExportE1-Validate`·`SpExportE2-Validate`), 복사 방식 시험용 더미, 옛 Results의 컴파일러 모듈 캐시 열아홉, 검증된 tar와 해시가 같은 selftest-work 스냅샷 중복 사본 둘. 정리 뒤 관리 산출물은 13.20 GiB(조기 중지 19.25 GiB), 되찾은 물리 공간은 34.35 GiB다. 최신 Debug 앱과 엔진 객체(`SpExportE3-Validate-20261123-01`), `LaneZoom-Validate-20261123-01` DerivedData, 현재 타입 검사가 쓰는 모듈 캐시 셋, 시험 fixture, 모든 Results의 로그·시험 결과, 보관본의 `.meta`는 남겼다. 지운 DerivedData를 가리키는 이전 인계의 "사용 가능한 Debug 앱" 경로와 그 실행의 다시 실행용 스크립트는 더는 쓸 수 없다(기록으로만 남긴다). 같은 날 뒤이은 검토(ARTIFACT-REVIEW-17)에서 소유자 승인으로 정확한 경로 16개를 더 지웠다: 검증된 tar와 모든 파일의 해시가 같은 스냅샷 폴더 `sw-1121T080243`, 그리고 서로 같고 원본과 해시가 같은 시험 미디어 격리 사본 열여섯 묶음 가운데 열다섯(한 묶음 `Results/LaneZoom-Validate-20261123-01/edit/work`는 남김, 원본 미디어는 건드리지 않음). 그 뒤 관리 산출물은 7.00 GiB, 추가로 되찾은 물리 공간은 12.10 GiB다(미디어 사본은 복제본이어서 물리 회수는 작았다). 내부 디스크의 프로젝트 관련 항목은 조사만 했고 지운 것이 없다. 목록과 기록: `/Volumes/Data/ON-THE-FRAME-Builds/Results/Cleanup-Plan-20261123-01/`, `Internal-Mac-Inspection-20261123-01/`. 삭제·이동은 소유자가 경로별로 승인한 뒤에만 한다. |
+
+**열린 문제.** 제품의 프레임 메모리 예산 값 미정, 넓게 칠하는 큰 발자국이 거부될 수 있음(유효한 모양의 호환 평가 필요), 장부 밖 할당(고정 캔버스 등)과 프로세스 전체 메모리는 묶이지 않음, 긴 내보내기의 메모리 안정성과 누수 미검증, 제품 시간 한도 정책 미정, 안내 글의 최종 표현과 앱 연결 미정, 그리고 [이전 인계](#2026-11-23-현행-인계--sp-export-e2-checkpoint)의 열린 문제.
+
+**다음 승인.** 후보는 SP-EXPORT-E4: Debug 전용으로 공급기를 실제 쓰기 경로에 잇고 Spectrum이 든 MP4를 디코딩해 Preview와 비교, 취소와 기존 파일 보호, 긴 길이 자원 측정. 그 전에 소유자가 예산 값·시간 한도 정책·안내 글을 정한다. v1.0 최종 수락 전에는 Instruments로 메모리 누수와 안정성을 점검한다.
+
 ## 2026-11-23 현행 인계 · SP-EXPORT-E2-CHECKPOINT
 
 아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 그 아래 이전 ‘현행’은 각 작성 시점 기준이다.

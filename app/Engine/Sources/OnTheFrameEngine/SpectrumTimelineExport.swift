@@ -23,7 +23,8 @@ enum SpectrumTimelineExportError: Error, Equatable {
     case frameState(spectrum: UUID, frame: Int, state: SpectrumFrameState)
     case frameOutOfRange(Int)
     case pcmBudgetExceeded(bytes: Int)
-    case rasterBudgetExceeded(bytes: Int)
+    /// 이 프레임의 스펙트럼 그림·발자국에 필요한 메모리(동시 사용량의 상한)가 한도를 넘는다. 넘친 계산은 required = Int.max.
+    case frameMemoryBudgetExceeded(required: Int, limit: Int)
     /// 앞 프레임이 끝나기 전에 다음 요청이 옴(쓰기 펌프는 한 번에 하나만 요청한다)
     case concurrentRequest
     case closed
@@ -35,13 +36,13 @@ struct SpectrumTimelineExportLimits: Sendable, Equatable {
     let stepTimeout: Double
     /// 내보내기 전체에 허용하는 시간(초). 쓰기 펌프가 이 값으로 마무리 기한을 계산한다.
     let jobTimeout: Double
+    /// 한 프레임의 스펙트럼 그림과 발자국이 동시에 쓰는 메모리의 상한(SpectrumFrameBudget). 기본값이 없다 — 제품 값은 공개 연결 때 정한다.
+    let frameMemoryBudgetBytes: Int
     /// 한 프레임을 위해 들고 있는 디코딩된 소리의 상한(바이트)
     var pcmBudgetBytes = 32 << 20
-    /// 한 프레임의 스펙트럼 그림 바이트 합의 상한
-    var rasterBudgetBytes = 128 << 20
     var isValid: Bool {
         stepTimeout.isFinite && jobTimeout.isFinite && stepTimeout > 0 && jobTimeout >= stepTimeout && jobTimeout <= 1_000_000_000
-            && pcmBudgetBytes > 0 && rasterBudgetBytes > 0
+            && pcmBudgetBytes > 0 && frameMemoryBudgetBytes > 0
     }
 }
 
@@ -88,18 +89,25 @@ final class SpectrumTimelineFrames: ExportFrameOverlay, @unchecked Sendable {
             }
         }
     }
-    /// 프레임 k의 스펙트럼 결과(아래에서 위). 보이는 것이 없으면 빈 배열.
+    /// 프레임 k의 스펙트럼 결과(아래에서 위)를 그림째로 — 시험·진단용. 내보내기는 prepareFootprints를 쓴다(그림을 쌓지 않는다).
     func layers(_ frame: Int) async throws -> [SpectrumTimelineLayer] {
+        try await guarded { try await self.worker.process(frame, makeFootprints: false).layers }
+    }
+    /// 프레임 k의 발자국(아래에서 위). 층을 하나씩 그려 발자국으로 바꾸고 그림은 바로 놓는다. 보이는 것이 없으면 빈 배열.
+    func prepareFootprints(_ frame: Int) async throws -> [SubtitleFootprint] {
+        try await guarded { try await self.worker.process(frame, makeFootprints: true).footprints }
+    }
+    /// 요청 앞뒤로 취소와 원본 정체를 본다. 디코더가 취소를 알아챈 경우도 취소로 돌려준다.
+    private func guarded<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T {
         try Task.checkCancellation(); try validateSources()
-        let result: [SpectrumTimelineLayer]
-        do { result = try await worker.layers(frame) }
-        catch SpectrumAnalysisError.cancelled { throw CancellationError() }   // 디코더가 취소를 알아챈 경우도 취소로 돌려준다
+        let result: T
+        do { result = try await body() }
+        catch SpectrumAnalysisError.cancelled { throw CancellationError() }
         try Task.checkCancellation(); try validateSources()
         return result
     }
-    func prepareFootprints(_ frame: Int) async throws -> [SubtitleFootprint] {
-        try await layers(frame).compactMap { layer in layer.rendered.map { Self.footprint($0, lane: layer.lane, frame: frame) } }
-    }
+    /// 마지막으로 처리한 프레임의 메모리 장부(계산한 상한)
+    func memory() async -> SpectrumFrameMemoryReport { await worker.lastMemory }
     func composed(_ frame: Int, source: CVPixelBuffer, output: CVPixelBuffer) {}
     #if DEBUG
     func checkpoint(_ point: SpectrumExportCheckpoint) async {}
@@ -120,12 +128,15 @@ final class SpectrumTimelineFrames: ExportFrameOverlay, @unchecked Sendable {
 }
 
 /// 한 번에 한 프레임만 계산한다. 원본은 미디어마다 한 번 열어 다시 쓰고, 디코딩한 소리는 지금 프레임이 읽는 덩어리만 들고 있는다.
+/// 그림·발자국의 동시 메모리는 SpectrumFrameBudget으로 할당 전에 본다(SP-EXPORT-E3).
 actor SpectrumTimelineWorker {
     private let timeline: Timeline, sources: [UUID: MediaAsset], limits: SpectrumTimelineExportLimits
     private var files: [UUID: SpectrumFileSource] = [:]          // 미디어 ID → 연 원본
     private var chunks: [UUID: [Int: [[Float]]]] = [:]           // 미디어 ID → 덩어리 번호 → 채널별 표본
     private var renderer: SpectrumFrameRenderer?
     private var busy = false, closed = false
+    private(set) var lastMemory = SpectrumFrameMemoryReport()
+    struct Output: Sendable { var layers: [SpectrumTimelineLayer] = [], footprints: [SubtitleFootprint] = [] }
 
     init(timeline: Timeline, sources: [UUID: MediaAsset], limits: SpectrumTimelineExportLimits) {
         self.timeline = timeline; self.sources = sources; self.limits = limits
@@ -136,7 +147,9 @@ actor SpectrumTimelineWorker {
         chunks.values.reduce(0) { $0 + $1.values.reduce(0) { $0 + $1.reduce(0) { $0 + $1.count * MemoryLayout<Float>.stride } } }
     }
 
-    func layers(_ k: Int) async throws -> [SpectrumTimelineLayer] {
+    /// 프레임 하나. makeFootprints면 층마다 그리기 → 메모리 검사 → 발자국 → 그림 놓기(그림을 쌓지 않는다). 아니면 그림을 담아 돌려준다(시험·진단).
+    /// 어느 층에서든 실패하면 그 프레임의 결과를 아무것도 돌려주지 않고(일부만 내지 않는다) 디코딩한 소리를 놓는다.
+    func process(_ k: Int, makeFootprints: Bool) async throws -> Output {
         guard !closed else { throw SpectrumTimelineExportError.closed }
         guard !busy else { throw SpectrumTimelineExportError.concurrentRequest }
         guard k >= 0, k < timeline.durationFrames else { throw SpectrumTimelineExportError.frameOutOfRange(k) }
@@ -144,10 +157,41 @@ actor SpectrumTimelineWorker {
         defer { busy = false }
         // 프리뷰와 같은 차례: 타임라인은 위 레인을 먼저 담고, 그릴 때는 아래부터다
         let visible = timeline.spectra.reversed().filter { $0.visible(atFrame: k) }
-        guard !visible.isEmpty else { chunks = [:]; return [] }
-        let plans = try await plans(visible, frame: k)
-        try await load(plans)
-        return try render(plans, frame: k)
+        lastMemory = SpectrumFrameMemoryReport()
+        guard !visible.isEmpty else { chunks = [:]; return Output() }
+        var budget = SpectrumFrameBudget(limit: limits.frameMemoryBudgetBytes)
+        do {
+            // 원본을 열거나 소리를 디코딩하기 전에: 그림 하나도 들일 수 없으면 여기서 멈춘다
+            try budget.admit(transient: SpectrumFootprintCost.maxImageBytes)
+            let plans = try await plans(visible, frame: k)
+            try await load(plans)
+            var out = Output()
+            for p in plans {
+                try Task.checkCancellation()
+                try budget.admit(transient: SpectrumFootprintCost.maxImageBytes)   // 그리기 전: 가장 큰 그림을 가정
+                let (bands, rendered) = try render(p, frame: k)
+                if makeFootprints {
+                    guard let r = rendered else { continue }
+                    // 발자국을 만들기 전: 실제 크기와 칠한 화소 수로. 세는 동안에는 그림과 그 복사가 함께 있을 수 있다.
+                    let image = SpectrumFootprintCost.imageBytes(r.image)
+                    try budget.admit(transient: SpectrumFootprintCost.add(image, image))
+                    try budget.admit(transient: SpectrumFootprintCost.constructionPeak(r, painted: SpectrumFootprintCost.paintedPixels(r.image)))
+                    try Task.checkCancellation()
+                    let footprint = SpectrumTimelineFrames.footprint(r, lane: p.entry.lane, frame: k)
+                    try budget.retain(footprint.retainedBytes)
+                    out.footprints.append(footprint)   // 그림 r은 이 반복이 끝나면 놓인다
+                } else {
+                    try budget.retain(rendered.flatMap { SpectrumFootprintCost.imageBytes($0.image) } ?? 0)
+                    out.layers.append(SpectrumTimelineLayer(spectrumID: p.entry.id, lane: p.entry.lane, bands: bands, rendered: rendered))
+                }
+            }
+            lastMemory = SpectrumFrameMemoryReport(layers: plans.count, retainedBytes: budget.retained, peakBytes: budget.peak)
+            return out
+        } catch {
+            chunks = [:]
+            lastMemory = SpectrumFrameMemoryReport(layers: 0, retainedBytes: 0, peakBytes: budget.peak)
+            throw error
+        }
     }
 
     private struct Plan {
@@ -198,20 +242,13 @@ actor SpectrumTimelineWorker {
         }
         try Task.checkCancellation()
     }
-    private func render(_ plans: [Plan], frame k: Int) throws -> [SpectrumTimelineLayer] {
+    /// 한 층: 분석 값과 그림(그릴 것이 없으면 nil)
+    private func render(_ p: Plan, frame k: Int) throws -> (bands: [Float], rendered: SpectrumRenderedFrame?) {
         if renderer == nil { renderer = try SpectrumFrameRenderer(width: SubtitleFootprint.w, height: SubtitleFootprint.h) }
-        guard let renderer else { throw SpectrumTimelineExportError.closed }
-        var out: [SpectrumTimelineLayer] = [], rasterBytes = 0
-        for p in plans {
-            guard let f = files[p.media] else { throw SpectrumTimelineExportError.sourceUnavailable(spectrum: p.entry.id) }
-            let cache = chunks[p.media] ?? [:]
-            let bands = try SpectrumAnalysis.bands(frame: k, pieces: p.pieces, fps: SpectrumTimelineFrames.fps, rate: f.sampleRate, channelCount: f.channelCount,
-                                                   chunkSamples: f.chunkSamples, settings: p.entry.style.analysisSettings) { cache[$0] }
-            let rendered = try renderer.render(bands: bands, style: p.entry.style)
-            if let r = rendered { rasterBytes += r.image.bytesPerRow * r.image.height }
-            guard rasterBytes <= limits.rasterBudgetBytes else { throw SpectrumTimelineExportError.rasterBudgetExceeded(bytes: rasterBytes) }
-            out.append(SpectrumTimelineLayer(spectrumID: p.entry.id, lane: p.entry.lane, bands: bands, rendered: rendered))
-        }
-        return out
+        guard let renderer, let f = files[p.media] else { throw SpectrumTimelineExportError.sourceUnavailable(spectrum: p.entry.id) }
+        let cache = chunks[p.media] ?? [:]
+        let bands = try SpectrumAnalysis.bands(frame: k, pieces: p.pieces, fps: SpectrumTimelineFrames.fps, rate: f.sampleRate, channelCount: f.channelCount,
+                                               chunkSamples: f.chunkSamples, settings: p.entry.style.analysisSettings) { cache[$0] }
+        return (bands, try renderer.render(bands: bands, style: p.entry.style))
     }
 }

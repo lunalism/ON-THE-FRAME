@@ -7,7 +7,8 @@ import XCTest
 /// SP-EXPORT-E2 시험 재료: 생성한 WAV, 스펙트럼이 든 타임라인, 프리뷰와 같은 함수를 직접 부른 기준값.
 enum SpectrumTimelineFixture {
     struct Failure: Error, CustomStringConvertible { let description: String; init(_ s: String) { description = s } }
-    static let limits = SpectrumTimelineExportLimits(stepTimeout: 30, jobTimeout: 600)
+    /// 시험용 값이다(제품 기본값이 아니다): 프레임 메모리 예산 128 MiB
+    static let limits = SpectrumTimelineExportLimits(stepTimeout: 30, jobTimeout: 600, frameMemoryBudgetBytes: 128 << 20)
 
     /// 48 kHz WAV. value(표본, 채널) → −1…1
     static func writeWAV(_ url: URL, seconds: Int, channels: Int, _ value: (Int, Int) -> Double) throws {

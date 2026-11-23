@@ -57,8 +57,8 @@ final class SpectrumTimelineSafetyTests: SpectrumTimelineTestCase {
         let m = try await media("a.wav", Fx.tone(440))
         let sc = try scene(m)
         let t = try sc.timeline.addingSpectrum(lane: sc.low, at: 0, length: 30, sourceKey: sc.key)
-        XCTAssertEqual(rejection(t, [m], limits: SpectrumTimelineExportLimits(stepTimeout: 30, jobTimeout: .infinity)), .invalidLimits)
-        XCTAssertEqual(rejection(t, [m], limits: SpectrumTimelineExportLimits(stepTimeout: 0, jobTimeout: 10)), .invalidLimits)
+        XCTAssertEqual(rejection(t, [m], limits: SpectrumTimelineExportLimits(stepTimeout: 30, jobTimeout: .infinity, frameMemoryBudgetBytes: 128 << 20)), .invalidLimits)
+        XCTAssertEqual(rejection(t, [m], limits: SpectrumTimelineExportLimits(stepTimeout: 0, jobTimeout: 10, frameMemoryBudgetBytes: 128 << 20)), .invalidLimits)
         var tiny = Fx.limits; tiny.pcmBudgetBytes = 1_024
         let p = try provider(t, [m], limits: tiny)
         do { _ = try await p.layers(5); XCTFail("상한을 넘겨야 한다") }

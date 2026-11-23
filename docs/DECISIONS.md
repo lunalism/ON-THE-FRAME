@@ -1688,3 +1688,37 @@ After Effects 방식의 Composition 확장과 전환 효과는 이 체크포인�
 v1.0 최종 수락 전에는 실제 Mac에서의 메모리 누수 점검과 긴 길이 안정성 점검을 반드시 한다.
 
 증거: `/Volumes/Data/ON-THE-FRAME-Builds/Results/`의 `SpExportE2-Typecheck-20261123-01/`, `SpExportE2-Validate-20261123-01/`, `SpExportE2-Pump-20261123-01/`, `SpExportE2-SubtitleRegression-20261123-01/`.
+
+### 2026-11-23 Spectrum 발자국 메모리 예산과 자격 분류(SP-EXPORT-E3, 엔진 전용)
+
+공개 Spectrum Export의 셋째 조각이다. [SP-EXPORT-E2](#2026-11-23-일반-타임라인-spectrum-내보내기-프레임-공급기sp-export-e2-엔진-전용)가 남긴 필수 안전 작업을 했다.
+
+**상태.** 내부 Spectrum 발자국 예산과 자격 판정 장치가 시험한 한도 안에서 검증됐다. 공개 Spectrum Export는 계속 막혀 있다(앱의 사전 차단과 `ExportService`의 거부, 쓰기 펌프를 바꾸지 않았다).
+
+**구현(엔진, 모두 internal).** 프로젝트 형식·앱 소스·`SubtitleFootprint`는 바꾸지 않았다.
+
+- `SpectrumFrameMemory.swift`(새 파일): 발자국 하나의 비용을 실제 할당에서 계산한다(그림, 그 복사, 임시 Double 배열 넷, 자라는 밝기·색차 배열, 남는 배열 용량). 프레임마다 장부(`SpectrumFrameBudget`)가 "지금 붙잡은 양 + 곧 필요한 양"을 할당 직전에 본다. 누적 합이 아니라 동시에 쓰는 양의 최대를 본다. 계산이 넘치면 거부한다.
+- `SpectrumTimelineExport.swift`: 내보내기 경로가 층을 하나씩 처리한다(상태 확인 → 메모리 검사 → 그리기 → 검사 → 발자국 → 그림 놓기). 모든 층을 먼저 그려 두지 않는다. 예산을 넘으면 층을 빼지 않고 명시적 오류로 멈춘다. 어느 층에서든 실패하면 그 프레임의 결과를 하나도 내지 않고 디코딩한 소리를 놓는다. 차례·분석·그리기 함수는 E2 그대로다.
+- 프레임 메모리 예산에는 기본값이 없다. 부르는 쪽이 넘겨야 한다. **128 MiB는 시험에 쓴 값이며 승인된 제품 메모리 한도가 아니다.** 제품 값은 공개 연결 때 소유자가 정한다. 디코딩한 소리의 별도 상한은 그대로다.
+- `SpectrumExportEligibility.swift`(새 파일): 내보내지 못하는 이유의 분류(소스 고르지 않음, 소스 없음, 계보 겹침, 원본 없음, 원본 바뀜, 메모리 한도, 내부 오류)와 한국어 안내 글. 판정은 기존 `Timeline.spectrumExportBlockers()`와 공급기 오류를 옮긴 것이며 새 정책은 없다(D-S3·D-S8: 빼지 않고 막는다). 글은 제안이고 앱의 내보내기 단추·알림에 이어져 있지 않다. 최종 표현은 공개 연결 단계에서 정한다.
+- 시간 한도는 바꾸지 않았다(유한한 값을 부르는 쪽이 넘긴다, 제품 정책 미정).
+
+**검증.**
+
+| 실행 | 결과 |
+| --- | --- |
+| 타입 검사 | 엔진 Debug 조건·non-DEBUG 조건 오류 0(실제 Release 구성 빌드가 아니다) |
+| Debug 빌드 | 외부 단일 작업 `SpExportE3-Validate-20261123-01` 1회 성공. 컴파일러 최대 RSS 약 1236 MiB(조기 중지 1280 MiB) |
+| 엔진 XCTest(그 빌드의 엔진 객체에 연결한 시험 실행기, 59개) | E3 14/14(`SpectrumFrameBudgetTests` 4, `SpectrumTimelineBudgetTests` 7, `SpectrumExportEligibilityTests` 3), E2 21/21, E1 17/17(`SourceTimeOriginTests` 9, `WaveformPeaksTests` 8), `SubtitlePumpExportTests` 7/7 PASS |
+| 앱 자체 검사(같은 빌드, 7묶음) | 일반 자체 검사 62/62, 공개 Spectrum 검사 28개, 이미지 프로젝트 내보내기 사전 차단 검사 4개, 이미지 내보내기 8/8, Spectrum overlay 65/65·playback 203/203·lifecycle 25/25 PASS |
+
+시험에서 기록한 장부 값(프레임 하나, 440 Hz 소리): Digital 한 층은 그림 1536×870, 칠한 화소 9,608개, 계산한 순간 최대 약 52 MiB, 남는 발자국 약 0.2 MiB. Digital과 Analog 두 층은 순간 최대 약 53 MiB. 순간 최대의 대부분은 발자국을 만들 때의 임시 Double 배열이다. 시험한 Digital·Analog 모양은 128 MiB 안에 들어갔다. 이 값은 계산한 상한이며 프로세스 메모리의 측정이 아니다(엔진 시험 프로세스의 최대 RSS는 약 226 MiB였다).
+
+**제한과 열린 것.**
+
+- 넓은 면을 통째로 칠하는 큰 발자국은 거부될 수 있다(계산상 1536×870을 모두 칠한 층 둘, 또는 화면 전체를 모두 칠한 층 하나는 128 MiB를 넘는다). 유효한 모양이 막히는지는 공개 전에 실제 모양으로 평가한다.
+- 장부 밖의 할당이 있다: 렌더러의 고정 캔버스(약 8 MiB), 렌더러가 그림을 복사하는 순간의 두 번째 그림, 발자국 생성 루프의 작은 임시 할당. 생성 중 순간 최대는 배열 용량이 두 배씩 느는 동작에 기댄 추정이다. AVFoundation의 디코더·인코더·화소 버퍼는 이 예산에 없다. 계산한 예산은 프로세스 전체 메모리의 상한이 아니다.
+- 긴 내보내기의 메모리 안정성과 메모리 누수는 검증하지 않았다. **v1.0 최종 수락 전에는 실제 Mac에서 Instruments(Leaks, Allocations, Memory Graph)로 긴 재생·편집, 반복 내보내기와 취소, 프로젝트 교체와 재연결, 캐시와 보안 범위 정리를 점검한다.**
+- E2에서 남은 것 그대로: Spectrum이 든 인코딩된 MP4, 인코딩 뒤 Preview/Export 일치, 여러 Spectrum의 실제 쓰기, 내보내는 도중의 취소(펌프), 실제 Release 구성 빌드, SwiftPM 의존 엔진 시험 57개. E1에서 남은 것도 그대로다.
+
+증거: `/Volumes/Data/ON-THE-FRAME-Builds/Results/`의 `SpExportE3-Typecheck-20261123-01/`, `SpExportE3-Validate-20261123-01/`.
