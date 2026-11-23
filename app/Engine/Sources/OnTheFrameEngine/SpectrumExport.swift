@@ -3,11 +3,12 @@ import Foundation
 import CoreGraphics
 import os
 
-/// Internal frame producer. A nil footprint is an explicit ready-empty result, never pending.
+/// Internal frame producer. An empty result is an explicit ready-empty frame, never pending.
+/// Footprints are composited in array order (first = bottom), all below subtitles (SP-EXPORT-E2, 2026-11-23).
 protocol ExportFrameOverlay: Sendable {
     var stepTimeout: Double { get }
     var jobTimeout: Double { get }
-    func prepare(_ frame: Int) async throws -> SubtitleFootprint?
+    func prepareFootprints(_ frame: Int) async throws -> [SubtitleFootprint]
     func validateSources() throws
     func composed(_ frame: Int, source: CVPixelBuffer, output: CVPixelBuffer)
     #if DEBUG
@@ -82,6 +83,8 @@ final class SpectrumExportFrames: ExportFrameOverlay, @unchecked Sendable {
     func composed(_ frame: Int, source: CVPixelBuffer, output: CVPixelBuffer) { controls.composed?(frame, source, output) }
     func checkpoint(_ point: SpectrumExportCheckpoint) async { await controls.checkpoint?(point) }
     func pausesWriter(at frame: Int) -> Bool { controls.pausesWriter?(frame) ?? false }
+    /// The fixed slice has exactly one spectrum: zero or one footprint per frame.
+    func prepareFootprints(_ frame: Int) async throws -> [SubtitleFootprint] { try await prepare(frame).map { [$0] } ?? [] }
     func prepare(_ frame: Int) async throws -> SubtitleFootprint? {
         await checkpoint(.framePreparation(frame))
         try Task.checkCancellation(); try validateSources()

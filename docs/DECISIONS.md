@@ -1635,3 +1635,56 @@ After Effects 방식의 Composition 확장과 전환 효과는 이 체크포인�
 - 과거의 시간 어긋남 문제가 모두 해결됐다고 보지 않는다. [다음 우선순위](#2026-11-23-레인-세로-맞춤과-확대-체크포인트)의 "최종 내보내기 수락 전에 기준 트랙 시작 오프셋 정렬 해결"을 어떻게 다시 정의할지는 소유자가 정한다.
 
 증거: `/Volumes/Data/ON-THE-FRAME-Builds/Results/SpExportE1-Prep-20261123-01/`(조사·타입 검사), `SpExportE1-Validate-20261123-01/`(빌드·시험), `SpExportE1-Validate-20261123-02/`(시험 수정 뒤 다시 실행, 복사·붙여넣기 비교).
+
+### 2026-11-23 일반 타임라인 Spectrum 내보내기 프레임 공급기(SP-EXPORT-E2, 엔진 전용)
+
+공개 Spectrum Export의 둘째 조각이다. 이름의 E2는 이 Export 작업의 조각이며 기술 검증 실험 E2(A-003)와 다르다. [SP-EXPORT-E1](#2026-11-23-spectrum파형-원본-시각-원점-정렬sp-export-e1-소유자-수동-44-pass) 위에 쌓았다.
+
+**상태.** 일반 Spectrum 프레임 공급기가 구현됐고 시험한 한도 안에서 실행 검증됐다. 제품의 자막 내보내기 쓰기 펌프는 인코딩된 MP4 출력으로 회귀 검증됐다. 공개 Spectrum Export는 계속 막혀 있다(앱의 사전 차단과 `ExportService`의 거부를 바꾸지 않았다). Spectrum 영상 내보내기가 완성된 것이 아니다.
+
+**구현(엔진 세 파일, 모두 internal).** 프로젝트 형식·앱 소스·`ExportService`는 바꾸지 않았다.
+
+- `SpectrumTimelineExport.swift`(새 파일): `SpectrumTimelineFrames`가 타임라인 스냅샷과 원본 목록을 받아 프레임마다 보이는 Spectrum의 결과를 낸다. 계산은 프리뷰가 쓰는 함수 그대로다(`Timeline.spectrumPieces` → `SpectrumAnalysis.chunks`·`bands` → `SpectrumFrameRenderer.render(bands:style:)`). 따라서 유효한 0높이의 최소 점(SPECTRUM-ZERO-01)과 E1의 원점 정렬이 그대로 적용되고 Softness는 0 경로만 쓴다. 기존 내부 Debug 조각의 고정 조건(360프레임, Spectrum 하나, 소리 클립 하나, 자막 셋, 스테레오 WAV)은 가져오지 않았다. 어떤 내보내기 경로에도 아직 이어져 있지 않다.
+- 차례는 프리뷰와 같다: `timeline.spectra.reversed()` 가운데 보이는 것, 앞의 것이 아래이고 모두 자막 아래다.
+- 동시에 보이는 여러 Spectrum은 받는다. 소스 고르지 않음·소스 없음·같은 계보 조각의 겹침(D-S3·D-S8)은 기존 `Timeline.spectrumExportBlockers()`로 판정해 만들 때 거부한다. 소스 원본이 목록에 없거나 파일이 바뀐 경우도 거부한다. 소스가 덮지 않는 구간은 기존 규칙대로 무음이며 오류가 아니다. 새 거부 범주는 만들지 않았다.
+- 원본은 미디어마다 한 번 열어 다시 쓰고, 디코딩한 소리는 지금 프레임이 읽는 덩어리만 든다(디코딩 전에 바이트 상한 검사). 프레임을 미리 계산하거나 쌓지 않는다.
+- 시간 한도(프레임당·작업 전체)는 부르는 쪽이 넘겨야 하며 제품 기본값이 없다. 기존 내부 조각의 180초 상한을 가져오지 않았고, 제품 정책은 공개 연결 때 정한다.
+- `SpectrumExport.swift`·`SubtitleExport.swift`: 내부 프로토콜 `ExportFrameOverlay`의 요구를 프레임당 발자국 하나에서 배열(`prepareFootprints`)로 바꾸고, 쓰기 펌프가 배열 차례로 합성한 뒤 자막을 올린다. 기존 내부 Debug 조각은 결과를 배열로 감싸는 한 줄을 더했다. 공급기가 없는 내보내기와 자막만 있는 내보내기는 빈 배열로 같은 경로를 탄다.
+
+**검증.** 실행마다 출처가 다르다. 자막 회귀 시험과 이미지 내보내기 검사는 앱 빌드 때가 아니라 그 뒤에 따로 실행했다.
+
+| 실행 | 결과 |
+| --- | --- |
+| 타입 검사 | 엔진 Debug 조건·non-DEBUG 조건 오류 0(실제 Release 구성 빌드가 아니다) |
+| Debug 빌드 | 외부 단일 작업 `SpExportE2-Validate-20261123-01` 1회 성공. 컴파일러 최대 RSS 약 1233 MiB(조기 중지 1280 MiB) |
+| 엔진 XCTest(그 빌드의 엔진 객체에 연결한 시험 실행기, 38개) | 공급기 21/21(`SpectrumTimelineFramesTests` 6, `SpectrumTimelineSourceTests` 6, `SpectrumTimelineSafetyTests` 9), `SourceTimeOriginTests` 9/9, `WaveformPeaksTests` 8/8 PASS |
+| 앱 자체 검사(같은 빌드) | 일반 자체 검사 62/62, 공개 Spectrum 검사 28개, 이미지 프로젝트 내보내기 사전 차단 검사 4개, Spectrum overlay 65/65·playback 203/203·lifecycle 25/25 PASS |
+| 쓰기 펌프, 빈 발자국(같은 앱, 따로 실행 `SpExportE2-Pump-20261123-01`) | 기존 이미지 내보내기 검사 8/8 PASS(생성 PNG, 150프레임, 자막·소리 없음) |
+| 쓰기 펌프, 자막(같은 엔진 객체, 따로 컴파일한 시험 실행기 `SpExportE2-SubtitleRegression-20261123-01`) | `SubtitlePumpExportTests` 7/7 PASS |
+
+자막 회귀 시험은 생성한 2초 영상(320×180, AAC 소리)과 흰 자막 하나로 `ExportService.export`를 호출하고 결과 H.264 MP4를 디코딩했다. 1920×1080, 디코딩한 프레임 60개, 자막의 밝은 화소는 프레임 20~39에만 있었고 글자 테두리가 자막 그림과 같은 자리였다. 소리 트랙 하나가 남았고 소리 시작이 기대 시각에 있었다. 원본은 그대로였고, 확인하지 않은 기존 대상은 보존됐고, 쓰는 도중 주입한 실패 뒤 대상과 임시 폴더가 남지 않았다. 문턱값으로 본 측정이며 화소 단위 일치 검증이 아니다.
+
+공급기 시험의 증거는 분석 값과 합성 전 그림까지다(직접 계산과 같음, 여러 층과 차례, 서로 다른 원본과 모노, 자르기·나누기·옮기기, 무음 구간, Digital·Analog, 0높이 점, 거부, 취소와 정리, 한도). 합성 차례는 4:2:0 버퍼의 단위 시험으로만 보았다.
+
+**열린 것.**
+
+- Spectrum이 든 인코딩된 MP4 출력, 인코딩 뒤의 Preview/Export 일치, 여러 Spectrum 발자국의 실제 쓰기.
+- 긴 내보내기의 속도와 메모리, 내보내는 도중의 취소(펌프 경로), 기존 내부 Debug Spectrum 조각의 실행(소스 수준 호환만 확인).
+- 실제 Release 구성 빌드, SwiftPM 의존 엔진 시험 57개.
+- E1에서 남은 것: 0이 아닌 트랙 시작을 보고하는 실제 미디어, MP3·VFR·다른 표본율.
+
+**다음 조각(SP-EXPORT-E3)에서 반드시 할 안전 작업.** 지금 한도가 묶는 것과 묶지 못하는 것을 구분한다.
+
+| 메모리 | 지금 |
+| --- | --- |
+| 디코딩한 소리(여러 원본 합계) | 디코딩 전에 상한 검사 |
+| 층별 그림(최대 약 8 MiB) | 그린 뒤 누적 검사 |
+| 발자국을 만드는 동안의 임시 배열(놓는 넓이 × 약 32바이트) | 묶지 않음 |
+| 프레임이 쓰일 때까지 남는 여러 층의 발자국(칠한 화소당 약 16바이트) | 묶지 않음 |
+| 펌프의 출력 버퍼(프레임당 하나, 풀에서 재사용) | 고정 |
+
+1. 발자국 메모리의 합계 예산. 2. 할당 전 검사. 3. 층을 하나씩 처리(그리기 → 발자국 → 그림 버리기). 4. 명시적 취소와 자원 정리. 5. 여러 Spectrum 층에서의 자원 측정. 기존 자원 한도는 올리지 않는다.
+
+v1.0 최종 수락 전에는 실제 Mac에서의 메모리 누수 점검과 긴 길이 안정성 점검을 반드시 한다.
+
+증거: `/Volumes/Data/ON-THE-FRAME-Builds/Results/`의 `SpExportE2-Typecheck-20261123-01/`, `SpExportE2-Validate-20261123-01/`, `SpExportE2-Pump-20261123-01/`, `SpExportE2-SubtitleRegression-20261123-01/`.

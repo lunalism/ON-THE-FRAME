@@ -199,7 +199,7 @@ enum SubtitleExporter {
         var audioWake: (() -> Void)? { get { lock.withLock { _audioWake } } set { lock.withLock { _audioWake = newValue } } }
         private var waitingSince: Double?
         private var preparing = false, prepared = false
-        private var spectrumFootprint: SubtitleFootprint?
+        private var spectrumFootprints: [SubtitleFootprint] = []   // 아래에서 위 차례(자막보다 아래)
         private var prepareTask: Task<Void, Never>?
         func checkFrameDeadline(_ seconds: Double) {
             lock.withLock {
@@ -211,7 +211,7 @@ enum SubtitleExporter {
         func wakeAfterFailure() { videoWake?(); audioWake?() }
         func videoStep(_ io: IO, _ footprints: FootprintWindow, _ spectrum: (any ExportFrameOverlay)?, _ queue: DispatchQueue, done: @escaping @Sendable () -> Void) {
             func finish() { if !videoDone { videoDone = true; io.vIn.markAsFinished(); done() } }
-            if error != nil { prepareTask?.cancel(); spectrumFootprint = nil; finish(); return }
+            if error != nil { prepareTask?.cancel(); spectrumFootprints = []; finish(); return }
             if videoDone || preparing { return }
             #if DEBUG
             if spectrum?.pausesWriter(at: k) == true { return }
@@ -225,14 +225,14 @@ enum SubtitleExporter {
                     lock.withLock { waitingSince = ProcessInfo.processInfo.systemUptime }
                     let frame = k
                     prepareTask = Task.detached {
-                        let result: Result<SubtitleFootprint?, Error>
-                        do { result = .success(try await spectrum.prepare(frame)) } catch { result = .failure(error) }
+                        let result: Result<[SubtitleFootprint], Error>
+                        do { result = .success(try await spectrum.prepareFootprints(frame)) } catch { result = .failure(error) }
                         queue.async {
                             self.preparing = false; self.prepareTask = nil
                             self.lock.withLock { self.waitingSince = nil }
                             guard !self.videoDone else { return }
                             switch result {
-                            case .success(let footprint): self.spectrumFootprint = footprint; self.prepared = true
+                            case .success(let layers): self.spectrumFootprints = layers; self.prepared = true
                             case .failure(let error): self.fail(error)
                             }
                             self.videoStep(io, footprints, spectrum, queue, done: done)
@@ -251,13 +251,13 @@ enum SubtitleExporter {
                 }
                 var out = src
                 let vis = footprints.visible(at: k)
-                if !vis.isEmpty || spectrumFootprint != nil {
+                if !vis.isEmpty || !spectrumFootprints.isEmpty {
                     var o: CVPixelBuffer?
                     guard let pool = io.adaptor.pixelBufferPool, CVPixelBufferPoolCreatePixelBuffer(nil, pool, &o) == kCVReturnSuccess, let ob = o,
                           CVPixelBufferGetPixelFormatType(ob) == SubtitleExporter.pixelFormat else { fail(ExportFailure.export("자막 프레임 버퍼를 만들지 못했습니다.")); finish(); return }
                     SubtitleFootprint.copyPlanes(src, ob)
                     CVPixelBufferLockBaseAddress(ob, [])
-                    spectrumFootprint?.composite(ob)
+                    for f in spectrumFootprints { f.composite(ob) }
                     for f in vis { f.composite(ob) }
                     CVPixelBufferUnlockBaseAddress(ob, [])
                     CVBufferPropagateAttachments(src, ob)
@@ -269,7 +269,7 @@ enum SubtitleExporter {
                 CVBufferSetAttachment(out, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
                 CVBufferSetAttachment(out, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
                 if !io.adaptor.append(out, withPresentationTime: t) { fail(ExportFailure.export("프레임 \(k)을 쓰지 못했습니다.")); finish(); return }
-                spectrumFootprint = nil; prepared = false
+                spectrumFootprints = []; prepared = false
                 k += 1
                 lock.lock(); _written = k; lock.unlock()
             }

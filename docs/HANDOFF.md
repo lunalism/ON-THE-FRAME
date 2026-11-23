@@ -1,5 +1,24 @@
 # 인계 요약 — ON THE FRAME
 
+## 2026-11-23 현행 인계 · SP-EXPORT-E2-CHECKPOINT
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 그 아래 이전 ‘현행’은 각 작성 시점 기준이다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 구현 체크포인트 | `feature/spectrum-effects`, 부모 `b2dce60`. 일반 타임라인의 Spectrum 내보내기 프레임 공급기(엔진 내부)와, 쓰기 펌프가 프레임당 여러 발자국을 받도록 한 변경. 엔진 세 파일과 엔진 시험 여섯 파일. 프로젝트 형식·앱 소스·`ExportService` 변경 없음. [결정 기록](DECISIONS.md#2026-11-23-일반-타임라인-spectrum-내보내기-프레임-공급기sp-export-e2-엔진-전용). 이 인계를 담은 커밋이 체크포인트다. |
+| 상태 | 공급기는 구현됐고 시험한 한도 안에서 실행 검증됐다. 자막 내보내기 쓰기 펌프는 인코딩된 MP4로 회귀 검증됐다. **공개 Spectrum Export는 계속 막혀 있다.** |
+| 게시 | 커밋·push는 소유자 승인 뒤에만 한다. 실제 결과는 원격 조회로 확인한다. |
+| 빌드·시험 | 외부 Debug `SpExportE2-Validate-20261123-01`(exit 0, 컴파일러 최대 RSS 약 1233 MiB): 엔진 시험 38/38(공급기 21, `SourceTimeOriginTests` 9, `WaveformPeaksTests` 8), 일반 자체 검사 62/62, 공개 Spectrum 검사 28개, 이미지 내보내기 사전 차단 검사 4개, Spectrum overlay 65/65·playback 203/203·lifecycle 25/25 PASS. 그 뒤 따로 실행: 이미지 내보내기 검사 8/8(빈 발자국 펌프), `SubtitlePumpExportTests` 7/7(자막 펌프, H.264 MP4를 디코딩해 확인). |
+| 소유자 수동 확인 | 이 조각에는 없다(사용자에게 보이는 변화 없음). |
+| Release 검증 | 없음(엔진 non-DEBUG 조건 타입 검사만). |
+| 사용 가능한 Debug 앱 | `/Volumes/Data/ON-THE-FRAME-Builds/DerivedData/SpExportE2-Validate-20261123-01/Build/Products/Debug/OnTheFrame.app` |
+| 빌드 산출물 | 관리 산출물은 마지막 시험 뒤 16.78 GiB였다(조기 중지 19.25 GiB). 다음 빌드들 전에 보관 이동을 검토한다. |
+
+**열린 문제.** Spectrum이 든 MP4 출력과 인코딩 뒤 Preview/Export 일치 미검증, 여러 Spectrum 발자국의 실제 쓰기 미검증, 긴 내보내기의 속도·메모리 미측정, 내보내는 도중의 취소(펌프) 미검증, 기존 내부 Debug Spectrum 조각 미실행, 발자국 메모리가 한도에 묶이지 않음(다음 조각의 필수 작업), 제품 시간 한도 정책 미정, 실제 Release 구성 빌드 없음, SwiftPM 의존 엔진 시험 57개 미실행, 그리고 [이전 인계](#2026-11-23-현행-인계--sp-export-e1-checkpoint)의 열린 문제.
+
+**다음 승인.** 후보는 SP-EXPORT-E3: 발자국 메모리 합계 예산과 할당 전 검사, 층을 하나씩 처리, 자격 미달 사유별 안내, 공개 연결을 위한 안전한 준비. 범위·빌드·시험은 소유자가 정해 승인한다. v1.0 최종 수락 전에는 실제 Mac에서의 메모리 누수·긴 길이 안정성 점검이 필요하다.
+
 ## 2026-11-23 현행 인계 · SP-EXPORT-E1-CHECKPOINT
 
 아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 그 아래 이전 ‘현행’은 각 작성 시점 기준이다.
