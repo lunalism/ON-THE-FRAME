@@ -157,7 +157,8 @@ public enum ExportService {
                                        limits: SpectrumTimelineExportLimits, options: Options = Options(),
                                        stage: @escaping @Sendable (ExportStage) async -> Void = { _ in },
                                        progress: @escaping @Sendable (Double) async -> Void = { _ in },
-                                       profile: (@Sendable (SpectrumExportProfile) -> Void)? = nil) async -> ExportOutcome {
+                                       profile: (@Sendable (SpectrumExportProfile) -> Void)? = nil,
+                                       experimentalCompositor: ExperimentalCompositorOptions? = nil) async -> ExportOutcome {
         guard enabled else { return .failed(.export("Internal spectrum timeline export is disabled.")) }
         guard !InternalImagePreview.containsImages(timeline) else { return .failed(.export("스펙트럼 내보내기는 이미지 프로젝트를 아직 지원하지 않습니다.")) }
         let frames: SpectrumTimelineFrames
@@ -173,7 +174,9 @@ public enum ExportService {
         }
         let outcome: ExportOutcome
         do {
-            let plan = try await CompositionPlanner.plan(timeline, media: media, settings: .m1)
+            var plan = try await CompositionPlanner.plan(timeline, media: media, settings: .m1)
+            // SP-EXPORT-E4D-INTEGRATION-PILOT-45(DEBUG 시범): 시험이 명시적으로 고를 때만 같은 계획의 영상 합성을 실험 합성기로 바꾼다. 기본값 nil은 지금과 같다.
+            if let experimentalCompositor { plan = try plan.replacingVideoComposition(withExperimental: experimentalCompositor) }
             try Task.checkCancellation()
             outcome = await exportPrepared(plan, to: destination, sources: Array(media.values), options: options, stage: stage, progress: progress, spectrum: frames)
         } catch {

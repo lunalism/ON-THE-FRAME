@@ -1,5 +1,66 @@
 # 인계 요약 — ON THE FRAME
 
+## 2026-11-25 현행 인계 · SP-EXPORT-E4D-CHECKPOINT
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 바로 아래 두 인계(2026-11-24)는 같은 조사의 앞선 기록이다. **E4-d 완료 체크포인트가 아니다.**
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 작업 상태 | `feature/spectrum-effects`, `391436a` 위의 체크포인트 커밋(실험 합성기 조사·DEBUG 통합 시범·F1 창 캡처 증거). 정확한 SHA는 Git으로 조회한다. |
+| 변경 파일 | 엔진: `ExperimentalCompositor.swift`, `ExportService.swift`(DEBUG 전용 Spectrum 내보내기의 선택 인자). 앱(DEBUG): `OnTheFrameApp.swift`(실행 인수), `SpectrumParitySelfTest.swift`, `CompositorPreviewDiagnostic.swift`, `CompositorPilotSelfTest.swift`, `CompositorWindowCapture.swift`. 엔진 시험 둘, 이 인계와 DECISIONS. 보통 프리뷰·내보내기·계획·`ProjectStore` 재생·탐색·프로젝트 형식·권한 변경 없음. |
+| 빌드 | 일반 Xcode Debug 앱 빌드 PASS(바뀐 DEBUG 파일 경고 0, 컴파일러 최대 RSS 1227 MiB = 조기 중지의 96%). **non-DEBUG·Release 검증 NOT RUN.** 손으로 다시 만든 프런트엔드 타입 검사는 BNNS 모듈 오류로 막혀 그만두었다. |
+| F1 | 실험 합성기의 프레임 1 요청 누락 다섯 번 관찰. 창 캡처(권한 요청 없이 `currentProcess`, builtin·corrected 각 1회): 두 방식 모두 창이 0 → 2로 바뀌었고(약 58 표본/s, 33 ms 넘는 빈틈 없음) 보통 길이의 프레임 1은 보이지 않았다. 표본 간격보다 짧은 표시는 배제 못 함. corrected만의 회귀는 확인 안 됨. 원인 UNKNOWN. 실제 패널 출력 증거 아님. |
+| F1 진단 결함 | 앱 안의 자동 분류가 재생 전 프레임 26 때문에 INCONCLUSIVE라고 잘못 적었다. 결과는 원시 JSON을 따로 처리한 것이다. 자동 분류는 PASS가 아니며 DEBUG 전용 수정이 필요하다. |
+| S5 · S6 · S3 · J | S5 시험한 DEBUG 장면에서 실험 합성기가 끝 열·행 덮음(기본 합성기는 아래 영상 노출), 사각형 밖 PASS. S6 여섯 표본 원본·시각 PASS, 화소 충실도 미해결. S3 #20 대 #5 미해결(32/32 재현 안 됨, 해결 아님). J 시험 범위 PASS. |
+| 판단 | E4-d parity 수락 안 됨, 공개 Spectrum Export 차단, 보통 제품 합성기 변경 없음, 실험 합성기 제품 통합 NO-GO, 색 정책 미정, 최근 앱 회귀 미실행. |
+| 사용 가능한 Debug 앱 | `/Volumes/Data/ON-THE-FRAME-Builds/DerivedData/SpExportE4d-F1NativeBuild-20261125-01/Build/Products/Debug/OnTheFrame.app`(이 체크포인트 소스). 이전 Debug 앱은 보존. |
+| 빌드 산출물 | 관리 산출물 약 16.28 GiB(조기 중지 19.25 GiB, 상한 20 GiB). 지운 것은 없다. |
+
+**열린 문제.** F1 프레임 1 미표시·요청 누락의 원인, 자동 분류 결함, S3, S6 화소 충실도, 색 정책, 확대 영상 끝 열·행 누락(기본 합성기), non-DEBUG 검증, E4-d parity·회귀 미실행, 컴파일러 RSS 여유(약 50 MiB), 그리고 아래 인계들의 열린 문제. 기록: [DECISIONS](DECISIONS.md#2026-11-24-실험-합성기-debug-통합-시범과-실행-결과sp-export-e4-d-미해결)의 2026-11-25 항목.
+
+**다음 승인.** 소유자가 정한다: F1 자동 분류 수정(DEBUG 전용)과 반복 캡처 여부, 재생 시작 프레임 1 미표시를 제품 문제로 다룰지, non-DEBUG 컴파일 검증, 고친 parity 시험·앱 회귀 실행, 가장자리·색 정책.
+
+## 2026-11-24 현행 인계 · SP-EXPORT-E4D-PILOT
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 바로 아래 SP-EXPORT-E4D-INVESTIGATION 인계는 같은 날 앞선 기록이다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 작업 상태 | `feature/spectrum-effects` @ `391436a` 위의 **커밋하지 않은 작업 트리 변경**. 이 인계와 [시범 기록](DECISIONS.md#2026-11-24-실험-합성기-debug-통합-시범과-실행-결과sp-export-e4-d-미해결)도 커밋되지 않았다. |
+| 변경 파일 | 엔진: `ExperimentalCompositor.swift`(실험 합성기 선택 항목·진단 기록·DEBUG 계획 사본), `ExportService.swift`(DEBUG 전용 Spectrum 내보내기의 선택 인자 하나). 앱(DEBUG): `OnTheFrameApp.swift`(실행 인수), `SpectrumParitySelfTest.swift`, `CompositorPreviewDiagnostic.swift`, `CompositorPilotSelfTest.swift`. 엔진 시험: `CompositionEdgeCoverageTests.swift`, `ExperimentalCompositorEdgeModeTests.swift`. 보통 프리뷰·내보내기·계획·프로젝트 형식은 바뀌지 않았다. |
+| 실험 합성기 | **제품 채택 NO-GO.** 통합 시범에서 확대 가장자리를 덮었고(S1·S2), 프리뷰와 내보내기가 맞았다(S1~S4). 보통 재생 흐름에서 재생 시작 프레임 1의 요청이 네 번 모두 오지 않았다(F1, 열린 문제). 화면 표시는 확인하지 않았다(창 캡처 검사 준비, 실행 안 함). DEBUG 전용이다. |
+| S5 | **시험한 DEBUG 겹침 장면에서 확인.** 클립 ID로 고른 회색 클립이 계획의 맨 위 레이어이고 원본과 맞았다(81점). 프레임 25·50, 프리뷰·내보내기에서 실험 합성기는 끝 열·행 1492화소를 모두 덮었고 기본 합성기는 모두 아래 영상을 드러냈다(대조군). 사각형 밖 넘침 없음. 이전 실행의 S5 결과(위치 번호 결함)는 증거가 아니다. |
+| S6 | 29.97 fps 원본의 프레임 4·5·6·89·90·91에서 Preview·Export 모두 정확한 원본 표본을 보였다(두 방식, 그려진 원본 번호로 판독). 표시 시각·디코딩 PTS는 정확히 k/30. 화소 충실도(99%) 차이는 남았고 표본 문제가 아니다(압축·렌더링 질문). |
+| S3 프리뷰 | 작업 53에서 두 방식 모두 한 번씩, 프리뷰 비디오 출력이 표시 시각 정확히 5/30으로 otf-TA **#20**(기대 #5)을 내줬다. 수명 진단(빌드 1회, 두 방식 각 A·B 8회)에서는 **32/32 처음 받아들인 버퍼가 #5**였다. 탐색 직후 이전 프레임 버퍼(#0·#20)가 나왔지만 자기 원래 표시 시각을 달고 있어 거부됐다. "5/30이 붙은 #20"은 **재현되지 않음(미해결)**. 탐색 완료는 보지 못했다(UNKNOWN). 소유자 창 관찰: corrected A·B 멈춤 f=5 안정, builtin은 관찰 없음. 정확한 표시 시각은 원본 프레임 판별의 근거가 아니다. |
+| E4-d parity | **수락되지 않음.** 마지막 실행은 52 PASS / 2 FAIL(54행). 고친 시험(55행, 실험 합성기 56행)은 실행하지 않았다. |
+| 색 정책 | 미정. 비교 쪽: `/Volumes/Data/ON-THE-FRAME-Builds/Results/SpExportE4d-ColorReview-20261124-01/index.html` |
+| 사용 가능한 Debug 앱 | `/Volumes/Data/ON-THE-FRAME-Builds/DerivedData/SpExportE4d-S5Validate-20261124-01/Build/Products/Debug/OnTheFrame.app`(수명 진단 모드 전 소스). 수명 진단 앱 `SpExportE4d-LifecycleValidate-20261124-01`(F1 창 캡처 전 소스). 그 전 앱 둘(`SpExportE4d-S5S6Validate-…`, `SpExportE4d-PilotValidate-…`)도 보존. |
+| 빌드 산출물 | 관리 산출물 약 15.61 GiB(조기 중지 19.25 GiB, 상한 20 GiB). 지운 것은 없다. |
+
+**열린 문제.** 확대 영상 끝 열·행 누락(공통 내보내기 결함), 실험 합성기의 재생 시작 프레임 요청 누락(네 번 관찰)과 실제 화면 표시, S3 프리뷰 프레임 불일치(원인 미확정), S6 화소 충실도 차이, 색 정책, E4-d parity·엔진·앱 회귀 미실행, 그리고 [이전 인계](#2026-11-24-현행-인계--sp-export-e4d-investigation)의 열린 문제.
+
+**다음 승인.** F1 창 캡처(`-OTFCompositorPilot <builtin\|corrected>-f1capture`, 준비됨·실행 안 함): 빌드 1회, 두 방식 각 1회. 자기 창만 `SCShareableContent.currentProcess`로 잡고 화면 기록 권한을 요청하지 않는다. 각각 소유자가 범위를 정해 승인한다.
+
+## 2026-11-24 현행 인계 · SP-EXPORT-E4D-INVESTIGATION
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 그 아래 이전 ‘현행’은 각 작성 시점 기준이다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 작업 상태 | `feature/spectrum-effects` @ `391436a` 위의 **커밋하지 않은 작업 트리 변경**. 커밋·push는 소유자 승인 뒤에만 한다. 이 인계와 [조사 기록](DECISIONS.md#2026-11-24-확대-영상-가장자리-결함-조사와-실험-합성기-관문sp-export-e4-d-미해결)도 커밋되지 않았다. |
+| 변경 파일 | 앱(Debug 전용): `OnTheFrameApp.swift`(실행 인수 둘), `SpectrumParitySelfTest.swift`, `CompositorPreviewDiagnostic.swift`. 엔진: `ExperimentalCompositor.swift`(앱은 쓰지 않는 실험 합성기의 선택 항목·진단 기록). 엔진 시험: `CompositionEdgeCoverageTests.swift`, `ExperimentalCompositorEdgeModeTests.swift`. 계획·내보내기·`ProjectStore`·프로젝트 형식 변경 없음. |
+| E4-d parity | **수락되지 않음.** 1회 실행 52 PASS / 2 FAIL(54행). 점 줄 단정은 시험 결함이라 고쳤으나 다시 실행하지 않았다. 기준 프레임 균일성 실패는 실제 출력 차이(아래 결함)다. 독립 배경 검사를 더했으나 실행하지 않았다(55행 예상). 앱 회귀 7묶음 미실행. |
+| 공통 내보내기 결함 | **미해결.** 기본 합성기가 영상 층을 2배 넘게 확대하면 기대 사각형의 오른쪽 끝 열·아래 끝 행 1 px이 그려지지 않는다. E4-a·b·c의 MP4와 Spectrum 없는 자막 내보내기에도 있다. 1920×1080 원본을 제 크기로 쓰는 경우는 보이지 않았다. |
+| 실험 합성기 | **제품 통합 NO-GO, 채택 미승인.** `fullRectangle` 모드는 엔진 시험에서 끝 열·행을 채웠다(5/5). 색·보간이 기본 합성기의 한 레인 결과와 다르고, 첫 재생 프레임의 표시가 실제 Preview에서 확인되지 않았다. |
+| 색·보간 | **정책 없음.** 기본 합성기가 영상 레인 수(composition 구조)에 따라 같은 클립을 다르게 그린다. 실험 합성기는 두 레인 쪽에 가깝다. 소유자용 비교: `/Volumes/Data/ON-THE-FRAME-Builds/Results/SpExportE4d-ColorReview-20261124-01/index.html`. |
+| 빌드·시험(2026-11-24) | Debug 앱 빌드 2회 성공(`SpExportE4d-Parity-20261124-01`, `SpExportE4d-RealPreview-20261124-01`, 컴파일러 최대 RSS 약 1232·1234 MiB), 엔진 전용 Debug 빌드 1회 성공(`SpExportE4d-CompositorGate-20261124-01`). 엔진 집중 시험: 제품 경로 가장자리 5개 중 3 FAIL(알려진 결함)·2 PASS, 실험 합성기 가장자리 5/5 PASS, 겹친 레인·빈 구간 시험 PASS(세 방식), SD 색 일치 시험 FAIL(예상된 차이). 실제 창 진단 3회(기본·이전 모드·고친 모드). 그 밖은 읽기 전용 메모리 측정이다. |
+| 사용 가능한 Debug 앱 | `/Volumes/Data/ON-THE-FRAME-Builds/DerivedData/SpExportE4d-RealPreview-20261124-01/Build/Products/Debug/OnTheFrame.app`(현재 작업 트리와 같은 소스) |
+| 빌드 산출물 | 마지막 실행 뒤 관리 산출물은 약 11.92 GiB(조기 중지 19.25 GiB). 이 조사에서 지운 것은 없다. |
+
+**열린 문제.** 확대 영상 끝 열·행 누락의 처리 방향 미정, 실험 합성기 채택 미승인, 색·보간 정책 미승인, 헤드리스에서 재현되는 첫 재생 프레임 2 요청 누락과 실제 창에서의 표시 미확인, 보통 `ProjectStore` 재생 흐름에서의 실험 합성기 동작 미검증, Preview/Export의 전체 일치 미입증, 실험 SwiftPM 패키지 의존 시험(`CompositorEquivalenceTests`·S1b) 미실행, 소유자의 E4-a MP4 육안 확인 대기, 그리고 [이전 인계](#2026-11-23-현행-인계--sp-export-e4-checkpoint)의 열린 문제. 컴파일러 최대 RSS 여유는 약 46 MiB다.
+
+**다음 승인.** 소유자가 정할 것: ① 가장자리 결함의 처리 방향(사용자 정의 합성기 / 원본 정규화 / 알려진 제한으로 기록), ② 색·보간 기준(한 레인 모습 유지 / 두 레인 쪽으로 통일 / 지금처럼 구조에 따라 다르게), ③ 실제 창에서 video output을 붙인 추가 진단 여부, ④ 고친 parity 시험의 재실행과 앱 회귀. 범위·빌드·시험은 소유자가 정해 승인한다.
+
 ## 2026-11-23 현행 인계 · SP-EXPORT-E4-CHECKPOINT
 
 아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 브랜치·HEAD·원격 상태를 다시 조회한다. 그 아래 이전 ‘현행’은 각 작성 시점 기준이다.

@@ -386,6 +386,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await LaneZoomSelfTest.run(folder: folder) }
             return
         }
+        if args.contains("-OTFSpectrumParityTest"), let folder = urls.first(where: { $0.hasDirectoryPath }) {   // SP-EXPORT-E4d: 프리뷰 층 대 인코딩된 내보내기(Debug 전용)
+            let compositor = args.firstIndex(of: "-OTFSpectrumParityCompositor").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? "builtin"   // E4D-INTEGRATION-PILOT-45
+            Task { await SpectrumParitySelfTest.run(folder: folder, compositor: compositor) }
+            return
+        }
+        if let i = args.firstIndex(of: "-OTFCompositorPilot"), i + 1 < args.count, let folder = urls.first(where: { $0.hasDirectoryPath }) {   // SP-EXPORT-E4D-INTEGRATION-PILOT-45: 실험 합성기 통합 시범(Debug 전용, 명시적 인수로만)
+            Task { await CompositorPilotSelfTest.run(folder: folder, mode: args[i + 1]) }
+            return
+        }
+        if let i = args.firstIndex(of: "-OTFCompositorPreviewDiagnostic"), i + 1 < args.count, let folder = urls.first(where: { $0.hasDirectoryPath }) {   // SP-EXPORT-E4D-REAL-PREVIEW-GATE-40: 실험 합성기 첫 재생 진단(Debug 전용, 명시적 인수로만)
+            Task { await CompositorPreviewDiagnostic.run(folder: folder, mode: args[i + 1], videoOutput: args.contains("-OTFCompositorDiagVideoOutput")) }
+            return
+        }
         if args.contains("-OTFSpectrumOverlayTest") || args.contains("-OTFSpectrumOverlayManual"),
            let folder = urls.first(where: { $0.hasDirectoryPath }) {
             Task { await SpectrumOverlaySelfTest.run(folder: folder, manual: args.contains("-OTFSpectrumOverlayManual")) }

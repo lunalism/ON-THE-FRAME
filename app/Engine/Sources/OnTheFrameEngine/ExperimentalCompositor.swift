@@ -48,8 +48,16 @@ public struct ExperimentalCompositorOptions: Sendable, Equatable {
     public var testSampleOffset: CGPoint
     /// 검사 전용(S1b 재검토 색차 가설): 원본 프레임을 BGRA 대신 YCbCr 4:2:0(디코더 형식)으로 받아 Core Image가 RGB로 바꾸게 한다. 기본 false.
     public var ycbcrSources: Bool
-    public init(snapEdges: Bool = true, sampling: Sampling = .linear, testSampleOffset: CGPoint = .zero, ycbcrSources: Bool = false) {
+    /// 실험(SP-EXPORT-E4D-COMPOSITOR-PROTOTYPE-33, 2026-11-24): 레이어의 먼 쪽(오른쪽·아래) 가장자리를 어디까지 그리는가. snapEdges일 때만 쓴다.
+    /// - historicalFarEdgeInset: 기본 합성기에서 잰 경험 규칙(원본 좌표 [0, 크기 − 0.25))을 그대로 따른다. S1b 기준선이며 기본값이다.
+    /// - fullRectangle: 변형된 원본 사각형 전체(원본 좌표 [0, 크기))를 덮는다. 변형·표본 위치·가까운 쪽 가장자리는 바꾸지 않는다.
+    ///   기본 합성기는 배율이 2를 넘으면 마지막 열·행을 그리지 않는다(2026-11-24 측정). 이 값은 그 동작과 일부러 다르다. 앱은 쓰지 않는다.
+    public enum EdgeCoverage: String, Sendable, CaseIterable { case historicalFarEdgeInset, fullRectangle }
+    public var edgeCoverage: EdgeCoverage
+    public init(snapEdges: Bool = true, sampling: Sampling = .linear, testSampleOffset: CGPoint = .zero, ycbcrSources: Bool = false,
+                edgeCoverage: EdgeCoverage = .historicalFarEdgeInset) {
         self.snapEdges = snapEdges; self.sampling = sampling; self.testSampleOffset = testSampleOffset; self.ycbcrSources = ycbcrSources
+        self.edgeCoverage = edgeCoverage
     }
 }
 
@@ -80,6 +88,8 @@ public final class ExperimentalInstruction: NSObject, AVVideoCompositionInstruct
 /// 진단 기록(테스트용). 잠금 안에서만 바꾼다.
 /// - entries: 그린 요청마다 출력 시각과 레이어별 받은 원본 프레임 시각(kCVBufferMovieTimeKey)
 /// - outcomes: 받은 요청마다 끝난 방식(성공·취소·오류). 요청 하나는 정확히 한 번 끝나야 한다.
+/// - receivedTimes·requestOutcomes(2026-11-24): 받은 요청의 출력 시각(받은 차례)과, 끝난 요청의 출력 시각·끝난 방식.
+///   그리기 전에 취소된 요청은 entries에 없으므로, "요청이 오지 않음"과 "요청은 왔으나 취소됨"을 프레임별로 가르는 데 쓴다.
 public final class ExperimentalCompositorLog: @unchecked Sendable {
     public struct Entry: Sendable {
         public let time: CMTime
@@ -92,10 +102,15 @@ public final class ExperimentalCompositorLog: @unchecked Sendable {
     private let lock = NSLock()
     private var entries: [Entry] = []
     private var started = 0, outcomes: [Outcome] = [], cancelCalls = 0, errors: [String] = []
+    private var received: [CMTime] = [], ended: [(time: CMTime, outcome: Outcome)] = []
     public init() {}
     func add(_ e: Entry) { lock.lock(); entries.append(e); lock.unlock() }
-    func start() { lock.lock(); started += 1; lock.unlock() }
-    func end(_ o: Outcome) { lock.lock(); outcomes.append(o); lock.unlock() }
+    func start(at time: CMTime) { lock.lock(); started += 1; received.append(time); lock.unlock() }
+    func end(_ o: Outcome, at time: CMTime) { lock.lock(); outcomes.append(o); ended.append((time, o)); lock.unlock() }
+    /// 받은 요청의 출력 시각(받은 차례)
+    public var receivedTimes: [CMTime] { lock.lock(); defer { lock.unlock() }; return received }
+    /// 끝난 요청의 출력 시각과 끝난 방식(끝난 차례)
+    public var requestOutcomes: [(time: CMTime, outcome: Outcome)] { lock.lock(); defer { lock.unlock() }; return ended }
     func cancelAll() { lock.lock(); cancelCalls += 1; lock.unlock() }
     func error(_ s: String) { lock.lock(); errors.append(s); lock.unlock() }
     public var snapshot: (entries: [Entry], started: Int, outcomes: [Outcome], cancelCalls: Int, errors: [String]) {
@@ -152,7 +167,7 @@ public class ExperimentalCompositor: NSObject, AVVideoCompositing, @unchecked Se
     public func start(_ request: any ExperimentalCompositionRequest) {
         lock.lock(); let gen = generation; lock.unlock()
         let received = CACurrentMediaTime()
-        request.experimentalInstruction?.log?.start()
+        request.experimentalInstruction?.log?.start(at: request.compositionTime)
         let box = ExperimentalRequestBox(request: request)
         queue.async { [self] in process(box.request, generation: gen, received: received) }
     }
@@ -172,8 +187,8 @@ public class ExperimentalCompositor: NSObject, AVVideoCompositing, @unchecked Se
             r.finish(with: ExperimentalCompositorError.render("unexpected instruction")); return
         }
         let log = ins.log
-        if !current(gen) { log?.end(.cancelled); r.finishCancelledRequest(); return }
-        guard let (out, size) = newBuffer() else { log?.error("no buffer"); log?.end(.failed); r.finish(with: ExperimentalCompositorError.render("no buffer")); return }
+        if !current(gen) { log?.end(.cancelled, at: r.compositionTime); r.finishCancelledRequest(); return }
+        guard let (out, size) = newBuffer() else { log?.error("no buffer"); log?.end(.failed, at: r.compositionTime); r.finish(with: ExperimentalCompositorError.render("no buffer")); return }
         testDidBeginRender?(r.compositionTime)
         if Self.testRenderDelayMicroseconds > 0 { usleep(Self.testRenderDelayMicroseconds) }
         var image = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 1)).cropped(to: CGRect(origin: .zero, size: size))
@@ -193,8 +208,8 @@ public class ExperimentalCompositor: NSObject, AVVideoCompositing, @unchecked Se
         entry.received = received; entry.rendered = CACurrentMediaTime()
         log?.add(entry)
         // 그리는 동안 취소되었으면 결과를 내지 않는다
-        if !current(gen) { log?.end(.cancelled); r.finishCancelledRequest(); return }
-        log?.end(.finished)
+        if !current(gen) { log?.end(.cancelled, at: r.compositionTime); r.finishCancelledRequest(); return }
+        log?.end(.finished, at: r.compositionTime)
         r.finish(withComposedVideoFrame: out)
     }
 
@@ -230,7 +245,10 @@ public class ExperimentalCompositor: NSObject, AVVideoCompositing, @unchecked Se
             // 기본 합성기 측정(S1b, docs/SUBTITLE-DESIGN.md §15, 경험 규칙·문서로 확인하지 않음): 출력 화소는 그 가운데가 원본 좌표
             // [0, 크기 − 0.25) 안에 들 때만 그려진다(먼 쪽 가장자리 문턱 0.25, 가까운 쪽 0). 축 정렬 변형(배율·이동·90° 회전)이므로
             // 그 원본 구간을 변형한 사각형에 화소 가운데 포함 규칙을 쓴다: 왼쪽·위 = floor(e + 0.5), 오른쪽·아래 = ceil(e − 0.5).
-            let r = CGRect(x: 0, y: 0, width: w - Self.farEdgeInset, height: h - Self.farEdgeInset).applying(t)
+            // edgeCoverage == .fullRectangle(실험, 2026-11-24): 먼 쪽 문턱을 쓰지 않고 원본 사각형 전체를 변형한 사각형에 같은 화소 가운데 규칙을 쓴다.
+            // 가장자리 화소를 늘린(clampedToExtent) 그림을 같은 변형으로 옮긴 뒤 이 사각형으로 자르므로, 변형을 키우지 않고 사각형 밖에 그리지 않는다.
+            let inset = o.edgeCoverage == .fullRectangle ? 0 : Self.farEdgeInset
+            let r = CGRect(x: 0, y: 0, width: w - inset, height: h - inset).applying(t)
             let x0 = (r.minX + 0.5).rounded(.down), y0 = (r.minY + 0.5).rounded(.down)
             let x1 = (r.maxX - 0.5).rounded(.up), y1 = (r.maxY - 0.5).rounded(.up)
             let snapped = CGRect(x: x0, y: size.height - y1, width: max(0, x1 - x0), height: max(0, y1 - y0))
@@ -267,3 +285,19 @@ public final class ExperimentalCompositorYCbCrSources: ExperimentalCompositor, @
         [kCVPixelBufferPixelFormatTypeKey as String: [kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]]
     }
 }
+
+#if DEBUG
+/// SP-EXPORT-E4D-INTEGRATION-PILOT-45(2026-11-24, DEBUG 전용 시범): 실제 계획(`CompositionPlanner.plan`)이 만든 것과 같은 계획에서
+/// 영상 합성만 실험 합성기로 바꾼 사본. 구간·레이어·변형·소리·자막·스펙트럼·시각은 그대로이고 계획 알고리즘을 복제하지 않는다.
+/// 보통 프리뷰·내보내기는 이 함수를 부르지 않는다. 이미지 프리뷰 전용 계획은 거부한다(그 합성기는 따로 있다).
+/// 원본의 색 첨부는 실험 합성기의 기존 동작 그대로 옮긴다(모든 원본을 BT.709로 정하지 않는다).
+extension PlannedComposition {
+    func replacingVideoComposition(withExperimental options: ExperimentalCompositorOptions, diagnostics: ExperimentalCompositorLog? = nil) throws -> PlannedComposition {
+        guard !imagePreviewOnly else { throw ExperimentalCompositorError.unsupported("image preview plan") }
+        guard hasVideo else { return self }
+        let video = try ExperimentalComposition.videoComposition(from: videoComposition, options: options, diagnostics: diagnostics)
+        return PlannedComposition(composition: composition, videoComposition: video, durationFrames: durationFrames, settings: settings, hasAudio: hasAudio,
+                                  audioMix: audioMix, hasVideo: hasVideo, assets: assets, subtitles: subtitles, spectra: spectra)
+    }
+}
+#endif
