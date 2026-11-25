@@ -48,7 +48,10 @@ enum CompositorPilotSelfTest {
         let lifecycleMode = mode.hasSuffix("-lifecycle")
         // F1-PRESENTATION-PREP-56: "<builtin|corrected>-f1capture"는 F1만, 자기 창 캡처와 함께 돈다(CompositorWindowCapture)
         let f1CaptureMode = mode.hasSuffix("-f1capture")
-        let base = lifecycleMode ? String(mode.dropLast("-lifecycle".count)) : f1CaptureMode ? String(mode.dropLast("-f1capture".count)) : mode
+        // F1-START-COMPARISON-67: "<builtin|corrected>-f1direct"는 같은 F1 캡처를 26 탐색 없이 돈다(조건 A, 바로 시작). -f1capture는 조건 B(26 → 0)로 그대로다.
+        let f1DirectMode = mode.hasSuffix("-f1direct")
+        let base = lifecycleMode ? String(mode.dropLast("-lifecycle".count)) : f1CaptureMode ? String(mode.dropLast("-f1capture".count))
+            : f1DirectMode ? String(mode.dropLast("-f1direct".count)) : mode
         guard base == "builtin" || base == "corrected" else { report.check("setup.mode", false, mode); report.finish(); return }
         box.corrected = base == "corrected"
         report.note("mode", mode)
@@ -74,7 +77,9 @@ enum CompositorPilotSelfTest {
             let tb = try await inspect("otf-TB.mp4"), oa = try await inspect("otf-A.mp4"), ntsc = try await inspect("otf-N2997.mp4"), wav = try await inspect("aud-wav48s.wav")
             report.note("sources", [gray, red, ta, tb, oa, ntsc, wav].map { "\($0.name) \(Int($0.naturalSize.width))x\(Int($0.naturalSize.height)) frames \($0.frameCount) audio \($0.hasAudio)" }.joined(separator: "; "))
             if lifecycleMode { try await lifecycle(report, box: box, ta: ta, red: red); report.finish(); return }
-            if f1CaptureMode { try await f1Capture(report, box: box, view: view, window: window, clips: [ta, tb, oa], music: wav); report.finish(); return }
+            if f1CaptureMode || f1DirectMode {
+                try await f1Capture(report, box: box, view: view, window: window, clips: [ta, tb, oa], music: wav, directStart: f1DirectMode); report.finish(); return
+            }
             // 시나리오마다 따로 실행한다: 한 시나리오가 오류를 던져도 기록하고 다음으로 간다(2026-11-24 첫 시범은 S5의 오류로 S6·J가 실행되지 않았다).
             // 각 시나리오는 `<이름>.ran` 행을 남긴다(오류 없이 끝남 = true, 오류 = false와 그 글). 단정은 바꾸지 않았다.
             func independently(_ name: String, _ body: () async throws -> Void) async {
@@ -128,7 +133,8 @@ enum CompositorPilotSelfTest {
     /// beforeSequence/afterSequence(F1-PRESENTATION-PREP-56, 진단 전용): 준비 뒤·26 탐색 전, 멈춤 뒤에 불린다. 탐색·재생·대기는 그대로다.
     /// beforeSequence가 false를 돌려주면 순서를 시작하지 않는다(F1.sequence 실패로 기록).
     static func firstPlayback(_ report: Report, box: Box, view: PlayerNSView, clips: [MediaAsset], music: MediaAsset,
-                              beforeSequence: (@MainActor () async -> Bool)? = nil, afterSequence: (@MainActor () async -> Void)? = nil) async throws {
+                              beforeSequence: (@MainActor () async -> Bool)? = nil, afterSequence: (@MainActor () async -> Void)? = nil,
+                              directStart: Bool = false) async throws {
         let s = report.s, musicLane = UUID()
         var t = Timeline()
         for c in clips { t = t.registering(c) }
@@ -141,8 +147,14 @@ enum CompositorPilotSelfTest {
         report.check("F1.ready", applied, "segments \(clips.count), audio tracks \(s.currentPlan?.composition.tracks(withMediaType: .audio).count ?? -1)")
         guard applied else { return }
         if let beforeSequence, !(await beforeSequence()) { report.check("F1.sequence", false, "not started: capture was not ready"); return }
-        s.seek(to: 26)
-        _ = await LaneSelfTest.waitUntil(5) { s.player.currentTime() == CMTime(value: 26, timescale: 30) }
+        // F1-START-COMPARISON-67(진단 전용): 순서 앞의 항목 상태와 재생 헤드를 적는다. directStart(조건 A)는 26 탐색과 그 대기만 건너뛴다.
+        // 그 뒤의 0.5 s 대기, 0 탐색(실제 정확한 탐색), 0 도착 대기, 재생, 2.5 s, 멈춤은 조건 B와 같다.
+        report.note("F1.start", directStart ? "direct (A): no seek to 26; seek 0 -> play" : "historical (B): seek 26 -> seek 0 -> play")
+        report.note("F1.initialState", "item status \(s.player.currentItem?.status.rawValue ?? -1); item time frames \(String(format: "%.3f", (s.player.currentItem?.currentTime().seconds ?? -1) * 30)); playhead \(s.playhead); applied generation \(s.appliedGeneration) of \(s.generation); rate \(s.player.rate)")
+        if !directStart {
+            s.seek(to: 26)
+            _ = await LaneSelfTest.waitUntil(5) { s.player.currentTime() == CMTime(value: 26, timescale: 30) }
+        }
         try await Task.sleep(nanoseconds: 500_000_000)
         let start = CACurrentMediaTime()
         s.seek(to: 0)
@@ -190,7 +202,7 @@ enum CompositorPilotSelfTest {
     /// F1 순서(26 탐색 → 0 탐색 → 재생 2.5 s)를 그대로 돌리면서, 그 전에 시작해 안정된 자기 창 캡처로 창에 합성된 원본 프레임 번호를 읽는다.
     /// 화면 기록 권한을 요청하지 않는다(currentProcess만 사용). 캡처가 시작·안정되지 않으면 F1 순서도 돌리지 않는다(NOT RUN).
     /// 결과: <폴더>/f1-capture.json(표본·표식·실험 합성기 요청 기록), 요약은 증거 행. 분류는 기록이며 PASS 판정이 아니다.
-    static func f1Capture(_ report: Report, box: Box, view: PlayerNSView, window: NSWindow, clips: [MediaAsset], music: MediaAsset) async throws {
+    static func f1Capture(_ report: Report, box: Box, view: PlayerNSView, window: NSWindow, clips: [MediaAsset], music: MediaAsset, directStart: Bool = false) async throws {
         report.note("capture.screenRecordingPreflight", "\(CompositorWindowCapture.screenRecordingPreflight()) (evidence only; never requested)")
         var capture: CompositorWindowCapture?
         var readiness: CompositorWindowCapture.Readiness?
@@ -215,13 +227,12 @@ enum CompositorPilotSelfTest {
                 report.check("capture.started", false, "\(error)")
                 return false
             }
-        }, afterSequence: { await capture?.stop() }) } catch { await capture?.stop(); throw error }
+        }, afterSequence: { await capture?.stop() }, directStart: directStart) } catch { await capture?.stop(); throw error }
         guard let capture else { report.note("F1capture.classification", "NOT RUN (capture not started; F1 sequence not run)"); return }
         await capture.stop()
         let snap = capture.snapshot()
         let clock = report.evidence["F1.clock"] ?? ""
         let nums = clock.split(separator: " ").compactMap { Double($0) }
-        let playAt = nums.count == 3 ? nums[1] : nil
         struct Request: Codable { let frame: Int; let received: Double; let rendered: Double }
         struct Output: Codable {
             let mode: String; let clock: String; let geometry: CompositorWindowCapture.Geometry; let selectedWindow: String
@@ -237,36 +248,16 @@ enum CompositorPilotSelfTest {
         guard readiness?.ready == true else {
             report.note("F1capture.classification", "NOT RUN (capture readiness failed: \(readiness?.reason ?? "no readiness result"); F1 sequence not run)"); return
         }
-        // 요약(기록): 재생 호출 뒤 1 s 안의 complete 표본에서 읽은 번호(연속 중복 제거)와 0→2 넘어가는 사이의 표본 간격
-        guard let playAt else { report.note("F1capture.classification", "ERROR (no play marker)"); return }
-        let window1s = snap.samples.filter { ($0.displayTime ?? $0.arrival) >= playAt - 0.1 && ($0.displayTime ?? $0.arrival) <= playAt + 1.0 }
-        let complete = window1s.filter { $0.status == "complete" }
-        let confident = complete.filter(\.confident)
-        var seq: [(Int, Double)] = []
-        for x in confident { if let f = x.sourceFrame, seq.last?.0 != f { seq.append((f, x.displayTime ?? x.arrival)) } }
-        let sawOne = seq.contains { $0.0 == 1 }
-        var gap: Double?
-        if let i = seq.firstIndex(where: { $0.0 >= 2 }), i > 0, seq[i - 1].0 == 0 {
-            // 마지막으로 0을 보인 complete 표본과 처음 ≥2를 보인 표본 사이(같은 번호가 이어진 표본 포함)의 시간 간격
-            let lastZero = confident.last { $0.sourceFrame == 0 && ($0.displayTime ?? $0.arrival) <= seq[i].1 }
-            gap = lastZero.map { seq[i].1 - ($0.displayTime ?? $0.arrival) }
-        }
-        let statuses = Dictionary(grouping: window1s, by: \.status).mapValues(\.count)
-        let dwell = 1.0 / 30.0
-        let cls: String
-        // READINESS-FIX-58: 분류 이름에 보고 범주를 붙인다. B는 표본 간격 근거일 뿐 전체 표시 범위를 증명하지 않는다(소유자 검토 필요).
-        // 읽을 수 없는 내용(F)이나 범위 부족(C)은 INCONCLUSIVE이며 PASS로 바뀌지 않는다.
-        // 준비 뒤 멈춤 호출 전에 stopped·suspended 상태가 오면(위임 오류 없이도) 캡처가 끊긴 것이다: PASS가 아니라 ERROR.
-        let pauseAt = nums.count == 3 ? nums[2] : Double.infinity
-        let interrupted = snap.samples.contains { ($0.status == "stopped" || $0.status == "suspended") && $0.arrival >= (readiness?.readyAt ?? 0) && $0.arrival <= pauseAt }
-        if snap.error != nil || interrupted || complete.isEmpty { cls = "ERROR/G (capture error, stopped/suspended before pause, or no complete samples)" }
-        else if confident.count * 2 < complete.count { cls = "INCONCLUSIVE/F (frame code unreadable or geometry unreadable in most complete samples)" }
-        else if sawOne { cls = "OBSERVED/A (frame 1 positively observed)" }
-        else if let gap, gap < dwell { cls = String(format: "NOT OBSERVED, coverage to be reviewed/B (frame 1 not captured; the 0->2 sample gap %.1f ms is shorter than one source frame)", gap * 1000) }
-        else { cls = "INCONCLUSIVE/C (frame 1 not captured; coverage inadequate" + (gap.map { String(format: ", 0->2 gap %.1f ms", $0 * 1000) } ?? ", no 0->2 transition") + ")" }
-        let unreadableGeometry = complete.filter { $0.geometryState.hasPrefix("unreadable-geometry") }.count
-        report.note("F1capture.summary", "samples \(snap.samples.count) (overflow \(snap.overflow)); in play window \(window1s.count) \(statuses); complete confident \(confident.count)/\(complete.count); unreadable geometry \(unreadableGeometry); visible sequence " + seq.prefix(20).map { String(format: "%d@%+.0fms", $0.0, ($0.1 - playAt) * 1000) }.joined(separator: " "))
-        report.note("F1capture.classification", cls + " — capture evidence only; not a playback verdict and not physical display evidence")
+        // F1-CLASSIFIER-66: 분류는 F1CaptureClassifier가 한다(같은 소스를 저장된 f1-capture.json에 오프라인으로 다시 돌릴 수 있다).
+        // 창 범위는 F1.clock의 표식(0 탐색 → 재생 → 멈춤)으로 정한다. 이전 분류는 재생 −100 ms부터 보아서, 0 탐색 직후에도 남아 있던
+        // 프레임 26을 "처음 ≥2"로 골라 0→2 간격을 계산하지 못했다(두 실행 모두 INCONCLUSIVE로 잘못 기록).
+        let markers = nums.count == 3 ? F1CaptureClassifier.Markers(seekZero: nums[0], play: nums[1], pause: nums[2]) : nil
+        let input = snap.samples.map { F1CaptureClassifier.Sample(seq: $0.seq, status: $0.status, time: $0.displayTime ?? $0.arrival, confident: $0.confident,
+                                                                 sourceID: $0.sourceID, sourceFrame: $0.sourceFrame) }
+        let verdict = F1CaptureClassifier.classify(samples: input, markers: markers, captureError: snap.error, readyAt: readiness?.readyAt)
+        try enc.encode(verdict).write(to: report.folder.appendingPathComponent("f1-classification.json"))
+        report.note("F1capture.summary", "samples \(snap.samples.count) (overflow \(snap.overflow)); playback window \(verdict.samplesInWindow) \(verdict.statusCounts); complete confident \(verdict.confidentInWindow)/\(verdict.completeInWindow); visible sequence \(verdict.sequence)")
+        report.note("F1capture.classification", "\(verdict.verdict.rawValue) (\(verdict.reason)) — capture evidence only; not a playback verdict and not physical display evidence")
     }
 
     // MARK: 프리뷰·내보내기 대응

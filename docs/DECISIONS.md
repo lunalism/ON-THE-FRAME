@@ -90,6 +90,18 @@
 | D-039 | 2026-10-23 | 자막 색 고르기 다듬기(소유자 요청): 기본 팔레트 20색(두 줄 열 칸)을 색 패널 상자 위에 두고 빠른 색 다섯은 없앤다. 팔레트는 RGB만 바꾸고 불투명도는 그대로. 색 조정(팔레트·색 패널·HEX·불투명도)은 한 세션 — 첫 실제 변화에 시작, 패널 닫힘이나 다른 편집·다른 것 고르기·실행 취소 같은 문서 동작 때 끝나며 한 단계, 처음 값으로 돌아오면 기록 없음. 멈춘 시간은 세션을 나누지 않는다(D-038의 0.4초 멈춤 경계를 대체) | [SUBTITLE-DESIGN.md](SUBTITLE-DESIGN.md) §46. 팔레트를 시스템 패널 안이 아니라 정보 패널에 둔 것은 구현 판단(패널 보조 영역 자리를 앱이 정할 수 없음) |
 | D-040 | 2026-10-23 | 자막 효과 — 외곽선·그림자·배경을 한 마일스톤으로(소유자 승인): 새 자막은 모두 꺼짐. 켤 때 기본값(1080p 출력 픽셀): 외곽선 검정 100%·두께 2, 그림자 검정 60%·오른쪽 +4·아래 +4·흐림 6, 배경 검정 50%·가로 여백 16·세로 여백 10·모서리 8. 그리기는 공유 래스터(구조 R 유지): 배경 → 글자 그림자(외곽선 포함 실루엣) → 외곽선 → 채움. 켜진 효과가 있으면 형식 7, 효과가 꺼진 자막 문서는 형식 6, 자막이 없으면 5. 형식 1–7을 읽고 이전 문서는 효과 꺼짐 | [SUBTITLE-DESIGN.md](SUBTITLE-DESIGN.md) §48. 흐림 뜻·단위·꺼진 설정 보존은 §48.1–§48.2 |
 
+### 1.7 영상 합성 렌더링 방향 (소유자 결정, 2026-11-25)
+
+| ID | 날짜 | 결정 | 비고 |
+| --- | --- | --- | --- |
+| D-041 | 2026-11-25 | 영상 합성 결과를 영상 레인 수와 무관하게 하나로 통일한다(소유자 선택 **Option B**, [E4-d 조사](#2026-11-24-확대-영상-가장자리-결함-조사와-실험-합성기-관문sp-export-e4-d-미해결)의 색·보간 기준 (B)). 목표 기준은 실험 합성기 `ExperimentalCompositor` `fullRectangle` 경로가 보인 동작이며 남은 검증 관문을 통과해야 한다. (1) 한 레인·여러 레인 composition의 렌더링을 같게 한다. (2) 색 표기 없는 SD 원본의 해석이 지금의 여러 레인 쪽으로 바뀌는 것을 받아들인다. (3) 축소할 때 실험 합성기의 색차 재표본화를 받아들이고, 이전의 색 치우침을 흉내 내지 않는다. (4) 원본이 선언한 색 메타데이터를 보존한다. (5) 메타데이터와 변환 경로를 보지 않고 모든 원본을 BT.709로 강제하지 않는다. (6) 기존 한 레인 프로젝트가 다르게 보일 수 있음을 문서에 적는다. 범위는 영상 합성뿐이며, Preview와 Export는 결국 같은 렌더링을 써야 한다. 기하·타임라인 시각·층 차례·소리·자막·Spectrum 계산·비파괴 원본 처리는 바꾸지 않는다. 정지 이미지 합성과 이미지 배경 Spectrum Export는 이 결정 밖이다 | **방향 승인일 뿐이다.** 실험 합성기의 보통 제품 사용, 공개 Spectrum Export 차단 해제, 프로젝트 형식 변경, 제품 렌더링 코드 변경, 빌드·실행 시험, 커밋·push를 승인하지 않는다. 채택 전 관문은 [2026-11-25 기록](#2026-11-25-영상-합성-렌더링-방향-결정option-b-sp-export-e4d-color-policy-decision)을 따른다. E4-d·제품 통합은 완료가 아니다 |
+
+### 1.8 전체 Preview parity 진단의 보정 의존 계약 (소유자 결정, 2026-11-25)
+
+| ID | 날짜 | 결정 | 비고 |
+| --- | --- | --- | --- |
+| D-042 | 2026-11-25 | 전체 Preview 대 Export parity 1단계 진단(DEBUG)에서 축소 모델은 고정 보정에 한 방향으로 의존한다: **CAL-B → RES-B → RES-C**(소유자 Option A). CAL-B는 보정 파라미터를 계산해 동결하고 파라미터 지문·출처(디스플레이 프로필, videoRect, 배율, 앱 바이너리 해시, 캡처 색 공간, fixture 해시)·판 v1 지문을 기록한다. 뒤 단계는 CAL-B를 바꾸지 않는다. RES-B는 동결된 CAL-B만 소비하며, 실행 전에 저장 지문과 재계산 지문의 일치·환경·판 지문을 확인하고 그 지문과 출처를 동결 RES-B에 기록한다. CAL-B를 다시 맞추거나 다른 보정으로 바꾸지 않는다. RES-C는 확립된 동결 RES-B를 요구하고, 그 모델이 기록한 CAL-B 지문이 받은 CAL-B와 같아야 한다. 모델을 다시 맞추거나 바꾸지 않는다. 실패 전파: CAL-B 실패·부재·환경 불일치 → CAL-V, 보정 의존 색, Preview 마스크, RES-B, RES-C, 보정 의존 충실도는 INCONCLUSIVE, Preview 끝 열·행은 NOT VERIFIED. CAL-B가 유효한데 RES-B가 미확립 → RES-C와 RES-B 의존 충실도는 INCONCLUSIVE, Preview 끝 열·행은 NOT VERIFIED. 원본 판별, Export 시각·크기·마스크·오탐·끝 열·행, 활성 층 수, 출력 메타데이터 관찰은 자기 전제가 유효하면 계속 판정한다 | G0 조건부 실패 규칙의 구체화이며 그 밖의 규칙은 바꾸지 않는다. 진단 계약일 뿐이며 실험 합성기의 제품 사용, 공개 Spectrum Export 차단 해제, D-041의 렌더링 범위 변경, O-04 종료를 뜻하지 않는다. [기록](#2026-11-25-전체-preview-대-export-parity-1단계-설계제안-g0-승인-대기)의 G1 마감 항목 |
+
 ## 2. 제안 (미승인)
 
 | ID | 제안 | 상태 |
@@ -141,7 +153,7 @@
 | O-01 | 최소 macOS 버전, 지원 CPU 아키텍처 | 제안 P-004. 개발 기기 환경([ENVIRONMENT.md](ENVIRONMENT.md))은 지원 범위 결정이 아님 |
 | O-02 | 기술 스택과 아키텍처 | 제안 P-003 |
 | O-03 | 입력 포맷, 출력 코덱 (4K 포함) | |
-| O-04 | 내보내기 해상도, 프레임레이트, 색 처리, HDR 정책 | 4K의 정확한 크기·프레임레이트 포함. D-016은 4K60·HDR 승인이 아님 |
+| O-04 | 내보내기 해상도, 프레임레이트, 색 처리, HDR 정책 | 4K의 정확한 크기·프레임레이트 포함. D-016은 4K60·HDR 승인이 아님. **2026-11-25:** [D-041](#17-영상-합성-렌더링-방향-소유자-결정-2026-11-25)은 영상 합성의 레인 수 통일·색 해석 방향만 정한다. 내보내기 색 처리·HDR 정책 전체는 여전히 열림 |
 | O-05 | 초기 스펙트럼 모양과 세부 컨트롤 | **2026-11-17 색인 정렬:** Digital/Analog·방향·기존 편집·정수 UI/scrubbing·유효 0높이 점은 후속 승인/구현됨. 잠정 분석 기본값의 확정과 미래 FX 의미는 여전히 열림. [현행 구분](#2026-11-17-doc-align-01-현행-방향과-문서-정렬) |
 | O-06 | 프로젝트 파일 포맷 | **해결 → D-023 및 후속 형식 승인. 2026-11-17 색인 정렬:** `.ontheframe` JSON, 지원 경로의 최대 형식 10. 저장은 내용에 따라 5/6/7/8/9/10이고 application persistence와 raw codec의 읽기 범위가 다름. [정확한 경계](PRODUCT.md#현행-프로젝트-형식과-기능-경계). 아래 역사적 형식 5 기록은 당시 이정표로 유지 |
 | O-07 | UI 언어 | |
@@ -1920,3 +1932,162 @@ v1.0 최종 수락 전에는 실제 Mac에서의 메모리 누수 점검과 긴 
 - 진단 한계: 앱 안의 자동 분류는 두 실행 모두 "INCONCLUSIVE/C (no 0->2 transition)"라고 적었다. 재생 전 보이던 프레임 26을 첫 "≥2" 항목으로 골라 0→2 간격을 계산하지 않았기 때문이다. 위 결과는 원시 표본(`f1-capture.json`)을 따로 처리한 것이다. 자동 분류는 결함이 있으며 PASS가 아니고, 이후 DEBUG 전용 수정이 필요하다.
 - 유지되는 상태: S5(시험한 DEBUG 겹침 장면의 끝 열·행, 실험 합성기 덮음·기본 합성기 아래 영상 노출, 사각형 밖 검사 PASS), S6(29.97→30 fps 여섯 표본 위치에서 Preview·Export 모두 기대 원본 표본, 시각 정확, 화소 충실도 미해결), S3(작업 53의 #20 대 #5 불일치 미해결, 수명 진단 32/32 정상, 재현 안 됨이며 해결 아님), 시범 J(시험 범위에서 PASS), 색 정책 미정, 최근 조사에서 앱 회귀 미실행, E4-d parity 수락 안 됨, 공개 Spectrum Export 차단, 보통 제품 합성기 변경 없음, 실험 합성기 제품 통합 NO-GO.
 - 증거: `/Volumes/Data/ON-THE-FRAME-Builds/Results/`의 `SpExportE4d-F1ReadinessFix-20261125-01/`·`SpExportE4d-F1FreshModule-20261125-01/`(막힌 타입 검사), `SpExportE4d-F1NativeBuild-20261125-01/`(빌드 기록, `suites/f1capture-{builtin,corrected}/`의 원시 JSON, `f1capture-*.analysis.json`, `f1capture-comparison.json`, `f1-analyze.py`).
+
+**F1 자동 분류기 수정과 오프라인 재생(2026-11-25, SP-EXPORT-E4D-F1-CLASSIFIER-66).** 확정 결정은 없다. 커밋하지 않은 작업 트리 변경이다. 새 창 캡처는 실행하지 않았다.
+
+- 원인: 이전 분류는 재생 호출 −100 ms부터의 표본을 보았다. 0으로의 탐색은 재생 1~22 ms 전이라 그 뒤에도 프레임 26이 창에 남아 있었고(순서 `26, 0, 2, …`), "처음 ≥2" 항목이 26이 되어 0→2 간격을 계산하지 못했다. 두 실행 모두 INCONCLUSIVE로 잘못 기록됐다.
+- 수정(DEBUG 전용): 분류를 Foundation만 쓰는 새 파일 `CompositorF1Classifier.swift`로 옮기고 `CompositorPilotSelfTest.swift`는 그것을 부른다(결과를 `f1-classification.json`에도 남긴다). 창은 `F1.clock` 표식으로 정한다: 0 탐색 호출부터 멈춤 또는 재생 + 1 s까지. 그 안에서 기대 원본(otf-TA)의 읽을 수 있는 첫 프레임 0을 찾고, 그 뒤의 첫 프레임 ≥2를 찾는다. 판정: 읽을 수 있는 프레임 1 → OBSERVED. 0과 ≥2 사이의 표본이 모두 읽히거나 idle이고, 마지막 0(또는 그 뒤 idle)과 첫 ≥2의 간격과 그 구간의 가장 큰 표본 간격이 모두 한 원본 프레임(33.3 ms)보다 짧으면 NOT OBSERVED WITH ADEQUATE EVIDENCE. 표식 없음·순서 이상, 비단조 시각, 프레임 0 또는 ≥2 없음, 캡처 조기 종료, 예상 밖 원본 ID, 사이의 읽을 수 없는 표본, 간격 부족, 재생 전 진행은 INCONCLUSIVE. 캡처 오류와 멈춤 전 stopped·suspended는 ERROR. PASS는 없다. 캡처 준비·표본 생성·ScreenCaptureKit 설정·fixture·탐색 순서·재생·합성은 바꾸지 않았다.
+- 오프라인 재생(소유자 승인, 앱 빌드·캡처 없음): 저장소의 분류기 파일을 그대로 작은 하네스와 함께 `swiftc`로 컴파일(-DDEBUG, strict concurrency complete, 오류·경고 0)해 저장된 `f1-capture.json` 둘을 읽기만 했다(전후 SHA-256 동일). 첫 시도는 하네스 파일 이름(`main.swift`가 아님) 때문에 컴파일에 실패했고, 이름만 고쳐 승인 후 한 번 더 실행했다. 결과: builtin·corrected 모두 NOT OBSERVED WITH ADEQUATE EVIDENCE(마지막 0 +212.5 → 2 +230.4 ms, 간격 17.9 ms / +229.9 → +245.6 ms, 15.7 ms). 이는 독립 후처리 결과와 같다. 인공 경계 사례 13개(26→0→1→2, 26→0→2, 사이의 판독 불가, 큰 간격, 표식 없음, ≥2 없음, 조기 종료, stopped, 다른 원본, 비단조 시각, 긴 프레임 0, 캡처 오류, idle)의 판정이 모두 기대와 같았다.
+- 한계: 오프라인 재생은 저장된 표본에 대한 것이며 새 실행 결과가 아니다. 앱 안에 고친 `CompositorPilotSelfTest.swift`는 컴파일하지 않았다(앱 빌드 미승인, 컴파일러 검증 NOT RUN). F1은 열린 문제다: 재생 시작 프레임 1의 미표시 원인 UNKNOWN, 표본 간격보다 짧은 표시 배제 불가, 실제 패널 증거 아님.
+- 증거: `/Volumes/Data/ON-THE-FRAME-Builds/Results/`의 `SpExportE4d-F1Classifier-20261125-01/`(하네스 이름 때문에 실패한 컴파일), `SpExportE4d-F1Classifier-20261125-02/`(`replay-result.json`, `replay.log`, `summary.txt`).
+
+**F1 시작 조건 비교(2026-11-25, SP-EXPORT-E4D-F1-START-COMPARISON-67).** 확정 결정은 없다. 커밋하지 않은 작업 트리 변경이다.
+
+- 구현(DEBUG 전용 `CompositorPilotSelfTest.swift`): 조건 A 모드 `<builtin|corrected>-f1direct`를 더했다. 조건 B(`-f1capture`, 26 → 0 → 재생)와 다른 점은 26 탐색과 그 대기를 건너뛰는 것뿐이다. 그 뒤의 0.5 s 대기, 0으로의 실제 정확한 탐색(`ProjectStore.seek`은 이미 0이어도 정확한 탐색을 한다), 0 도착 대기, 재생 2.5 s, 멈춤은 같다. 두 조건 모두 순서 앞의 항목 상태·재생 헤드를 적는다(`F1.start`, `F1.initialState`). 분류기와 임계값은 바꾸지 않았다.
+- 일반 Xcode Debug 앱 빌드 1회: BUILD SUCCEEDED(오류 0). `CompositorF1Classifier.swift`, 고친 `CompositorPilotSelfTest.swift`, `CompositorWindowCapture.swift`가 컴파일됐고 이 파일들의 경고는 0이다. 컴파일러 최대 RSS 1226 MiB(조기 중지 1280 MiB의 96%), 트리 1879 MiB.
+- 실행(네 사례, 각 새 앱 프로세스 1회, 사례마다 소유자 승인, 권한 요청 창 없음): 네 사례 모두 시작 전 항목 준비 완료·재생 헤드 0·항목 시각 0이었다. 분류기 판정은 네 사례 모두 NOT OBSERVED WITH ADEQUATE EVIDENCE다.
+
+| 사례 | 마지막 0 → 첫 2 (재생 호출 기준) | 간격 | 구간 최대 표본 간격 | 프레임 1 합성기 요청 |
+| --- | --- | --- | --- | --- |
+| A1 builtin, 바로 시작 | +215.0 → +231.5 ms | 16.5 ms | 31.4 ms(전환 전 프레임 0 유지 구간) | 기록 없음(builtin) |
+| A2 corrected, 바로 시작 | +230.5 → +246.1 ms | 15.6 ms | 19.6 ms | 없음 |
+| B1 builtin, 26 → 0 | +216.8 → +234.6 ms | 17.8 ms | 19.8 ms | 기록 없음(builtin) |
+| B2 corrected, 26 → 0 | +234.5 → +250.8 ms | 16.3 ms | 19.1 ms | 없음 |
+
+- 해석(이번 조건, 각 1회): 프레임 1이 창에 보이지 않는 현상은 앞선 26 탐색과 관계없이, 두 합성기 모두에서 나타났다. corrected에서는 요청 순서가 `…0, 0, 2, 3, …`였고 프레임 2~10을 0 탐색 뒤 약 40~90 ms에 한꺼번에 그렸지만 창은 약 +230 ms까지 프레임 0을 보였다. 플레이어 시각은 재생 후 약 165~230 ms에 프레임 1 구간을 지났다. 공통 재생 시작 동작과 맞지만 원인은 확인하지 않았다. 표본 간격보다 짧은 표시는 배제하지 못하며 창 서버 증거이고 패널 증거가 아니다. A1의 31.4 ms 간격은 기준(33.3 ms)에 가깝지만 전환 지점이 아니다.
+- 제안(소유자 미승인): F1을 시험 조건에서의 공통 재생 시작 동작으로 따로 추적하고, 실험 합성기 채택의 차단 조건으로 두지 않은 채 E4-d parity(고친 시험)를 재개한다. 재생 시작 프레임 1 미표시를 제품 문제로 고칠지는 별도 결정이다. S3는 F1과 따로 미해결이다.
+- 증거: `/Volumes/Data/ON-THE-FRAME-Builds/Results/SpExportE4d-F1StartCompare-20261125-01/`(빌드 기록, `suites/<사례>/`의 `f1-capture.json`·`f1-classification.json`·`compositor-pilot-evidence.json`, `<사례>.analysis.json`, `f1-start-comparison.json`). 보조 분석 `f1-analyze.py`는 idle 표본에 빠진 항목을 견디도록 고친 사본이다(원본은 보존).
+
+**E4-d parity 재실행(2026-11-25, SP-EXPORT-E4D-PARITY-RESUME-68).** 확정 결정은 없다. 앱 빌드·소스 변경 없이 START-COMPARISON-67의 Debug 앱(같은 HEAD의 `SpectrumParitySelfTest.swift`·엔진)으로 두 방식을 각 1회(소유자 승인 각각) 실행했다.
+
+- 시험 범위(감사): 프리뷰에서는 **멈춘 경로의 Spectrum CALayer 그림과 자막 층**만 읽고, 이를 같은 타임라인을 DEBUG 내부 진입점으로 내보낸 H.264 MP4의 디코딩 프레임(5·20·34·38·50)과 비교한다. 프리뷰 영상 화소와 창 전체 화면은 읽지 않는다(전체 화면 parity는 시험하지 않음). Spectrum은 Digital 두 층이고 **Analog는 다루지 않는다**(NOT VERIFIED). 원본은 단색 회색 영상(320×180 → 6배)이라 원본 프레임 번호 판별은 이 시험에 없다(S6에서 따로 확인). 기준 프레임 전체(끝 열·행 포함)를 원본 밝기·색차와 견주는 독립 배경 검사와 기준 프레임 균일성 검사가 있다. 두 방식의 단정·허용 오차는 같고, corrected일 때만 설치 확인 행이 하나 더 있다.
+
+| 결과 | builtin(55행) | corrected fullRectangle(56행) |
+| --- | --- | --- |
+| 전체 | 53 PASS, 2 EXPECTED BASELINE FAIL, 예상 밖 실패 0 | 56 PASS |
+| `export.backgroundMatchesSource` | FAIL: 원본 밖 화소 2999개 = 오른쪽 끝 열 + 아래 끝 행(알려진 결함) | PASS: 0개 |
+| `export.referenceFrameUniform` | FAIL: 밝기 12…77 | PASS: 71…71 |
+| Spectrum 층 색(6)·겹침 차례(2)·경계(3)·0높이 점(칠해진 행 16·16)·막대 높이(2)·불투명(3) | PASS | PASS |
+| 자막 색·가시성(5)·Spectrum 위(1+5) | PASS | PASS |
+| 프리뷰 준비·층 차례(각 5), 표시 시점(5), 빈 곳(5) | PASS | PASS |
+| `pilot.correctedCompositorInstalled` | 없음 | PASS(프리뷰 항목 교체 1, 실패 0) |
+
+- 층 색 비교는 두 방식 모두 100% 허용 오차 안이었다(평균 dY·dC ≤ 1.0, 최대 dY 5·dC 8). 이전 실행(52/54)의 `frame20.zeroHeightDots` 실패는 시험 결함 수정으로 PASS가 됐다.
+- 내보내기 쪽 실험 합성기 사용은 명시적 설치 기록이 아니라 결과(끝 열·행이 채워짐)로 확인된다. 프리뷰 쪽 설치 행은 영상 화소를 비교하지 않으므로 프리뷰 영상의 정확성을 보이지 않는다.
+- 범위: 이 결과는 정확히 이 DEBUG fixture와 비교 대상(Spectrum·자막 층 대 인코딩된 내보내기, 내보낸 배경)에 대한 것이다. 전체 화면 Preview parity, Analog Spectrum, 원본 프레임 판별, 색 정책, non-DEBUG·Release, 장시간·메모리, 이미지 Spectrum Export, 공개 Spectrum Export 준비를 증명하지 않는다. F1(공통 재생 시작 프레임 1 미표시)과 S3(간헐 프리뷰 프레임 불일치)는 따로 미해결이다. E4-d는 수락되지 않았고, 실험 합성기 제품 통합 NO-GO, 공개 Spectrum Export 차단, 색 정책 미정이다.
+- 증거: `/Volumes/Data/ON-THE-FRAME-Builds/Results/SpExportE4d-F1StartCompare-20261125-01/`의 `suites/parity-{builtin,corrected}/`(`spectrum-parity-result.json`, `spectrum-parity-evidence.json`, `preview/*.png`, `out/parity.mp4`), `parity-*.console.txt`, `parity-*.app-rss.txt`, `parity-classification.json`, `parity-original-sources.sha256`.
+
+### 2026-11-25 영상 합성 렌더링 방향 결정(Option B, SP-EXPORT-E4D-COLOR-POLICY-DECISION)
+
+소유자가 E4-d 조사의 색·보간 기준 중 **(B) 통일**을 명시적으로 골랐다. 확정 내용은 [D-041](#17-영상-합성-렌더링-방향-소유자-결정-2026-11-25)이다. 이 기록은 방향 승인이며, 위의 E4-d 조사·시범·정정 기록은 그대로 보존한다.
+
+- 근거로 쓰인 관찰(이미 기록됨): 기본 합성기는 영상 트랙이 하나인 composition과 둘인 composition에서 같은 클립을 다르게 그렸다(색 표기 없는 SD 판 한 레인 YCbCr [83, 110, 206], 두 레인 [69, 119, 206]). 실험 합성기 `fullRectangle`은 레인 수와 무관하게 같은 결과였고 SD 색은 두 레인 기본과 같았다(색차 최대 1). 0.5배 축소의 색 무늬에서는 실험 합성기의 블록 평균 색이 원본에 가장 가까웠다. 이 값들은 생성 재료와 소유자 영상의 격리 사본으로 잰 것이며 모든 원본 종류를 대표하지 않는다.
+- 사용자에게 보이는 영향(문서화 대상): 이 방향이 제품에 들어가면 기존 한 레인 프로젝트, 특히 색 표기 없는 SD 원본과 축소·확대한 세부가 지금과 다르게 보일 수 있다. 프로젝트 파일은 바뀌지 않는다. 사용자 안내 문구와 위치는 아직 정하지 않았다.
+- 메타데이터 원칙: 원본이 선언한 색 표기(원색·전달 함수·행렬)를 보존하고, 표기 없는 원본의 해석 경로는 명시적으로 검토한다. 모든 원본을 BT.709로 강제하지 않는다. 실험 합성기는 원본의 색 첨부를 기존 동작대로 옮기며, 표기 없는 SD·HD 원본의 실제 변환 경로는 아직 원본 종류별로 검증하지 않았다(HDR은 지원을 주장하지 않는다).
+- 채택 전 남은 관문(모두 미완료, 각각 소유자 승인 필요):
+  1. 전체 화면 Preview 대 Export 같은 프레임 비교 — 실제 영상 화소, Digital·Analog Spectrum, 자막 포함(지금의 parity는 멈춘 Spectrum·자막 층 대 MP4만 본다).
+  2. 원본 색 메타데이터 보존과 표기 없는 원본 해석의 원본 종류별 검증(SD·HD, 601/709 표기, 표기 없음).
+  3. 실험 합성기의 메모리·취소·성능(프레임당 2~5배 느린 측정이 있었음)·장시간 회귀, non-DEBUG·Release 컴파일·동작.
+  4. 관련 엔진 회귀와 앱 회귀 7묶음, 실험 SwiftPM 패키지 의존 시험(`CompositorEquivalenceTests`·S1b).
+  5. 제품 통합 설계: 보통 Preview·Export에 하나의 렌더링 경로를 넣는 방법과 되돌림. 공개 Spectrum Export 차단 해제는 별도 결정이다.
+- 따로 미해결로 남는 것: F1(두 합성기 공통의 재생 시작 프레임 1 미표시, 원인 UNKNOWN), S3(간헐 프리뷰 프레임 불일치), S6 화소 충실도, 정지 이미지 합성과 이미지 배경 Spectrum Export(이 결정 밖).
+- 바뀌지 않은 것: 실험 합성기는 DEBUG 전용이며 제품 통합 NO-GO, E4-d 수락 안 됨, 공개 Spectrum Export 차단, 프로젝트 형식·제품 렌더링 코드 변경 없음. 이 작업은 문서만 고쳤다(빌드·시험·커밋 없음).
+
+### 2026-11-25 전체 Preview 대 Export parity 1단계 설계(제안, G0 승인 대기)
+
+**제안이며 승인되지 않았다.** 구현·fixture 생성·빌드·실행은 하지 않았다. 구조(ScreenCaptureKit `currentProcess`로 자기 Preview 창의 실제 합성 화면 캡처, 프레임 번호가 그려진 fixture로 원본 판별, builtin 대 `fullRectangle`, Digital·Analog Spectrum·자막·겹침, 1단계 멈춘 프레임 / 2단계 재생 별도)는 소유자가 원칙적으로 받아들였고, 아래는 G0 전 최종 수정안이다. 상세 보고는 작업 기록(SP-EXPORT-E4D-FULL-PREVIEW-PARITY-FINAL-DESIGN-REVIEW)에 있다.
+
+- 색 세 층의 구분: (1) 원본 해석 — 트랙 format description 표기와 디코딩 버퍼의 `kCVImageBuffer*` 첨부, (2) 내부 작업 색 공간 — corrected는 `CIContext(workingColorSpace: NSNull, outputColorSpace: NSNull)`(색 관리 없음, 코드 확인), builtin은 문서 없음(추정하지 않음), (3) 최종 출력 메타데이터 — 지금 내보내기는 BT.709 원색·전달·행렬을 표기한다(`SubtitleExport.color709`, 실험 합성기 출력 버퍼의 709 원색 첨부). (3)은 **관찰된 구현 사실**로 기록하며 D-041을 출력 색·HDR 정책으로 넓히지 않는다. O-04는 열려 있다.
+- 고정 보정: 명시적 BT.709 보정 fixture(균일 패치 24개, 학습 16/검증 8)를 builtin·레인 하나·변형 없음으로 표시하고, 원본 디코딩 값(선언된 709 원색·전달 함수·행렬 계수·화소 범위로 계산) 대비 Preview 표시 경로를 3×3 + 오프셋으로 한 번 맞춰 동결한다(디스플레이 프로필·videoRect·바이너리 해시와 묶음). 프레임마다 다시 맞추지 않는다. 보정 전 차이와 보정 후 잔차를 따로 보고한다.
+- Preview 축소 모델: 전용 무늬 fixture로 고정 후보(면적 평균, bilinear, Catmull-Rom, Mitchell(1/3, 1/3), Lanczos-2, Lanczos-3, 위상 1/16 px 격자)를 맞춘다. 선택은 학습 오차가 아니라 검증 영역으로 한다: 통과 0개 → 미확립, 1개 → 선택, 여럿 → 쌍별 예측 차이가 실질적이면 미확립, 아니면 검증 RMS가 가장 낮은 것(같으면 목록 앞). 미확립이면 화소 충실도는 INCONCLUSIVE.
+- 사례마다 새 앱 프로세스(사례 × 합성기). 끝 열·행은 Export 원래 해상도에서 판정하고, Preview에서 1 px 결함이 부분 화소가 되면 NOT VERIFIED. 생성 fixture만 Preview PNG를 남기고, 소유자 실제 미디어는 기본으로 PNG 없이 숫자 JSON·해시만 남긴다.
+
+**색 시험(M1–M6).** 원본 4종은 같은 프레임 코드와 균일 패치를 가진다: SD-U(640×480 표기 없음), SD-601(명시적 BT.601), HD-709(명시적 BT.709), HD-U(1920×1080 표기 없음).
+
+| 사례 | 타임라인 | 목적 |
+| --- | --- | --- |
+| M1 | SD-U 레인 하나, 기본 맞춤(1440×1080, x 240–1680) | 기준 |
+| M2 | SD-601 레인 하나 | 명시적 601 표기 따름 |
+| M3 | HD-709 레인 하나 | 명시적 709 표기 따름 |
+| M4 | HD-U 레인 하나 | 표기 없는 HD 기록 |
+| M5 | SD-U + 비어 있는 위 영상 레인 | 빈 레인 구조. 실제 계획의 활성 층 수를 기록하며, 이것만으로 레인 수 불변을 주장하지 않는다 |
+| M6 | SD-U(M1과 같은 변형) + **실제로 활성인 위 영상 층**(otf-TB 0.125배, 왼쪽 여백 x 0–240 안) | 실제 여러 층 합성. 측정 프레임에서 `CompositionPlanner` 계획의 명령에 활성 층이 2개 이상인지 확인(아니면 INCONCLUSIVE). 비교 ROI는 대상 사각형에서 위 층 사각형과 4 px 여백을 뺀 곳 |
+
+**D-041 적합성(corrected).** 객관적으로 옳은 색을 주장하지 않으며 새 색 기준을 만들지 않는다.
+
+- C1 실제 여러 층 불변: corrected M6 대 M1의 대상 ROI(같은 원본·프레임·기하), Export와 Preview 각각.
+- C2 빈 레인 불변: corrected M5 대 M1(보조 증거).
+- C3 승인된 기준과의 비교: 표기 없는 SD에 대한 승인 기준은 "기존 여러 레인 렌더링 쪽"이다. corrected M1의 Export를 같은 실행 묶음의 builtin M6(실제 여러 층) 대상 ROI와 비교한다. 회귀 고정점으로 기존 판(`plate-red-640x480`)의 corrected Export 평균 YCbCr이 기록값 [69, 119, 207] ±2인지도 본다(생성 재료 측정값).
+- C4 축소 색차 재표본화: 이전 치우침과 비교하지 않는다(기록만).
+- C5 명시적 표기 따름: M2·M3의 Export·Preview가 **선언된 색 해석 전체** — 원색(primaries), 전달 함수(transfer function), 행렬 계수(matrix coefficients), 화소 범위(video/full) — 로 계산한 기대색을 따른다. 행렬 계수만으로 원본 해석을 판정하지 않는다. 네 항목은 원본 트랙 format description과 디코딩 버퍼 첨부에서 각각 읽어 기록하고, 하나라도 읽지 못하거나 서로 어긋나면 그 원본의 C5는 INCONCLUSIVE다. 이 판정은 원본 해석(1층)에 대한 것이며 내부 작업 색 공간(2층)과 최종 출력 메타데이터(3층)는 따로 기록한다(G0 정리, 2026-11-25).
+- C6 표기 없는 원본의 BT.601·BT.709 두 해석은 진단 참고값으로 기록만 한다.
+- C7 출력 메타데이터는 관찰 사실로 기록만 한다.
+- D-041 적합 = C1·C3·C5가 PASS(C2는 보조). builtin의 M6 대 M1 차이는 EXPECTED BASELINE DIFFERENCE로 기록한다.
+
+**허용 오차 판 v1(제안, 실행 전 동결).** 이전 수정안의 값은 그대로이고, 이번에 행을 더했을 뿐 완화한 값은 없다. 결과를 본 뒤 바꾸지 않으며 바꾸려면 새 판과 새 승인이 필요하다.
+
+| 항목 | 기준 | 비고 |
+| --- | --- | --- |
+| 원본 판별 / Export 시각 | 코드 정확히 일치 / PTS == k/30 | 못 읽으면 INCONCLUSIVE |
+| Preview 안정 | 같은 코드 complete 3개 연속, 50 ms 이상, 10 s 안 | |
+| 기하 | ≤ 0.5 Preview px(축소 모델 없으면 ≤ 1.0) | |
+| 마스크 생성 | 원래 해상도에서 overlay 뺀 기준 Export 대비 \|ΔY\| > 24 또는 max\|ΔC\| > 24. Preview 크기로 덮임 비율 core ≥ 0.9 / edge 0.1–0.9 / outside < 0.1. Preview 쪽은 보정 뒤 같은 ±24(overlay는 균일 배경 위에만) | |
+| 마스크 일치 | core IoU ≥ 0.97, 경계 상자 ≤ 1 px, edge 기록 | |
+| 마스크 크기(추가) | 보여야 할 층마다 Export core ≥ 500 원래 px. 미만이거나 비면 FAIL, 배치를 알 수 없으면 INCONCLUSIVE | 빈 마스크는 PASS 불가 |
+| 마스크 오탐(추가) | Export: 타임라인 배치 상자(8 px 확장) 밖 0 px. Preview: 기대 영역(2 px 확장) 밖 ≤ 바깥 화소의 0.1%이고 ≤ 50 px. 층이 없어야 할 프레임은 같은 기준으로 빈 마스크 | 분류된 화소 수를 모두 기록 |
+| 보정 유효성 | 검증 패치 ΔE00 평균 ≤ 1.5, 최대 ≤ 3.0, 회색 단조 | 실패하면 색·충실도 INCONCLUSIVE |
+| 보정 전 색 | 기록만 | |
+| 보정 후 Preview 대 Export 색 | 균일 패치 ΔE00 평균 ≤ 2.0, 최대 ≤ 4.0 | |
+| 원본 해석(명시적 표기) | ΔE00 평균 ≤ 2.0, **p95 ≤ 3.0, 최대 ≤ 5.0(추가)** | 평균만으로 국소 오류를 숨기지 않게. 기대색은 선언된 원색·전달 함수·행렬 계수·화소 범위 전체로 계산(값은 v1 그대로) |
+| 원본 해석(표기 없음) | 601·709 기록만 | |
+| C1·C2 레인 불변(corrected) | 대상 ROI 채널 ±2 안 ≥ 99.9%, 균일 패치 ΔE00 최대 ≤ 1.0(추가) | Export·Preview 각각 |
+| C3 승인 기준 | corrected M1 대 builtin M6 대상 ROI 균일 패치 ΔE00 평균 ≤ 1.0, 최대 ≤ 2.0(추가); 기존 판 YCbCr 각 ±2 | |
+| 축소 모델 확립 | 검증 RMS ≤ 2.0, 최대 ≤ 8 | |
+| 축소 모델 선택(추가) | 통과 후보 쌍의 예측 차이가 평가 영역의 0.5% 넘는 화소에서 > 2 이거나 최대 > 6이면 미확립 | |
+| 화소 충실도(안쪽, 가장자리 3 px 밖) | 채널 ±6 안 ≥ 99% | 모델 미확립이면 INCONCLUSIVE |
+| 경계 띠 충실도 | 기록만 | |
+| Export 끝 열·행 | 원본 대비 ±16 밖 0 px(builtin은 EXPECTED BASELINE FAIL) | 원래 해상도 |
+| Preview 끝 열·행 | 두 가정 예측 차이 ≥ 잡음 3배일 때만 판정 | 아니면 NOT VERIFIED |
+
+**조건부 실패 처리(G0 정리, 2026-11-25).** 앞 단계의 결과에 기대는 판정은 그 전제가 무너지면 따라서 INCONCLUSIVE가 된다. 대체·재학습은 하지 않는다.
+
+- CAL-B 실패(보정 유효성 기준 미달 또는 실행 실패): CAL-V는 INCONCLUSIVE다. 보정에 기대는 모든 판정(보정 후 Preview 대 Export 색, 화소 충실도, Preview 쪽 마스크 생성)도 INCONCLUSIVE다.
+- RES-B 미확립(통과 후보 없음 또는 엇갈림): RES-C의 충실도 판정은 INCONCLUSIVE다. 모든 사례의 화소 충실도와 Preview 끝 열·행 판정도 INCONCLUSIVE(끝 열·행은 NOT VERIFIED)다.
+- 다른 모델로 몰래 바꾸지 않는다: 동결된 보정·축소 모델만 쓰며, 미확립이나 실패를 다른 후보·기본값·이전 실행의 모델로 메우지 않는다.
+- 검증 데이터로 다시 맞추지 않는다: 검증 패치·검증 영역은 학습에 쓰지 않고, 실패 뒤에도 그 데이터를 넣어 다시 맞추지 않는다. 다시 하려면 새 승인과 새 실행이 필요하다.
+- 전제가 살아 있는 독립 판정은 계속한다: 원본 판별(코드 판독), Export 시각, Preview 안정, Export 마스크·오탐·크기, Export 끝 열·행(원래 해상도), 계획의 활성 층 수 확인, 출력 메타데이터 기록은 보정·축소 모델에 기대지 않으므로 계속 판정한다. 기하는 축소 모델이 없으면 v1의 1.0 px 기준으로 판정한다(v1에 이미 정한 대로). 캡처 자체(창 선택·준비)가 실패하면 그 실행의 모든 판정은 NOT RUN이다.
+
+**실행 관문(제안).** G0 이 설계와 v1 승인 → G1 구현·정적 확인(순수 계산 모듈의 단독 컴파일·인공 사례 재생은 따로 승인) → G2 fixture 생성 → G3 감시하는 Debug 빌드 1회 → G4 보정·축소(CAL-B, CAL-V, RES-B, RES-C: 4회) → G5 사례(C·D·E·F·G·M1–M6, 11사례 × 2 합성기: 22회) → G6 실제 미디어(H, 별도). G4·G5 합계 26회 앱 실행. 각 관문은 소유자 승인 뒤에만.
+
+**G1 구현(2026-11-25, SP-EXPORT-E4D-G1-DIAGNOSTIC-IMPLEMENTATION).** 소유자가 G0 설계를 승인했다(단계 묶음 승인 + 첫 이상에서 자동 중단, 2:1 창은 시도하되 필수 아님, 실제 미디어 H 제외, 재생 parity 2단계는 1단계 뒤 별도 설계). G1은 DEBUG 진단 구현만 했고 G2 fixture 생성·G3 빌드·G4·G5 실행은 하지 않았다. 커밋하지 않은 작업 트리 변경이다.
+
+- 새 파일(앱, 모두 `#if DEBUG`): `FullPreviewParityThresholds.swift`(판 v1 값과 지문), `FullPreviewParityColor.swift`(판정 이름, 색 선언 세 층, Y'CbCr·Lab·ΔE00), `FullPreviewParityLayout.swift`(fixture 배치, 평면, 좌표 대응, 코드 판독), `FullPreviewParityModels.swift`(고정 보정·축소 모델, 검증 데이터 학습 거부, 결정적 선택), `FullPreviewParityJudge.swift`(마스크·오탐·크기, 패치 색과 C5, 충실도, 끝 열·행, 기하, C1–C7), `FullPreviewWindowCapture.swift`(자기 창 캡처, sRGB), `FullPreviewParityIO.swift`(디코딩, 선언 읽기, 계획 층 수, 증거), `FullPreviewParityScenes.swift`(CAL·RES·C–G·M1–M6), `FullPreviewParitySelfTest.swift`(사례 하나씩 실행, CAL-B/V·RES-B/C, 집계). 개발 도구: `OTFDevSupport/ParityFixtures.swift`(새 fixture 생성기, `otf-dev parity-fixtures`로만 실행). 수정: `OnTheFrameApp.swift`(DEBUG 실행 인수 `-OTFFullPreviewParity`), `otf-dev/main.swift`(하위 명령). 보통 Preview·Export·`CompositionPlanner`·`ProjectStore`·프로젝트 형식·엔진 제품 코드·공개 차단은 바뀌지 않았다.
+- 정적 검증: 순수 계산 다섯 파일과 결정적 점검 하네스를 단독 `swiftc -typecheck`(-DDEBUG, strict concurrency complete, 감시 단계)로 검사했다. 첫 실행은 하네스의 최상위 변수 격리 오류 2건(저장소 파일 오류 0), 하네스만 고친 둘째 실행은 오류·경고 0. 하네스는 실행하지 않았다. 앱 의존 파일(캡처·IO·장면·실행기, 앱 진입점)과 `ParityFixtures.swift`(엔진 패키지)는 G3·G2 전에는 컴파일러로 확인할 수 없어 **NOT VERIFIED**다(코드 검토만).
+- **구현 중 드러난 점(제안, 소유자 확인 필요):**
+  1. C–F의 배경: 승인 문서는 otf-TA를 적었지만 otf-TA에는 격자선과 프레임마다 바뀌는 잡음 질감이 있어 "overlay는 균일 배경 위에만" 규칙과 맞지 않는다. 그래서 C–F는 균일 배경·프레임 코드가 있는 새 생성 fixture otf-PAR와 생성 440 Hz WAV(Spectrum 원본)를 쓴다. G와 M6은 otf-TA/otf-TB 그대로다.
+  2. 코드가 없는 구간(G의 빈 구간·회색·SD 판)의 캡처 안정 규칙: 연속 complete 표본 3개의 평균 밝기가 ±0.5 안이고 50 ms 이상이면 잡는다. 이 프레임들의 원본 판별은 NOT VERIFIED로 기록한다.
+  3. 캡처는 F1 진단 파일을 바꾸지 않으려고 별도 파일(`FullPreviewWindowCapture.swift`)로 만들었다(설계의 파일 목록은 기존 캡처 파일 확장이었다). 같은 `currentProcess`·자기 창·권한 요청 없음 규칙이다.
+  4. 화소 범위 판독 규칙: 트랙의 FullRangeVideo 확장이 true면 full, 없고 색 표기가 있으면 video(H.264/HEVC는 색 표기와 함께 범위를 신호), 없고 표기도 없으면 "선언 없음". 디코딩은 video 범위로 요청한다.
+  5. RES-B는 보정된 밝기로 맞추므로 CAL-B가 유효하지 않으면 RES-B도 INCONCLUSIVE다(승인된 "보정 의존 판정 INCONCLUSIVE" 규칙의 적용).
+- 남은 일(G2 전): 위 1–5의 소유자 확인, G2 fixture 생성 절차(otf-dev 빌드는 엔진 패키지 빌드를 포함)와 실행 스크립트(사례별 새 프로세스, 동결 모델 경로 전달, 첫 이상 자동 중단)의 준비.
+- 증거: `/Volumes/Data/ON-THE-FRAME-Builds/Results/SpExportE4d-G1Static-20261125-01/`(`main.swift` 하네스, `step.zsh`, `typecheck-pure*.log`, `summary.txt`).
+
+**G1 정정(2026-11-26, SP-EXPORT-E4D-G1-CORRECTION-AND-FINAL-REVIEW).** 소유자가 G1 확인 항목 다섯에 방향을 정했다: (1) otf-TA를 보존하고 otf-PAR를 추가 fixture로 둔다, (2) 평균 밝기만 보는 Preview 안정 판정을 화소 지문 기반으로 바꾼다, (3) `FullPreviewWindowCapture.swift`를 별도 DEBUG 구현으로 유지한다, (4) 다른 색 메타데이터가 있다는 이유만으로 화소 범위를 추정하지 않는다, (5) 실제 데이터 의존이 입증되지 않으면 RES-B를 CAL-B와 독립으로 두고, 의존이 발견되면 규칙을 바꾸기 전에 멈춰 보고한다. G2 이후는 시작하지 않았다. 커밋하지 않은 작업 트리 변경이다.
+
+- (1) fixture 역할: otf-TA는 그대로(원본 프레임 판별·프레임 번호 판독·타임라인 시각, 사례 G와 M6의 otf-TB). otf-PAR는 추가 fixture(균일 배경의 overlay 검증, Spectrum·자막 가시성, 프레임 코드로 판별)이며 440 Hz WAV를 Spectrum 원본으로 함께 쓴다(C–F). 보정·축소·색은 otf-CAL·otf-RES·otf-SDU/SD601/HD709/HDU가 맡는다. G0와의 차이: G0 설계 보고의 C 정의는 "otf-TA(440 Hz 소리) + Digital 2층(균일 배경 위)"였으나 otf-TA의 격자·잡음 질감이 균일 배경 규칙과 맞지 않았다. 소유자 결정 (1)로 C–F는 otf-PAR + 440 Hz WAV를 쓰는 것으로 정리했다. 기존 fixture 식별자는 바꾸지 않았다.
+- (2) 화소 지문 안정: 캡처의 영상 사각형 정수 내부(완전히 안에 든 화소)를 정준 바이트(R, G, B 행 우선, 채움·알파 없음, 크기 접두)로 만들어 FNV-1a 64 지문을 계산한다. complete이고 좌표가 읽히는 표본만 세며, 같은 ROI·같은 지문의 연속 3개가 50 ms 이상이면 안정이다(v1의 값). idle은 새 이미지가 없으므로 세지도 끊지도 않고, 좌표 판독 불가·버퍼 불량·다른 상태는 연속을 끊는다. 표본마다 시각·상태·ROI·지문을 기록한다. 지문은 정확히 같아야 하며 허용 오차는 두지 않았다(승인된 값이 없음). 안정은 원본 판별과 따로 판정한다: 안정한 지문은 "이미지가 바뀌지 않음"만 뜻하고, 원본 번호는 잡은 화면에서 따로 읽는다. 캡처 실패(오류·종료 상태·스트림 중지)는 NOT RUN, 표본 부족·시간 초과(v1의 10 s)는 INCONCLUSIVE다. 캡처 준비의 3 s 제한은 그대로다. 평균 밝기는 빈 구간 어둠 확인에만 남겼다.
+- (3) 캡처: 별도 파일을 유지했다. `currentProcess`만, 창 번호 일치와 소유 PID가 이 프로세스일 것(없으면 거부로 강화), `desktopIndependentWindow`, 소리·커서 없음, 권한 API 없음, 시작 실패 시 스트림 해제, 멈춤 때 대기 상태 해제. 창 선택 로직(약 20줄)은 F1 파일과 겹치지만 F1을 바꾸지 않기 위해 공유하지 않았다(F1 종료 뒤 정리 후보).
+- (4) 화소 범위: 트랙의 `kCMFormatDescriptionExtension_FullRangeVideo` 명시 값만 범위 선언으로 읽는다. 없으면 "선언 없음"이다. 디코딩은 '420v'(문서화된 video 범위 형식)로 요청하므로 디코딩 값의 범위는 형식 속성이며 원본 선언이 아니다. 해석은 둘로 나눴다: 완전 선언(원색·전달·행렬·명시 범위, 트랙과 버퍼 일치 — C5에 필요)과 변환(선언된 원색·전달·행렬 + 디코딩 형식 범위 — 디코딩 값의 색 계산에 사용). 표기 없는 SD·HD에는 선언도 변환도 만들지 않는다(BT.709·video 범위를 지어내지 않음). BT.601·BT.709 진단 참고값은 디코딩 420v 범위로 계산하며 원본 범위가 선언되지 않았음을 함께 적는다. 출력 트랙 선언은 C7로 기록만 한다. D-041과 O-04는 넓히거나 닫지 않았다.
+- (5) **RES-B는 CAL-B에 실제로 데이터 의존한다(멈춤, 소유자 결정 필요).** `resamplingStage`가 맞추는 Preview 밝기는 원시 캡처에 동결 CAL-B 행렬을 적용한 값이고, 유효한 CAL-B가 없으면 실행하지 않으며, 동결 RES-B는 CAL-B 파라미터를 기록하고 이후 사용 때 일치를 요구한다. 이유: 축소 모델의 검증 기준(RMS ≤ 2, 최대 ≤ 8, 8비트)은 Preview와 원본이 같은 톤 공간일 때만 의미가 있고, 보정 없이 비교하면 표시 경로의 톤 차이가 잔차에 섞인다. 영향: CAL-B가 실패하거나 다른 환경이면 RES-B·RES-C와 모든 충실도·Preview 끝 열·행이 INCONCLUSIVE/NOT VERIFIED가 된다. 의존 규칙은 바꾸지 않고 코드에 "PENDING OWNER DECISION"으로 표시했다. 선택지(제안): (가) 의존을 승인 규칙에 넣는다, (나) CAL-B 대신 문서화된 고정 변환(캡처 sRGB, 원본 BT.709 → 선형)을 쓴다(맞추는 단계 없음, 표시 경로 차이로 미확립 가능성 증가), (다) 영역마다 검정·흰색 수준을 맞추는 톤 무관 비교(측정마다 맞추는 단계가 생겨 별도 승인 필요).
+- G0 준수 감사: M1–M6·C1–C7·v1 값(지문 `b2cd7ba0367c680d`, 파일 해시 변화 없음)·CAL-B/V·빈/무효 마스크 거부·활성 층 수·Export 정확 PTS와 Preview 안정·원본 SHA-256 전후 기록·개인정보 규칙을 확인했다. G4/G5 실행기(`SpExportE4d-G1Runner-20261126-01/fullparity.zsh`, 준비만): 사례마다 새 프로세스·새 폴더, 동결 모델 경로 전달, 첫 이상(결과 없음·NOT RUN·FAIL·INCONCLUSIVE·시간 초과·감시 중지·원본 복사본 변경)에서 자동 중단, 재시도 없음.
+- 정적 검증: 순수 계산 파일 다섯과 점검 하네스의 단독 type-check 오류·경고 0, 결정적 순수 계산 점검 실행 33 PASS / 0 FAIL(범위 추정 금지, 변환과 완전 선언 분리, 지문 안정 규칙, 보정 학습 분리, 마스크 거부, 집계 기본값 포함). 앱 의존 파일(캡처·IO·장면·실행기·진입점)과 `ParityFixtures.swift`·`otf-dev`는 컴파일 **NOT VERIFIED**(G3·G2 필요).
+- G2 전에 남은 것: (5) RES-B/CAL-B 의존의 소유자 결정. 그 뒤 G2(엔진 패키지 빌드로 otf-dev 만들기, fixture 생성 1회, 색 표기·명시 범위·해시 확인) 승인.
+- 증거: `/Volumes/Data/ON-THE-FRAME-Builds/Results/`의 `SpExportE4d-G1Correction-20261126-01/`(하네스·type-check·실행 기록), `SpExportE4d-G1Runner-20261126-01/`(준비한 실행기).
+
+**G1 마감(2026-11-26, SP-EXPORT-E4D-G1-OWNER-DECISION-CLOSURE).** 소유자가 Option A(실제 CAL-B 의존 승인)를 골랐다. 확정 내용은 [D-042](#18-전체-preview-parity-진단의-보정-의존-계약-소유자-결정-2026-11-25)다. 커밋하지 않은 작업 트리 변경이며 G2 이후는 시작하지 않았다.
+
+- 감사(수정 전): RES-B가 동결 CAL-B 행렬만 읽고 CAL-B를 쓰지 않는 데이터 흐름, CAL-V가 동결 CAL-B만 쓰는 것, 보정 학습의 검증 패치 거부, 축소 모델 위상 학습의 검증 영역 거부는 이미 맞았다. 계약을 완전히 표현하지 못한 점 다섯을 보완했다: (1) CAL-B 파라미터 지문을 저장하지 않아 불러올 때 무결성을 검증할 수 없었다 → `storedParameters`를 저장하고 재계산 값과 다르면 사용하지 않는다, (2) RES-C가 RES-B의 CAL-B 지문과 받은 CAL-B의 일치를 확인하지 않았다 → 확인한다, (3) RES-B 사용 가능 판단이 CAL-B 유효성을 요구하지 않았다 → 요구한다(한 방향), (4) 동결 RES-B에 CAL-B 출처가 없었다 → `calibrationProvenance`를 기록하고 실행 기록에 의존 행(RECORDED)을 남긴다, (5) 동결 파일 덮어쓰기 방지가 없었다 → 이미 있으면 쓰지 않고 NOT RUN으로 기록한다. 독립 판정 예시 중 Export 크기 확인이 없어 `export.dimensions`(1920×1080)를 더했다. 보정·축소 알고리즘은 바꾸지 않았다. "PENDING OWNER DECISION" 표시를 지웠다.
+- G1 최종 점검: 소유자 결정 다섯(otf-TA 보존 + otf-PAR 추가, 화소 지문 안정, 별도 캡처 파일, 범위 추정 금지, CAL-B 의존 → D-042), M1–M6, C1–C7, 판 v1(지문 `b2cd7ba0367c680d`, 파일 해시 변화 없음), CAL-B/CAL-V, CAL-B → RES-B → RES-C, 조건부 실패, 안정과 판별의 분리, 범위 해석, DEBUG 격리(새 앱 파일 9개 모두 `#if DEBUG`, 엔진 제품·`ProjectStore`·`ContentView`·프로젝트·F1 파일 변경 없음), 개인정보와 원본 보호, 첫 이상 자동 중단(준비한 G4/G5 실행기)을 확인했다.
+- 정적 검증: 순수 계산 파일 다섯과 점검 하네스의 단독 type-check 오류·경고 0, 결정적 순수 계산 점검 36 PASS / 0 FAIL(D-042 지문 저장·변조 감지·RES-B의 의존 기록 포함). 앱 의존 파일(캡처·IO·장면·실행기·진입점)은 G3 전, `ParityFixtures.swift`·`otf-dev`는 G2 전 컴파일 **NOT VERIFIED**.
+- 판단: G1은 소스 수준에서 마감한다(컴파일러 검증 완료가 아니다). 남은 한계: 앱 의존 코드의 컴파일과 런타임 동작, 실제 fixture·출력 트랙의 명시 범위 선언 유무(없으면 C5 INCONCLUSIVE), 보정·축소 모델의 확립 여부, 지문 정확 일치 규칙의 런타임 적합성, 컴파일러 RSS 여유. E4-d 수락 안 됨, 실험 합성기 제품 통합 NO-GO, 공개 Spectrum Export 차단.
+- 증거: `/Volumes/Data/ON-THE-FRAME-Builds/Results/SpExportE4d-G1Closure-20261126-01/`(하네스·type-check·실행 기록).

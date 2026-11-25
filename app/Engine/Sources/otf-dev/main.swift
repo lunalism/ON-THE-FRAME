@@ -7,6 +7,7 @@ import OnTheFrameEngine
 
 // 개발 검증 도구(앱 번들에 들어가지 않음).
 //   otf-dev fixtures <dir>        생성 fixture를 dir에 만든다(있으면 그대로)
+//   otf-dev parity-fixtures <dir> 전체 Preview parity(E4-d 1단계)용 생성 fixture를 dir에 만든다(있으면 그대로, 관문 G2)
 //   otf-dev verify <selftest-dir> 앱 자체 검사 결과(selftest-result.json)와 내보낸 파일의 프레임·소리를 판정하고 verify-result.json을 쓴다
 //   otf-dev verify-preview <dir>  편집 뒤 프리뷰 갱신 자체 검사(preview-manifest.json)의 저장 프레임을 화면 코드·검정으로 판정한다
 let args = CommandLine.arguments
@@ -222,6 +223,9 @@ case "make-projects":
 case "fixtures":
     let names = try await DevFixtures.ensureAll(in: dir)
     print("fixtures:", names.joined(separator: ", "))
+case "parity-fixtures":   // SP-EXPORT-E4D-G1: full Preview parity fixtures (gate G2 only)
+    let names = try await ParityFixtures.ensureAll(in: dir)
+    print("parity fixtures:", names.joined(separator: ", "))
 case "verify":
     let st = try JSONDecoder().decode(SelfTestResult.self, from: Data(contentsOf: dir.appendingPathComponent("selftest-result.json")))
     for c in st.checks { print(c.pass ? "PASS" : "FAIL", c.name, c.detail.isEmpty ? "" : "— \(c.detail)") }

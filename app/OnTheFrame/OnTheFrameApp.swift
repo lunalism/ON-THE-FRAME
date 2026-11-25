@@ -391,6 +391,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await SpectrumParitySelfTest.run(folder: folder, compositor: compositor) }
             return
         }
+        if let i = args.firstIndex(of: "-OTFFullPreviewParity"), i + 2 < args.count, let folder = urls.first(where: { $0.hasDirectoryPath }) {   // SP-EXPORT-E4D-G1: 전체 Preview 대 Export parity 1단계(Debug 전용, 명시적 인수로만)
+            Task { await FullPreviewParitySelfTest.run(folder: folder, args: args) }
+            return
+        }
         if let i = args.firstIndex(of: "-OTFCompositorPilot"), i + 1 < args.count, let folder = urls.first(where: { $0.hasDirectoryPath }) {   // SP-EXPORT-E4D-INTEGRATION-PILOT-45: 실험 합성기 통합 시범(Debug 전용, 명시적 인수로만)
             Task { await CompositorPilotSelfTest.run(folder: folder, mode: args[i + 1]) }
             return
