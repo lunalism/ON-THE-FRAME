@@ -12,7 +12,14 @@ import AVFoundation
 /// Never changes normal Preview/Export, ProjectStore playback, project format, permissions or the public Export guard.
 @MainActor
 enum FullPreviewParitySelfTest {
-    struct WindowInfo: Codable { var attempted = true; var achievedTwoToOne = false; var videoRectPoints: [Double] = []; var backingScale = 0.0; var note = "" }
+    struct WindowInfo: Codable {
+        var attempted = true; var achievedTwoToOne = false; var videoRectPoints: [Double] = []; var backingScale = 0.0; var note = ""
+        // GEOMETRY-FIX-84 (optional fields): measured adjustments, final measurement, and whether it was taken after the last resize.
+        var attempts: [TwoToOneAttempt]? = nil
+        var finalSample: TwoToOneSample? = nil
+        var finalReason: String? = nil
+        var verifiedAfterLastResize: Bool? = nil
+    }
     struct RunRecord: Codable {
         let scenario: String, compositor: String
         let thresholdsVersion: String, thresholdsFingerprint: String, layoutVersion: Int
@@ -28,9 +35,12 @@ enum FullPreviewParitySelfTest {
         var summary: ScenarioSummary?
         var roiDimensions: [String: [String: Int]] = [:]
         var stabilityLogs: [String: [StabilitySample]] = [:]   // per frame: every sample seen while the grab was armed
+        var captureDiagnostics: [String: FrameCaptureDiagnostics]? = nil   // STALE-CAPTURE-FIX-79: seek settlement, fence, grab outcome per frame
         var sourceSHA256Before: [String: String] = [:], sourceSHA256After: [String: String] = [:]
         var provenance: ModelProvenance?
         var notes: [String] = []
+        /// parity-color-v3 (task 97): contract under which CAL-B/CAL-V/RES-B/RES-C and frame fidelity are judged.
+        var colorContract: ColorContractIdentity? = ColorContractV3.identity
     }
 
     static func run(folder: URL, args: [String]) async {
@@ -125,11 +135,21 @@ enum FullPreviewParitySelfTest {
         }
         record.prerequisites.captureValid = true
         var crops: [Int: PreviewCrop] = [:]
+        var diagnostics: [String: FrameCaptureDiagnostics] = [:]
+        defer { record.captureDiagnostics = diagnostics }
         for k in scene.frames {
-            let settled = await settle(k, scene: scene, view: view)
-            if !settled { record.checks.append(ParityCheck(name: "frame\(k).previewSettled", verdict: .inconclusive, detail: "preview did not settle within 15 s")); continue }
-            // A. Preview stability (pixel fingerprint of the ROI). B. Source identity is judged later on the crop, independently.
-            let g = await capture.grab()
+            let (settled, seek) = await settle(k, scene: scene, view: view)
+            guard settled, let fence = seek.fenceTicks else {
+                diagnostics["\(k)"] = FrameCaptureDiagnostics(seek: seek, grab: nil)
+                record.checks.append(ParityCheck(name: "frame\(k).previewSettled", verdict: .inconclusive, detail: "preview not settled: \(seek.outcome)")); continue
+            }
+            // A. Preview stability over FRESH samples (displayed after the fence). For frame-coded sources the grab accepts only the
+            // requested frame code; B. source identity is still judged later on the returned crop, independently.
+            let expect: ExpectedPreviewCode? = scene.target(k).flatMap { placed in
+                scene.sourceFrame(k).map { ExpectedPreviewCode(placed: placed, sourceID: placed.sourceID, frame: $0) }
+            }
+            let g = await capture.grab(fenceTicks: fence, expect: expect)
+            diagnostics["\(k)"] = FrameCaptureDiagnostics(seek: seek, grab: g.diagnostics)
             record.stabilityLogs["\(k)"] = g.samples
             let complete = g.samples.filter { $0.status == "complete" }.count
             if let c = g.crop {
@@ -187,8 +207,12 @@ enum FullPreviewParitySelfTest {
         case "RES": resamplingStage(scene: scene, crops: crops, sources: sources, folder: folder, provenance: provenance, calibration: calibration, frozen: resampling, record: &record)
         default: break
         }
+        // Frame checks use only frozen models supplied as arguments (A: frozen CAL-B, B: frozen RES-B). A model fitted or established
+        // in this run (C: CAL-B fit, D: RES-B establishment) is frozen for later stages and is NOT used here (G4-GATE-FIX-72).
         let calMatrix = record.prerequisites.calibrationValid ? calibration?.matrix : nil
         let model = record.prerequisites.resamplingEstablished ? resampling : nil
+        let fittedCALBThisRun = record.scenario == "CAL" && record.compositor == "builtin" && record.prerequisites.calibrationValid
+        let establishedRESBThisRun = record.scenario == "RES" && record.compositor == "builtin" && record.prerequisites.resamplingEstablished
 
         // Plan inspection (M5/M6 and every scenario as evidence).
         let plan = try await CompositionPlanner.plan(scene.timeline, media: s.mediaByID, settings: .m1)
@@ -206,6 +230,7 @@ enum FullPreviewParitySelfTest {
         var exportPatches: [Int: [[Double]]] = [:], c5: [String: ParityVerdict] = [:], anchor: [Double]?
         for k in scene.frames {
             judgeFrame(k, scene: scene, decoded: decoded, reference: reference, sources: sources, crop: crops[k], calMatrix: calMatrix,
+                       fittedCALBThisRun: fittedCALBThisRun, establishedRESBThisRun: establishedRESBThisRun,
                        calibrationReference: calibration?.referenceDeclaration, model: model, builtin: !corrected, folder: folder, savePNG: savePNG,
                        exportPatches: &exportPatches, c5: &c5, record: &record)
             if k == scene.anchorFrame, let f = decoded.frames[k], let p = scene.target(k) {
@@ -216,6 +241,8 @@ enum FullPreviewParitySelfTest {
         record.summary = ScenarioSummary(scenario: record.scenario, compositor: record.compositor, frames: scene.frames, activeLayers: layers,
                                          exportPatches: exportPatches, outputDeclaration: decoded.interpretation.conversion,
                                          outputTrackDeclaration: decoded.interpretation.track, anchorMean: anchor, c5Verdicts: c5)
+        record.summary?.colorContract = ColorContractV3.identity
+        record.summary?.calibrationParameters = calMatrix == nil ? nil : calibration?.parameters
     }
 
     static func firstFrame(of file: String, scene: ParityScene) -> Int { scene.frames.first { scene.sourceFile($0) == file } ?? 0 }
@@ -223,7 +250,8 @@ enum FullPreviewParitySelfTest {
     // MARK: per frame
 
     static func judgeFrame(_ k: Int, scene: ParityScene, decoded: FullPreviewParityIO.Decoded, reference: FullPreviewParityIO.Decoded?,
-                           sources: [String: FullPreviewParityIO.Decoded], crop: PreviewCrop?, calMatrix: [[Double]]?, calibrationReference: ColorDeclaration?,
+                           sources: [String: FullPreviewParityIO.Decoded], crop: PreviewCrop?, calMatrix: [[Double]]?,
+                           fittedCALBThisRun: Bool = false, establishedRESBThisRun: Bool = false, calibrationReference: ColorDeclaration?,
                            model: Resampling.Frozen?, builtin: Bool, folder: URL, savePNG: Bool,
                            exportPatches: inout [Int: [[Double]]], c5: inout [String: ParityVerdict], record: inout RunRecord) {
         let p = "frame\(k)"
@@ -253,23 +281,24 @@ enum FullPreviewParitySelfTest {
         } else {
             let ey = export.y.mean(x: 0, y: 0, w: export.width, h: export.height)
             record.checks.append(ParityCheck(name: "\(p).gapBlackExport", verdict: ey <= 20 ? .pass : .fail, detail: String(format: "export mean Y' %.2f (gap)", ey)))
-            if let crop {
-                let m = FullPreviewWindowCapture.meanLuma(crop)
-                record.checks.append(ParityCheck(name: "\(p).gapBlackPreview", verdict: m <= 8 ? .pass : .fail, detail: String(format: "preview mean luma %.2f (gap)", m)))
-            }
+            if crop != nil { record.checks.append(ParityG5V3.gapBlackPreview(calibrated: calibrated, prefix: p)) }   // managed (v3 table)
         }
         // Masks and overlay exclusion.
         var exclusion: [Bool]?
         if let ref = reference?.frames[k] {
-            let (checks, _) = ParityJudge.masks(frame: export, reference: ref, layout: scene.layout(k), preview: calibrated, prefix: p, calibrationNote: record.prerequisites.calibrationNote)
-            record.checks += checks
+            let refPredict = calibrated == nil ? nil : ParityG5V3.referencePrediction(output: ParityG5V3.managedDeclaration(decoded.interpretation))
+            let maskPreview = refPredict == nil ? nil : calibrated   // never difference a calibrated crop against an encoded reference
+            let note = calibrated != nil && refPredict == nil ? "\(ParityG5V3.tag): output declaration outside parity-color-v3" : record.prerequisites.calibrationNote
+            let (checks, _) = ParityJudge.masks(frame: export, reference: ref, layout: scene.layout(k), preview: maskPreview, prefix: p, calibrationNote: note,
+                                                referencePrediction: refPredict)
+            record.checks += checks.map { ParityG5V3.isPreviewMaskCheck($0.name) ? ParityG5V3.tagRepresentation($0, calibrated: maskPreview != nil) : $0 }
             if let crop { exclusion = ParityJudge.overlayExclusion(frame: export, reference: ref, mapping: crop.mapping, width: crop.r.width, height: crop.r.height) }
         } else if scene.reference != nil {
             record.checks.append(ParityCheck(name: "\(p).mask", verdict: .inconclusive, detail: "reference export frame missing"))
         }
         // Geometry.
         if let placed = scene.target(k), let c = calibrated ?? crop {
-            record.checks.append(ParityJudge.geometry(preview: c, placed: placed, withModel: model != nil, prefix: p))
+            record.checks.append(ParityG5V3.tagRepresentation(ParityJudge.geometry(preview: c, placed: placed, withModel: model != nil, prefix: p), calibrated: calibrated != nil))
         }
         // Patch colour (M scenarios).
         if let tagged = scene.colourTagged, let placed = scene.target(k), let file = scene.sourceFile(k), let sd = sources[file], let sf = scene.sourceFrame(k), let sframe = sd.frames[sf] {
@@ -284,8 +313,10 @@ enum FullPreviewParitySelfTest {
                 if let e { ex.append(e) }
             }
             exportPatches[k] = ex.count == ParityLayout.patchCount ? ex : []
+            // parity-color-v3 (task 98): managed colour (previewVsExportColour, C5.previewFollowsDeclaration) compares the calibrated
+            // capture with the v3 prediction in lab.v2; raw and Export-side C5 (lab.v1) are unchanged.
             let checks = ParityJudge.patchColour(measures, source: sd.interpretation, output: decoded.interpretation, tagged: tagged,
-                                                 calibrationReference: calMatrix == nil ? nil : calibrationReference, prefix: p)
+                                                 managedCalibration: calibrated != nil, prefix: p)
             record.checks += checks
             for c in checks where c.name.contains(".C5.") { c5["\(p).\(c.name.split(separator: ".").last!)"] = c.verdict }
             if let roi = scene.roi, let dims = try? FullPreviewParityIO.saveROI(folder: folder, frame: k, export: export, roi: roi, preview: calibrated) {
@@ -295,10 +326,24 @@ enum FullPreviewParitySelfTest {
         // Fidelity.
         if let placed = scene.target(k) {
             if let c = calibrated, let model {
-                record.checks.append(ParityJudge.fidelity(export: export, preview: c, model: model, placed: placed, exclude: exclusion, prefix: p))
+                record.checks.append(ParityG4V3.frameFidelity(export: export, calibrated: c, model: model, placed: placed, exclude: exclusion, prefix: p))
             } else {
-                record.checks.append(ParityCheck(name: "\(p).fidelity", verdict: crop == nil ? .notRun : .inconclusive,
-                                                 detail: crop == nil ? "no capture" : "calibration: \(record.prerequisites.calibrationNote); resampling: \(record.prerequisites.resamplingNote)"))
+                // Not evaluable: state exactly which frozen inputs were supplied to frame checks, separately from models fitted or
+                // established in this run. Machine-readable flags (1 = yes, 0 = no) and a reason code for exact runner matching:
+                // dependency.reasonCode 1 = frozen CAL-B and frozen RES-B both not usable, 2 = only frozen RES-B not usable,
+                // 3 = only frozen CAL-B not usable. The verdict stays INCONCLUSIVE.
+                let calUsable = calMatrix != nil, resUsable = model != nil
+                let code: Double = !calUsable && !resUsable ? 1 : (calUsable && !resUsable ? 2 : 3)
+                func yn(_ b: Bool) -> String { b ? "yes" : "no" }
+                let detail = crop == nil ? "no capture"
+                    : "not evaluable: frozen CAL-B supplied to frame checks: \(yn(calUsable)); frozen RES-B supplied to frame checks: \(yn(resUsable)); "
+                      + "CAL-B fitted in this run: \(yn(fittedCALBThisRun)) (not used for frame checks); RES-B established in this run: \(yn(establishedRESBThisRun)) (not used for frame checks). "
+                      + "calibration: \(record.prerequisites.calibrationNote); resampling: \(record.prerequisites.resamplingNote)"
+                let values: [String: Double] = crop == nil ? [:] : [
+                    "dependency.frozenCALBUsable": calUsable ? 1 : 0, "dependency.frozenRESBUsable": resUsable ? 1 : 0,
+                    "dependency.fittedCALBThisRun": fittedCALBThisRun ? 1 : 0, "dependency.establishedRESBThisRun": establishedRESBThisRun ? 1 : 0,
+                    "dependency.reasonCode": code]
+                record.checks.append(ParityCheck(name: "\(p).fidelity", verdict: crop == nil ? .notRun : .inconclusive, detail: detail, values: values))
             }
         }
         // Edges (uniform plates reaching the output edge).
@@ -316,7 +361,12 @@ enum FullPreviewParitySelfTest {
                 let mean = lum.reduce(0, +) / Double(lum.count)
                 let noise = sqrt(lum.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(lum.count))
                 let level = (lv.y.lowerBound + lv.y.upperBound) / 2
-                record.checks.append(ParityJudge.previewEdge(preview: c, model: model, placed: placed, level: (level - 16) * 255 / 219, noise: noise, builtin: builtin, prefix: p))
+                if let od = ParityG5V3.managedDeclaration(decoded.interpretation), let fwd = ParityG4V3.Forward(primaries: od.primaries ?? "") {
+                    record.checks.append(ParityG5V3.tagRepresentation(ParityJudge.previewEdge(preview: c, model: model, placed: placed, level: (level - 16) * 255 / 219, noise: noise,
+                                                                                               builtin: builtin, prefix: p, output: ParityG4V3.resamplingOutput(fwd)), calibrated: true))
+                } else {
+                    record.checks.append(ParityCheck(name: "\(p).previewEdge", verdict: .notVerified, detail: "\(ParityG5V3.tag): output declaration outside parity-color-v3"))
+                }
             } else {
                 record.checks.append(ParityCheck(name: "\(p).previewEdge", verdict: .notVerified, detail: "calibration or resampling model unavailable"))
             }
@@ -331,47 +381,52 @@ enum FullPreviewParitySelfTest {
               let sd = sources["otf-CAL.mp4"], let sframe = sd.frames[k] else {
             record.checks.append(ParityCheck(name: "CAL.patches", verdict: .notRun, detail: "no captured calibration frame or source frame")); return
         }
-        // The reference colour needs the conversion of the decoded calibration source (declared primaries/transfer/matrix + decoded
-        // 420v range). The source's own range declaration is recorded, not assumed.
-        guard let refDecl = sd.interpretation.conversion, let m = refDecl.matrix else {
-            record.checks.append(ParityCheck(name: "CAL.reference", verdict: .inconclusive, detail: "calibration source primaries/transfer/matrix not all declared and agreeing: \(sd.interpretation.problem ?? "unresolved")")); return
+        // parity-color-v3 (task 97): the target P comes from the managed source declaration (track-declared primaries/transfer/matrix +
+        // decoded range, SourceDeclarationV3); the source's own range declaration is recorded, never assumed.
+        let managed = ParityG4V3.managedDeclaration(sd.interpretation)
+        guard let decl = managed.declaration else {
+            record.checks.append(ParityCheck(name: "CAL.reference", verdict: .inconclusive, detail: "\(ParityG4V3.managedTag): \(managed.note)")); return
         }
         record.checks.append(ParityCheck(name: "CAL.sourceDeclaration", verdict: .recorded,
-                                         detail: "otf-CAL track \(ParityJudge.describe(sd.interpretation.track)); complete declaration: \(sd.interpretation.resolved != nil)"))
+                                         detail: "otf-CAL track \(ParityJudge.describe(sd.interpretation.track)); complete declaration: \(sd.interpretation.resolved != nil); \(managed.note)"))
         let srcPlaced = PlacedSource(sourceID: placed.sourceID, x: 0, y: 0, w: Double(sframe.width), h: Double(sframe.height))
-        var patches: [Calibration.Patch] = []
+        var sourceMeans: [Int: [Double]] = [:], captured: [Int: [Double]] = [:]
         for i in 0..<ParityLayout.patchCount {
             let r = ParityLayout.patch(i)
-            guard let meas = ParityJudge.cropMean(crop, placed: placed, rect: r), let s = ParityJudge.nativeMean(sframe, placed: srcPlaced, rect: r),
-                  let ref = ColorMath.rgb(y: s[0], cb: s[1], cr: s[2], matrix: m, fullRange: sframe.declaration.fullRange ?? false) else { continue }
-            patches.append(Calibration.Patch(index: i, measured: meas, reference: [ref.r, ref.g, ref.b], pixels: 0))
+            if let meas = ParityJudge.cropMean(crop, placed: placed, rect: r) { captured[i] = meas }
+            if let s = ParityJudge.nativeMean(sframe, placed: srcPlaced, rect: r) { sourceMeans[i] = s }
         }
-        let refForLab = ColorDeclaration(primaries: refDecl.primaries, transfer: refDecl.transfer, matrix: refDecl.matrix, fullRange: false, origin: "calibration reference")
+        let targets = ParityG4V3.calibrationTargets(sourceMeans: sourceMeans, declaration: decl)
+        let patches = ParityG4V3.calibrationPatches(captured: captured, targets: targets)
         if record.compositor == "builtin" {   // CAL-B: fit on training, validate, freeze (never overwrites an existing frozen file)
             let target = folder.appendingPathComponent("calibration-frozen.json")
             guard !FileManager.default.fileExists(atPath: target.path) else {
                 record.checks.append(ParityCheck(name: "CAL-B.calibration", verdict: .notRun, detail: "calibration-frozen.json already exists; not overwritten")); return
             }
-            let f = Calibration.calibrate(patches: patches, reference: refForLab, provenance: provenance)
+            let (f, o) = ParityG4V3.freezeCalibration(patches: patches, declaration: decl, provenance: provenance, clipNote: ParityG4V3.clipSummary(targets))
             write(f, target)
-            record.checks.append(ParityCheck(name: "CAL-B.calibration", verdict: f.valid ? .pass : .fail,
-                                             detail: f.reason + " (frozen to calibration-frozen.json, parameters \(f.parameters))",
-                                             values: ["validationMeanDE": f.validationDE.mean, "validationMaxDE": f.validationDE.max]))
+            var values: [String: Double] = ["validationMeanDE": f.validationDE.mean, "validationMaxDE": f.validationDE.max]
+            if let o {
+                values["admissible"] = o.admissibility.admissible ? 1 : 0
+                values["maxMatrixDeviation"] = o.admissibility.maxMatrixDeviation
+                values["maxOffset"] = o.admissibility.maxOffset
+                values["holdoutPass"] = o.holdoutPass ? 1 : 0
+                values["greyMonotonic"] = o.greyMonotonic ? 1 : 0
+                values["validationPass"] = o.validationVerdict == .pass ? 1 : 0
+            }
+            record.checks.append(ParityCheck(name: "CAL-B.calibration", verdict: f.aggregateVerdict ?? .inconclusive,
+                                             detail: f.reason + " (frozen to calibration-frozen.json, parameters \(f.parameters), \(ColorContractV3.id) \(ColorContractV3.frozenFingerprint))",
+                                             values: values))
             record.prerequisites.calibrationValid = f.valid
-            record.prerequisites.calibrationNote = f.valid ? "valid (this run)" : f.reason
-        } else {                              // CAL-V: residual with the frozen CAL-B only
-            guard record.prerequisites.calibrationValid, let f = frozen, f.valid, f.integrityOK, f.provenance.environmentMatches(provenance) else {
-                record.checks.append(ParityCheck(name: "CAL-V.residual", verdict: .inconclusive, detail: "CAL-B missing, invalid or from another environment (\(record.prerequisites.calibrationNote))")); return
+            record.prerequisites.calibrationNote = f.valid ? "valid (this run, \(ColorContractV3.id))" : f.reason
+        } else {                              // CAL-V: managed residual with the frozen v3 CAL-B only (never refitted)
+            let admitted = ParityG4V3.admitCalibration(frozen, provenance: provenance)
+            guard record.prerequisites.calibrationValid, admitted.usable, let f = frozen else {
+                record.checks.append(ParityCheck(name: "CAL-V.residual", verdict: .inconclusive, detail: "CAL-B missing, invalid, refused or from another environment (\(admitted.note))")); return
             }
-            var des: [Double] = []
-            for p in patches where ParityLayout.validationPatches.contains(p.index) {
-                let a = Calibration.apply(f.matrix, p.measured)
-                if let la = ColorMath.lab((a[0], a[1], a[2]), primaries: refForLab.primaries!, transfer: refForLab.transfer!),
-                   let lb = ColorMath.lab((p.reference[0], p.reference[1], p.reference[2]), primaries: refForLab.primaries!, transfer: refForLab.transfer!) { des.append(ColorMath.deltaE2000(la, lb)) }
-            }
-            let d = Distribution(des)
+            let d = ParityG4V3.calibrationResidual(f, patches: patches)
             record.checks.append(ParityCheck(name: "CAL-V.residual", verdict: .recorded,
-                                             detail: String(format: "corrected display through frozen CAL-B: validation ΔE00 mean %.3f max %.3f (recorded, not fitted)", d.mean, d.max),
+                                             detail: String(format: "%@: corrected display through frozen CAL-B: holdout ΔE00 lab.v2 mean %.3f max %.3f (recorded, not fitted)", ParityG4V3.managedTag, d.mean, d.max),
                                              values: ["mean": d.mean, "max": d.max]))
         }
     }
@@ -389,41 +444,42 @@ enum FullPreviewParitySelfTest {
         guard let k = scene.frames.first(where: { crops[$0] != nil }), let raw = crops[k], let sd = sources["otf-RES.mp4"], let sframe = sd.frames[k] else {
             record.checks.append(ParityCheck(name: "RES.capture", verdict: .notRun, detail: "no captured resampling frame or source frame")); return
         }
+        let name = record.compositor == "builtin" ? "RES-B.model" : "RES-C.fidelity"
+        let managed = ParityG4V3.managedDeclaration(sd.interpretation)
+        guard let decl = managed.declaration, let fwd = ParityG4V3.Forward(primaries: decl.primaries ?? ""),
+              let source = ParityG4V3.resamplingSource(sframe, declaration: decl) else {
+            record.checks.append(ParityCheck(name: name, verdict: .inconclusive, detail: "\(ParityG4V3.managedTag): resampling source not usable: \(managed.note)")); return
+        }
+        // Capture: CAL-B residual applied once (clamp01(M · capture + b)). Prediction: encoded-domain resample, then the v3 forward
+        // transform once (Resampling output). Neither is applied twice.
         let c = ParityJudge.calibrated(raw, matrix: cal.matrix)
         var previewLuma = ParityPlane(width: c.r.width, height: c.r.height)
         for i in 0..<previewLuma.data.count { previewLuma.data[i] = 0.2126 * c.r.data[i] + 0.7152 * c.g.data[i] + 0.0722 * c.b.data[i] }
-        var sourceLuma = ParityPlane(width: sframe.width, height: sframe.height)
-        for i in 0..<sourceLuma.data.count { sourceLuma.data[i] = (sframe.y.data[i] - 16) * 255 / 219 }
-        let inputs = resamplingInputs(source: sourceLuma, preview: previewLuma, mapping: c.mapping)
+        let inputs = resamplingInputs(source: source.plane, preview: previewLuma, mapping: c.mapping)
         record.checks.append(ParityCheck(name: "\(record.compositor == "builtin" ? "RES-B" : "RES-C").calibrationDependency", verdict: .recorded,
-                                         detail: "consumes frozen CAL-B \(cal.parameters) (stored \(cal.storedParameters)), CAL-B provenance: \(cal.provenance.displayProfile), video rect \(cal.provenance.videoRectPixels), app \(cal.provenance.appBinarySHA256.prefix(16))…"))
+                                         detail: "consumes frozen CAL-B \(cal.parameters) (stored \(cal.storedParameters)), CAL-B provenance: \(cal.provenance.displayProfile), video rect \(cal.provenance.videoRectPixels), app \(cal.provenance.appBinarySHA256.prefix(16))…; \(fwd.description); \(managed.note)",
+                                         values: ["sourceMaxChromaDeparture": source.maxChroma]))
         if record.compositor == "builtin" {   // RES-B: establish and freeze (never overwrites an existing frozen file)
             let target = folder.appendingPathComponent("resampling-frozen.json")
             guard !FileManager.default.fileExists(atPath: target.path) else {
                 record.checks.append(ParityCheck(name: "RES-B.model", verdict: .notRun, detail: "resampling-frozen.json already exists; not overwritten")); return
             }
-            let f = Resampling.establish(xProfiles: inputs.x, yProfiles: inputs.y, validation: inputs.validation, calibration: cal.parameters,
-                                         calibrationProvenance: cal.provenance, provenance: provenance)
+            let f = ParityG4V3.establishResampling(x: inputs.x, y: inputs.y, validation: inputs.validation, calibration: cal, provenance: provenance, forward: fwd)
             write(f, target)
             record.checks.append(ParityCheck(name: "RES-B.model", verdict: f.established ? .pass : .inconclusive,
-                                             detail: (f.established ? "established: \(f.candidate!.rawValue)" : "unresolved") + " — \(f.reason)" + (f.disagreement.map { "; \($0)" } ?? "")))
+                                             detail: "\(ParityG4V3.managedTag): " + (f.established ? "established: \(f.candidate!.rawValue)" : "unresolved") + " — \(f.reason)" + (f.disagreement.map { "; \($0)" } ?? "")))
             record.prerequisites.resamplingEstablished = f.established
-            record.prerequisites.resamplingNote = f.established ? "established (this run)" : f.reason
-        } else {                              // RES-C: validation fidelity with the frozen RES-B model only
-            guard record.prerequisites.resamplingEstablished, let f = frozen, f.established, let cand = f.candidate, let px = f.phaseX, let py = f.phaseY,
-                  f.calibrationParameters == cal.parameters, f.provenance.environmentMatches(provenance) else {
+            record.prerequisites.resamplingNote = f.established ? "established (this run, \(ColorContractV3.id))" : f.reason
+        } else {                              // RES-C: validation fidelity with the frozen v3 RES-B model only
+            let admitted = ParityG4V3.admitResampling(frozen, calibration: cal, calibrationUsable: record.prerequisites.calibrationValid, provenance: provenance)
+            guard record.prerequisites.resamplingEstablished, admitted.usable, let f = frozen, let fid = ParityG4V3.resamplingFidelity(f, validation: inputs.validation, forward: fwd) else {
                 record.checks.append(ParityCheck(name: "RES-C.fidelity", verdict: .inconclusive,
-                                                 detail: "frozen RES-B not usable (not established, other environment, or fitted with another CAL-B): \(record.prerequisites.resamplingNote)")); return
+                                                 detail: "frozen RES-B not usable: \(admitted.note); \(record.prerequisites.resamplingNote)")); return
             }
-            var se = 0.0, n = 0, mx = 0.0
-            for b in inputs.validation {
-                let pred = Resampling.predict(cand, b, phaseX: px, phaseY: py)
-                for y in 2..<max(2, b.measured.height - 2) { for x in 2..<max(2, b.measured.width - 2) { let d = Double(pred[x, y] - b.measured[x, y]); se += d * d; n += 1; mx = max(mx, abs(d)) } }
-            }
-            let rms = n > 0 ? sqrt(se / Double(n)) : .nan
-            let ok = n > 0 && rms <= ParityThresholdsV1.resamplingValidationRMS && mx <= ParityThresholdsV1.resamplingValidationMax
-            record.checks.append(ParityCheck(name: "RES-C.fidelity", verdict: n == 0 ? .inconclusive : (ok ? .pass : .fail),
-                                             detail: String(format: "frozen %@ on the corrected display: validation RMS %.3f max %.3f", cand.rawValue, rms, mx), values: ["rms": rms, "max": mx]))
+            let ok = fid.n > 0 && fid.rms <= ParityThresholdsV1.resamplingValidationRMS && fid.max <= ParityThresholdsV1.resamplingValidationMax
+            record.checks.append(ParityCheck(name: "RES-C.fidelity", verdict: fid.n == 0 ? .inconclusive : (ok ? .pass : .fail),
+                                             detail: String(format: "%@: frozen %@ on the corrected display: validation RMS %.3f max %.3f", ParityG4V3.managedTag, f.candidate!.rawValue, fid.rms, fid.max),
+                                             values: ["rms": fid.rms, "max": fid.max]))
         }
     }
 
@@ -472,21 +528,20 @@ enum FullPreviewParitySelfTest {
     /// Sets the prerequisites from the frozen files (CAL-B/RES-B runs set them in their own stage). No substitution, no refit.
     static func loadModels(args: [String], provenance: ModelProvenance, record: inout RunRecord) {
         if record.scenario == "CAL" && record.compositor == "builtin" { return }
-        if let c = loadCalibration(args: args) {
-            let env = c.provenance.environmentMatches(provenance), thr = c.thresholds == ParityThresholdsV1.fingerprint, intact = c.integrityOK
-            record.prerequisites.calibrationValid = c.valid && env && thr && intact
-            record.prerequisites.calibrationNote = !c.valid ? "CAL-B invalid: \(c.reason)" : (!intact ? "CAL-B fingerprint mismatch (stored \(c.storedParameters), recomputed \(c.parameters))"
-                : (!env ? "CAL-B environment differs" : (!thr ? "CAL-B thresholds differ" : "frozen CAL-B \(c.parameters)")))
+        // parity-color-v3 (task 97): v1 / retired v2 / altered models are refused (ParityG4V3.admit*), never migrated or refitted.
+        let calibration = loadCalibration(args: args)
+        if calibration != nil || value(after: "-OTFParityCalibration", in: args) != nil {
+            let a = ParityG4V3.admitCalibration(calibration, provenance: provenance)
+            record.prerequisites.calibrationValid = a.usable
+            record.prerequisites.calibrationNote = calibration == nil ? "frozen CAL-B unreadable" : a.note
         } else { record.prerequisites.calibrationNote = "no frozen CAL-B supplied" }
         if record.scenario == "RES" && record.compositor == "builtin" { return }
-        if let r = loadResampling(args: args) {
-            let env = r.provenance.environmentMatches(provenance), thr = r.thresholds == ParityThresholdsV1.fingerprint
-            let calOK = loadCalibration(args: args).map { $0.parameters == r.calibrationParameters } ?? false
+        let resampling = loadResampling(args: args)
+        if resampling != nil || value(after: "-OTFParityResampling", in: args) != nil {
             // One-way: a usable RES-B requires a usable CAL-B (D-042); RES-B never makes CAL-B usable.
-            let calUsable = record.prerequisites.calibrationValid
-            record.prerequisites.resamplingEstablished = calUsable && r.established && env && thr && calOK
-            record.prerequisites.resamplingNote = !calUsable ? "CAL-B not usable (\(record.prerequisites.calibrationNote)); RES-B depends on it"
-                : (!r.established ? "RES-B unresolved: \(r.reason)" : (!env ? "RES-B environment differs" : (!thr ? "RES-B thresholds differ" : (!calOK ? "RES-B fitted with another CAL-B fingerprint" : "frozen RES-B \(r.candidate!.rawValue)"))))
+            let a = ParityG4V3.admitResampling(resampling, calibration: calibration, calibrationUsable: record.prerequisites.calibrationValid, provenance: provenance)
+            record.prerequisites.resamplingEstablished = a.usable
+            record.prerequisites.resamplingNote = resampling == nil ? "frozen RES-B unreadable" : a.note
         } else { record.prerequisites.resamplingNote = "no frozen RES-B supplied" }
     }
 
@@ -511,48 +566,108 @@ enum FullPreviewParitySelfTest {
 
     // MARK: preview
 
-    /// Paused preview settled at frame k (same observable conditions as the existing parity test). Timelines without Spectrum
-    /// do not wait for the overlay.
-    static func settle(_ k: Int, scene: ParityScene, view: PlayerNSView) async -> Bool {
+    /// Paused preview settled at frame k. STALE-CAPTURE-FIX-79: player time alone is not settlement. Requires, from existing
+    /// observable state only (no additional seek): the seek requested here is still the latest (token), it left the host's pending
+    /// list as COMPLETED (overlay confirmation for this token with finished == true, displayed frame k; see `SeekProbe`), the item
+    /// and generation are unchanged, the player is paused at exactly k, the player layer is ready for display, no still image covers
+    /// it, plus the existing Spectrum/subtitle conditions. Then a monotonic freshness boundary is taken (mach absolute ticks, the
+    /// clock of SCStreamFrameInfo.displayTime). A superseded, interrupted or unverifiable seek never settles.
+    /// The boundary does not prove that the layer already shows frame k; the grab's identity gate and judgment decide that.
+    static func settle(_ k: Int, scene: ParityScene, view: PlayerNSView) async -> (Bool, SeekSettlement) {
         let s = ProjectStore.shared, overlay = view.spectrumOverlay
         let spectra = scene.timeline.spectra.filter { $0.visible(atFrame: k) }.map(\.id)
         let subs = scene.timeline.subtitles.filter { (($0.start)..<($0.start + $0.length)).contains(k) }.map(\.id)
+        let item = s.player.currentItem
+        var d = SeekSettlement(frame: k)
         s.seek(to: k)
-        return await LaneSelfTest.waitUntil(15) {
-            guard s.appliedGeneration == s.generation, !s.isPlaying, CMTimeCompare(s.player.currentTime(), CMTime(value: Int64(k), timescale: 30)) == 0 else { return false }
-            if !scene.timeline.spectra.isEmpty {
-                guard overlay.confirmedFrame == k else { return false }
-                if spectra.isEmpty ? !overlay.layers.isEmpty : (overlay.presentedFrameForTest != k || overlay.layers.count != spectra.count) { return false }
+        d.token = s.seekToken; d.requested = CACurrentMediaTime()
+        d.confirmationClearedAtRequest = overlay.confirmedFrame == nil   // seekRequested clears it synchronously for this (non-Pause) seek
+        func snapshot() {
+            d.readyForDisplay = view.playerLayer.isReadyForDisplay; d.showingStill = view.isShowingStill
+            d.displayedFrame = view.displayedFrameForExperiment; d.overlayConfirmedFrame = overlay.confirmedFrame
+            let t = s.player.currentTime(); d.playerTime = "\(t.value)/\(t.timescale)"
+        }
+        let deadline = d.requested + 15
+        while true {
+            let state = SeekProbe.classify(requestedToken: d.token, currentToken: s.seekToken, itemChanged: s.player.currentItem !== item,
+                                           confirmationClearedAtRequest: d.confirmationClearedAtRequest, pending: view.hasPendingSpectrumSeek,
+                                           overlayConfirmedFrame: overlay.confirmedFrame, displayedFrame: view.displayedFrameForExperiment, frame: k)
+            switch state {
+            case .superseded, .itemChanged, .unverifiable, .interrupted:
+                d.outcome = state.rawValue; snapshot(); return (false, d)
+            case .inFlight: break
+            case .completed:
+                if d.completionObserved == nil { d.completionObserved = CACurrentMediaTime() }
+                if previewConditions(k, scene: scene, view: view, spectra: spectra, subs: subs) {
+                    d.fenceTicks = mach_absolute_time()
+                    d.fenceSeconds = FullPreviewWindowCapture.seconds(machTicks: d.fenceTicks!)
+                    d.settled = CACurrentMediaTime(); d.outcome = "settled"; snapshot(); return (true, d)
+                }
             }
-            for id in subs {
-                guard let l = view.subtitleLayerForTest(id), l.contents != nil, (l.presentation()?.opacity ?? l.opacity) > 0.5 else { return false }
+            if CACurrentMediaTime() >= deadline {
+                d.outcome = state == .completed ? "timeout: seek completed but the paused Preview conditions were not met within 15 s"
+                                                : "timeout: seek not completed within 15 s"
+                snapshot(); return (false, d)
             }
-            return true
+            try? await Task.sleep(nanoseconds: 10_000_000)
         }
     }
 
+    /// The paused Preview conditions after a completed seek (existing conditions plus layer readiness and no covering still image).
+    static func previewConditions(_ k: Int, scene: ParityScene, view: PlayerNSView, spectra: [UUID], subs: [UUID]) -> Bool {
+        let s = ProjectStore.shared, overlay = view.spectrumOverlay
+        guard s.appliedGeneration == s.generation, !s.isPlaying, CMTimeCompare(s.player.currentTime(), CMTime(value: Int64(k), timescale: 30)) == 0,
+              view.playerLayer.isReadyForDisplay, !view.isShowingStill else { return false }
+        if !scene.timeline.spectra.isEmpty {
+            guard overlay.confirmedFrame == k else { return false }
+            if spectra.isEmpty ? !overlay.layers.isEmpty : (overlay.presentedFrameForTest != k || overlay.layers.count != spectra.count) { return false }
+        }
+        for id in subs {
+            guard let l = view.subtitleLayerForTest(id), l.contents != nil, (l.presentation()?.opacity ?? l.opacity) > 0.5 else { return false }
+        }
+        return true
+    }
+
     /// Tries to make the Preview video rectangle exactly 960×540 capture pixels with an integral origin (not mandatory).
+    /// Optional attempt (G0) to make the Preview video rectangle exactly 960×540 physical pixels at an integral physical origin.
+    /// GEOMETRY-FIX-84: bounded, measured, discrete window adjustments (`TwoToOne.decide`): every decision uses a fresh measurement,
+    /// so the result is verified after the last resize; window sizes are never revisited; a non-responsive resize, constraints or
+    /// the attempt bound stop the attempt. Not achieving 2:1 is not a failure (the run continues with the actual size).
     static func attemptTwoToOne(window: NSWindow, view: PlayerNSView) async -> WindowInfo {
         var info = WindowInfo()
-        let scale = Double(window.backingScaleFactor)
-        info.backingScale = scale
-        let tw = 960 / scale, th = 540 / scale
-        for _ in 0..<4 {
+        func measure() -> TwoToOneSample {
             view.layoutSubtreeIfNeeded()
-            let vr = view.playerLayer.videoRect, b = view.bounds
-            let inWindow = view.convert(vr, to: nil)
-            let integral = abs((inWindow.minX * scale).rounded() - inWindow.minX * scale) < 0.01 && abs((inWindow.minY * scale).rounded() - inWindow.minY * scale) < 0.01
-            if abs(vr.width - tw) < 0.25, abs(vr.height - th) < 0.25, integral { info.achievedTwoToOne = true; break }
-            guard b.width > 0, b.height > 0 else { break }
-            var f = window.frame
-            if b.width / b.height > 16.0 / 9 { f.size.height += (th - vr.height) * f.height / b.height } else { f.size.width += (tw - vr.width) * f.width / b.width }
-            f.size.width = f.size.width.rounded(); f.size.height = f.size.height.rounded()
-            window.setFrame(f, display: true)
-            try? await Task.sleep(nanoseconds: 300_000_000)
+            let vr = view.playerLayer.videoRect, b = view.bounds, inWindow = view.convert(vr, to: nil), f = window.frame
+            return TwoToOneSample(windowW: f.width, windowH: f.height, viewW: b.width, viewH: b.height,
+                                  videoX: inWindow.minX, videoY: inWindow.minY, videoW: vr.width, videoH: vr.height, scale: Double(window.backingScaleFactor))
         }
-        let vr = view.playerLayer.videoRect, inWindow = view.convert(vr, to: nil)
-        info.videoRectPoints = [inWindow.minX, inWindow.minY, vr.width, vr.height]
-        info.note = info.achievedTwoToOne ? "2:1 achieved" : "2:1 not achieved; continuing with the actual size (not a failure)"
+        let minFrame = window.frameRect(forContentRect: NSRect(origin: .zero, size: window.contentMinSize)).size
+        let visible = (window.screen ?? NSScreen.main)?.visibleFrame.size ?? window.frame.size
+        let initial = measure()
+        var current = initial, attempts: [TwoToOneAttempt] = [], reason = ""
+        loop: while true {
+            switch TwoToOne.decide(current: current, attempts: attempts, initial: initial,
+                                   minSize: (Double(minFrame.width), Double(minFrame.height)), maxSize: (Double(visible.width), Double(visible.height))) {
+            case .done(let achieved, let why):
+                info.achievedTwoToOne = achieved; reason = why; break loop
+            case .resize(let w, let h, let axis, let error, let step):
+                var attempt = TwoToOneAttempt(index: attempts.count, before: current, axis: axis, errorPoints: error, stepPoints: step, requestedW: w, requestedH: h)
+                var f = window.frame
+                f.size = NSSize(width: w, height: h)
+                window.setFrame(f, display: true)
+                try? await Task.sleep(nanoseconds: 300_000_000)   // unchanged settling wait
+                current = measure()                                // re-read; the request is never assumed to have succeeded
+                attempt.after = current
+                attempts.append(attempt)
+            }
+        }
+        info.backingScale = current.scale
+        info.videoRectPoints = [current.videoX, current.videoY, current.videoW, current.videoH]
+        info.attempts = attempts
+        info.finalSample = current
+        info.finalReason = reason
+        info.verifiedAfterLastResize = attempts.last.map { $0.after == current } ?? true
+        info.note = info.achievedTwoToOne ? "2:1 achieved" : "2:1 not achieved (\(reason)); continuing with the actual size (not a failure)"
         return info
     }
 

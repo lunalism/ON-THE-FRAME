@@ -69,10 +69,10 @@ enum FullPreviewParityIO {
             out[k] = planes(pb, declaration: bufferDecl)
         }
         let interp = DeclaredInterpretation.resolve(track: trackDecl, buffer: bufferDecl, decodedFullRange: false, decodedPixelFormat: "420v (requested, video range)")
-        let colourDecl = interp.conversion ?? ColorDeclaration(primaries: DeclaredInterpretation.agreed(trackDecl.primaries, bufferDecl.primaries),
-                                                               transfer: DeclaredInterpretation.agreed(trackDecl.transfer, bufferDecl.transfer),
-                                                               matrix: DeclaredInterpretation.agreed(trackDecl.matrix, bufferDecl.matrix),
-                                                               fullRange: false, origin: "\(origin) decoded 420v (incomplete declaration)")
+        // Without a conversion the frame keeps only what the track declares (no decoder-default fill-in); the 420v range is the
+        // decoded format's range, recorded as such.
+        let colourDecl = interp.conversion ?? ColorDeclaration(primaries: trackDecl.primaries, transfer: trackDecl.transfer, matrix: trackDecl.matrix,
+                                                               fullRange: false, origin: "\(origin) decoded 420v (track declaration incomplete; no buffer fill-in)")
         for (k, f) in out { out[k] = NativeFrame(y: f.y, cb: f.cb, cr: f.cr, declaration: colourDecl) }
         return Decoded(frames: out, interpretation: interp, exactTimes: exact)
     }

@@ -51,6 +51,13 @@ enum Calibration {
         let storedParameters: String
         var parameters: String { Fingerprint.fnv(matrix.flatMap { $0 }.map { String(format: "%.9f", $0) }.joined(separator: ",")) }
         var integrityOK: Bool { !matrix.isEmpty && storedParameters == parameters }
+        // parity-color-v3 (task 97). Absent in v1 files (decoded as nil), so a v1 model is refused by ParityG4V3.admitCalibration.
+        var colorContract: ColorContractIdentity? = nil
+        var admissibility: CalibrationV3.Admissibility? = nil
+        var validationVerdict: ParityVerdict? = nil
+        var aggregateVerdict: ParityVerdict? = nil
+        var targetDeclaration: ColorDeclaration? = nil
+        var contractBinding: String? = nil
     }
 
     enum FitError: Error, CustomStringConvertible {
@@ -212,14 +219,19 @@ enum Resampling {
         return (0..<n).map { -0.5 + Double($0) / Double(n) }
     }
 
+    /// Optional per-sample transform applied once AFTER the encoded-domain resample (parity-color-v3: the fixed forward colour
+    /// transform). nil = v1 behaviour (prediction compared in the encoded domain). Kernels and candidates are unchanged.
+    typealias Output = @Sendable (Double) -> Double
+
     /// Best phase offset (added to each profile's base phase) for one candidate on one axis, from training profiles only.
-    static func fitPhase(_ c: Candidate, profiles: [Profile]) -> (phase: Double, rms: Double)? {
+    static func fitPhase(_ c: Candidate, profiles: [Profile], output: Output? = nil) -> (phase: Double, rms: Double)? {
         guard !profiles.isEmpty, profiles.allSatisfy({ !ParityLayout.resolutionRegions[$0.regionIndex].validation }) else { return nil }
         var best: (Double, Double)?
         for p in phases() {
             var se = 0.0, n = 0
             for pr in profiles {
-                let pred = resample1D(pr.source, count: pr.measured.count, scale: pr.scale, phase: pr.basePhase + p, c)
+                let raw = resample1D(pr.source, count: pr.measured.count, scale: pr.scale, phase: pr.basePhase + p, c)
+                let pred = output.map { f in raw.map(f) } ?? raw
                 for i in 1..<max(1, pr.measured.count - 1) { let d = pred[i] - pr.measured[i]; se += d * d; n += 1 }
             }
             guard n > 0 else { continue }
@@ -250,11 +262,18 @@ enum Resampling {
         let calibrationParameters: String          // CAL-B parameter fingerprint this model was fitted with (D-042)
         let calibrationProvenance: ModelProvenance? // CAL-B provenance this model was fitted with (D-042)
         let provenance: ModelProvenance
+        // parity-color-v3 (task 97). Absent in v1 files → refused by ParityG4V3.admitResampling.
+        var colorContract: ColorContractIdentity? = nil
+        var calibrationContract: ColorContractIdentity? = nil
+        var outputTransform: String? = nil
+        var contractBinding: String? = nil
     }
 
-    static func predict(_ c: Candidate, _ b: ValidationBlock, phaseX: Double, phaseY: Double) -> ParityPlane {
-        resample2D(b.source, w: b.measured.width, h: b.measured.height, scaleX: b.scaleX, scaleY: b.scaleY,
-                   phaseX: b.basePhaseX + phaseX, phaseY: b.basePhaseY + phaseY, c)
+    static func predict(_ c: Candidate, _ b: ValidationBlock, phaseX: Double, phaseY: Double, output: Output? = nil) -> ParityPlane {
+        var plane = resample2D(b.source, w: b.measured.width, h: b.measured.height, scaleX: b.scaleX, scaleY: b.scaleY,
+                               phaseX: b.basePhaseX + phaseX, phaseY: b.basePhaseY + phaseY, c)
+        if let f = output { for i in 0..<plane.data.count { plane.data[i] = Float(f(Double(plane.data[i]))) } }
+        return plane
     }
 
     /// Deterministic selection (G0): fit phases on training profiles, validate each candidate on the validation blocks;
@@ -263,19 +282,19 @@ enum Resampling {
     /// D-042 (owner Option A): RES-B consumes only the frozen CAL-B result; `calibration` is its parameter fingerprint and
     /// `calibrationProvenance` its provenance, both recorded in the frozen model. Nothing here changes CAL-B.
     static func establish(xProfiles: [Profile], yProfiles: [Profile], validation: [ValidationBlock], calibration: String,
-                          calibrationProvenance: ModelProvenance? = nil, provenance: ModelProvenance) -> Frozen {
+                          calibrationProvenance: ModelProvenance? = nil, provenance: ModelProvenance, output: Output? = nil) -> Frozen {
         let margin = 2
         var reports: [CandidateReport] = []
         var predictions: [Candidate: [ParityPlane]] = [:]
         for c in Candidate.allCases {
-            let fx = fitPhase(c, profiles: xProfiles), fy = fitPhase(c, profiles: yProfiles)
+            let fx = fitPhase(c, profiles: xProfiles, output: output), fy = fitPhase(c, profiles: yProfiles, output: output)
             guard let px = fx?.phase, let py = fy?.phase, !validation.isEmpty, validation.allSatisfy({ ParityLayout.resolutionRegions[$0.regionIndex].validation }) else {
                 reports.append(CandidateReport(candidate: c, trainingRMSX: fx?.rms, trainingRMSY: fy?.rms, phaseX: fx?.phase, phaseY: fy?.phase,
                                                validationRMS: nil, validationMax: nil, passed: false)); continue
             }
             var se = 0.0, n = 0, mx = 0.0, preds: [ParityPlane] = []
             for b in validation {
-                let pred = predict(c, b, phaseX: px, phaseY: py)
+                let pred = predict(c, b, phaseX: px, phaseY: py, output: output)
                 preds.append(pred)
                 for y in margin..<max(margin, b.measured.height - margin) { for x in margin..<max(margin, b.measured.width - margin) {
                     let d = Double(pred[x, y] - b.measured[x, y]); se += d * d; n += 1; mx = max(mx, abs(d))

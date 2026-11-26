@@ -1,5 +1,207 @@
 # 인계 요약 — ON THE FRAME
 
+## 2026-11-26 현행 인계 · SP-EXPORT-E4D-RUNNER-V4-99 / G3-COLOR-V3-BUILD-100 / G4-COLOR-V3-RUNTIME-101
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 상태를 다시 조회한다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| runner v4(99, 소유자 승인) | 외부 `Results/SpExportE4d-G4G5RunnerV4-20261126-01/`(저장소 밖). gate.py v4는 G4 단계, G5 실행, AGG를 판정하고 handoff.py v4는 v3 내용 규칙을 쓴다. fixture 사전 검사를 하고, G5 뒤에 aggregate를 실행하며, INT/TERM이 오면 안전하게 멈춘다. **OFFLINE-READY**: gate 단위 시험 103/103 PASS, runner 전체 흐름 시험 33/33 PASS(합성 데이터, mock `open`). Swift가 쓴 golden 동결 모델로 binding 재계산이 일치하는지 확인했다. 오프라인 시험에서 **gate STOP이 runner에서 사라지던 결함**(`if … fi` 뒤에 `${pipestatus[1]}`을 읽음)을 찾아 고쳤다. 1차 기록은 보존했다. 이전 G1·v2·v3 runner는 바뀌지 않았다. |
+| G3-06 빌드(100, 소유자 승인 "승인, 지켜봄") | 감독 Debug 빌드 1회(G3-05와 같은 명령, 출력 경로만 다름): **BUILD SUCCEEDED**, exit 0, 172 s, 오류 0. v3 파일 셋(ColorV3·G4V3·G5V3)과 수정한 Models·Judge·SelfTest가 처음으로 컴파일·링크됐다. 경고 집합은 G3-05와 같고 FullPreview 파일의 경고는 0이다. 서명 검증 OK, entitlements 동일. 앱 `10ab8a22…`, debug.dylib `1b297e96…`. 컴파일러 최대 RSS **1242 MiB**(한도 1280), 트리 1899 MiB. 컴파일 증거일 뿐 런타임 증거는 아니다. |
+| G4-04 실행(101, 소유자 승인 "내장 화면에서 실행, 지켜봄") | G3-06 앱 + runner v4로 실제 G4 1회를 실행했다(`Results/SpExportE4d-G4-20261126-04/`). **CAL-B → CAL-V → RES-B → RES-C 모두 gate 통과, G4 PASS.** 화면: **내장 Liquid Retina XDR, backing scale 2**. 2:1 달성(480×270 pt = **960×540 px**, 물리 원점 [780, 104] 정수). 단계별 결과는 다음과 같다. CAL-B PASS(허용성 통과, 최대 \|M−I\| 0.00186, \|b\| 0.00101; 검증셋 ΔE00 lab.v2 평균 0.180·최대 0.333; 회색 단조). CAL-V 잔차 RECORDED(평균 0.345·최대 0.524), 샌드박스 앱이 `$RUN/frozen` clone을 읽었다. RES-B는 **area 확정**(검증 RMS **0.333**, 최대 **2.992**; 나머지 후보는 RMS 20–25). RES-C PASS(검증 RMS **0.674**, 최대 2.992; frame5.fidelity 509434/509436 ±6, managed 색 일치이며 raw 화소 일치가 아님). 동결 모델: CAL-B `b32fbe20812841c5`, RES-B area, v3 계약과 binding 유효. 프레임 신원과 캡처 신선도 PASS(오래된 표본·이전 세대 거부). 전체 화면 배치의 geometry 가장자리는 NOT VERIFIED(정해진 문구). fixture·앱·runner·저장소는 바뀌지 않았다. |
+| 범위와 한계 | G4 PASS는 **이 Mac의 내장 XDR 화면(scale 2)에서 얻은 parity-color-v3 managed 판정**에 한정된다. G4-03의 외장 모니터(scale 1)에서는 재현을 확인하지 않았다(화면 이식성). **G5 NOT RUN.** G5 fixture 폴더(otf-TA·otf-TB·plate-red 수집, gray.mov는 서로 다른 판 셋 중 정본 결정 필요)와 **독립 표기 BT.709·SMPTE-C fixture**(G2 개정과 소스 변경)는 남아 있다. G5에는 같은 화면과 G4-04 동결 모델이 필요하다. |
+| 판단 | E4-d **수락 안 됨(NO-GO)**, 실험 합성기 제품 통합 NO-GO, **공개 Spectrum Export 차단**. |
+
+**다음 승인(각각 별도).**
+- G5 fixture 준비(gray.mov 결정 포함)
+- 독립 표기 fixture(G2 개정)
+- G5 실행
+- 필요하면 외장 화면에서 G4 재현
+
+## 2026-11-26 현행 인계 · SP-EXPORT-E4D-COLOR-V3-G5-INTEGRATION-98
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 상태를 다시 조회한다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 작업 상태 | `feature/spectrum-effects` @ `cff115c` 위의 **커밋하지 않은 변경**: 수정 9개(이번에 `FullPreviewParityJudge.swift`·`FullPreviewParitySelfTest.swift`·DECISIONS·HANDOFF)와 새 파일 3개(`FullPreviewParityColorV3.swift`, `FullPreviewParityG4V3.swift`, 이번에 추가한 `FullPreviewParityG5V3.swift`). |
+| 97 상태 | G4 v3 연결 그대로(G4 시험 59/59 재실행 통과). SelfTest 컴파일은 여전히 NOT VERIFIED. |
+| 98 구현(소유자 승인 "승인", DEBUG만) | 감사 결과 동결된 v3 매핑과 충돌은 없었다. 바꾼 곳은 다음과 같다. **managed 색**: previewVsExportColour와 C5.previewFollowsDeclaration가 보정된 캡처를 v3 예측(lab.v2)과 비교한다. Export쪽 C5(lab.v1)와 C5 적격 조건은 그대로이고, 97의 임시 보호 조치는 뺐다. **Preview 마스크**: 영역 검출에서만 기준값을 v3 forward로 같은 표현에 맞추며, 판정은 raw 기하로 남는다. **previewEdge**: 두 가설값을 재표본화한 뒤 forward를 한 번 적용한다(raw 가장자리 기하). **gapBlackPreview**: 보정된 캡처로 잰다(managed, v3 CAL-B가 없으면 INCONCLUSIVE). **C1/C2 previewPixels**: 같은 v3 CAL-B로 보정된 장면끼리만 비교한다(요약에 계약과 CAL-B 지문 추가). **C5.M2/M3**: 판정한 프레임마다 Export와 Preview 판정이 모두 있어야 PASS다. geometry·마스크·previewEdge의 표현은 values `representation.managedCalibrated`로 기록하며 detail은 바꾸지 않았다. D041 = C1 ∧ C3 ∧ C5, 임계값, 계약, 제품 코드, 실행기, gate.py는 변경 없음. |
+| 검증 | 외부 `Results/SpExportE4d-ColorV3G5Integration-20261126-01/`. 순수 type-check는 첫 실행에서 하네스 식 1개 오류(저장소 파일 0) 뒤 `typecheck-pure-2`에서 0/0. 새 G5 시험은 첫 실행 52/2(K1·T1 하네스 기대값 오류, 기록 보존) 뒤 `run-g5v3-2`에서 **54 PASS / 0 FAIL**. 회귀는 G4 59/59, v3 핵심 131/131, geometry 17/17, stale 29/29, G1/G2 52/52(하네스 호출 3곳을 새 매개변수 이름으로 바꿈). 합성 PASS는 런타임 증거가 아니다. |
+| runner v4 | 같은 폴더의 `runner-v4-requirements.md`(97 항목 1–5와 98 항목 6–11: 원장 식별자, 표현 값, 요약 필드, 합성 의미, 예상 INCONCLUSIVE, 정지 조건). 실행기는 구현하지 않았다. |
+| 판단 | G4 INCONCLUSIVE(G4-03), RES-C NOT RUN, G5 차단, E4-d 수락 안 됨, 공개 Spectrum Export 차단. |
+
+**남은 일(각각 별도 승인).**
+- runner v4
+- G2 독립 표기 fixture(BT.709·SMPTE-C, 이전과 다른 값, 검증 전용)
+- 감독 G3 빌드: SelfTest와 앱 의존 연결의 첫 컴파일
+- CAL-B부터 G4, 그 뒤 G5
+
+## 2026-11-26 현행 인계 · SP-EXPORT-E4D-COLOR-V3-G4-INTEGRATION-97
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 상태를 다시 조회한다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 작업 상태 | `feature/spectrum-effects` @ `cff115c` 위의 **커밋하지 않은 변경**: 기존 8개 파일 중 이번에 `FullPreviewParityModels.swift`·`FullPreviewParitySelfTest.swift`·DECISIONS·HANDOFF를 수정. 새 파일 `FullPreviewParityColorV3.swift`(95·96)와 `FullPreviewParityG4V3.swift`(97). |
+| 구현(소유자 승인 "승인", DEBUG만) | **CAL-B**: 목표값을 v3 P(선언 행렬·디코딩 범위 → E-clip → γ1.96 → 원색 → G-clip → OETF)로 바꿨다. 제약·검증셋 ΔE00(lab.v2)·회색 단조를 각각 기록하고, 판정 순서(INCONCLUSIVE/FAIL/PASS)를 적용해 v3 식별자와 결합 지문을 담아 동결한다. **CAL-V**: v3 수락을 통과한 동결 CAL-B만 쓰는 managed 잔차(RECORDED)다. **RES-B**: E-clip 원본 휘도, 후보 6개를 인코딩 영역에서 재표본화한 뒤 v3 변환을 한 번 적용, 임계값 v1. **RES-C·frameK.fidelity**: 동결 v3 CAL-B와 RES-B만 쓴다. **모델 수락**: v1(계약 없음)·폐기 v2·틀린 지문·바뀐 결합값·행렬 손상·다른 CAL-B·환경 불일치는 거부하고, 이전 동결 파일은 이전·수정하지 않는다. **보호 조치**: M 장면의 v1 Preview 색 판정(C5 Preview, previewVsExportColour)에는 v3 CAL-B를 넘기지 않으며, C1–C7 통합 전까지 INCONCLUSIVE와 notes 기록이 남는다. Judge·캡처·제품 코드·임계값·후보 커널·geometry 문구는 변경하지 않았다. |
+| 검증 | 외부 `Results/SpExportE4d-ColorV3G4Integration-20261126-01/`. 순수 파일 type-check(+ColorV3+G4V3, strict concurrency complete, `-DDEBUG`)는 첫 실행에서 오류·경고 0. 새 G4 시험은 첫 실행 58/1(S3는 하네스 설계 오류, 기록 보존) 뒤 `run-g4v3-2`에서 **59 PASS / 0 FAIL**. 회귀는 v3 핵심 131/131, geometry 17/17, stale 29/29, G1/G2 52/52. **`FullPreviewParitySelfTest.swift`(앱 의존)는 컴파일 NOT VERIFIED**(감독 G3 빌드 필요). 실제 Preview/Export parity 주장은 없다. |
+| 결과 형식 | 결과에 `colorContract`가 추가됐고, 동결 CAL-B·RES-B 필드와 수락 note 형식이 바뀌었다. 현재 runner v3/gate.py는 v3 결과에서 멈춘다(예: `frozen CAL-B <지문>` 정확 비교). 요구 사항은 같은 폴더의 `runner-v4-requirements.md`에 있다. **G4 실행은 runner v4가 검증될 때까지 막힌다.** |
+| 판단 | G4 INCONCLUSIVE(G4-03), RES-C NOT RUN, G5 차단, E4-d 수락 안 됨, 공개 Spectrum Export 차단. |
+
+**남은 일(각각 별도 승인).**
+- C1–C7 v3 통합: C5 Preview, previewVsExportColour, previewEdge, masks의 managed 표현
+- runner v4/gate.py/handoff.py
+- G2 독립 표기 fixture(BT.709·SMPTE-C)
+- 감독 G3 빌드(SelfTest 첫 컴파일)
+- CAL-B부터 G4, 그 뒤 G5
+
+## 2026-11-26 현행 인계 · SP-EXPORT-E4D-COLOR-V3-CLOSURE-96
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 상태를 다시 조회한다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 작업 상태 | `feature/spectrum-effects` @ `cff115c` 위의 **커밋하지 않은 변경**: 기존 8개 파일(이번에는 DECISIONS·HANDOFF만 추가 수정)과 `FullPreviewParityColorV3.swift`(이번에 수정). |
+| CAL-B 경계(소유자 승인) | 허용성 검사를 뺄셈 방식에서 경계 포함 직접 구간 비교로 바꿨다: 대각 0.90 ≤ M ≤ 1.10, 비대각 −0.10 ≤ M ≤ 0.10, 오프셋 −0.04 ≤ b ≤ 0.04, 유한값만. 각 소수 경계는 가장 가까운 Double 상수이며 엡실론이 없다. 저장된 1.10은 이제 허용되고, 바로 다음 Double은 거부된다. 계약 v3(3,665바이트, `22521502dd4ea3e1`)와 임계값 v1(`b2cd7ba0367c680d`)은 그대로이고 새 버전이 아니다. |
+| 판정 분류(소유자 승인) | `execution`은 실행 메타데이터다(SelfTest:54 실행 오류 NOT RUN, 색·화소 판정 아님). `C1`·`C2`·`C1.frameK`·`C2.frameK`는 합성(C1/C2 전제 조건 표식)이다: Judge:488–500에서 활성 층 2개 미만·ROI·기록 없음·공통 프레임 없음일 때만 나오는 INCONCLUSIVE/NOT RUN이다. 실제 하위 판정은 raw(exportPixels·patchDE)와 managed(previewPixels)로 따로 분류되어 있다. 상위 집계(FAIL 하나면 FAIL, 모두 PASS여야 PASS, 그 밖은 NOT RUN/INCONCLUSIVE)는 기존 그대로이며 Judge·SelfTest는 수정하지 않았다. |
+| 검증 | 외부 `Results/SpExportE4d-ColorV3Closure-20261126-01/`. v3 시험 **131 PASS / 0 FAIL**: 95번 88개(기대값 둘 변경 — 대각 1.10 허용, `execution`·C1/C2 분류) + 새 경계 시험 43개(경계값 허용, 바로 밖 값 거부, NaN·무한대 거부, 판정 우선순위). 회귀 geometry 17/17, stale 29/29, G1/G2 52/52. 순수 type-check는 하네스 오류로 두 번 실패한 뒤(저장소 파일 오류 0, 기록 보존) `typecheck-pure-3`에서 0/0. 앱 컴파일은 하지 않았다. |
+| 판단 | v3 런타임 통합은 비활성 상태다. G4 INCONCLUSIVE, RES-C NOT RUN, G5 차단, E4-d 수락 안 됨, 공개 Spectrum Export 차단. |
+
+**남은 일(각각 별도 승인).**
+- v3 런타임 통합: SelfTest·Judge·Models의 CAL-B·RES-B·RES-C·C5 Preview, 동결 모델의 `colorContract`, 실행기 v4/gate.py
+- G2 독립 표기 fixture(BT.709·SMPTE-C, 이전과 다른 값, 검증 전용)
+- G3 빌드
+- CAL-B부터 G4, 그 뒤 G5
+
+## 2026-11-26 현행 인계 · SP-EXPORT-E4D-ARTIFACT-ARCHIVE-94 / COLOR-V3-CORE-95
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 상태를 다시 조회한다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 작업 상태 | `feature/spectrum-effects` @ `cff115c` 위의 **커밋하지 않은 변경**: 기존 8개 파일(이번에는 DECISIONS·HANDOFF만 추가 수정)과 새 파일 `app/OnTheFrame/FullPreviewParityColorV3.swift`. |
+| Group A 보관(94, 소유자 승인 "승인 (세 폴더만)") | `DerivedData/SpExportE4d-G3-20261126-01·03·04`를 같은 APFS 볼륨 안에서 `/Volumes/Data/ON-THE-FRAME-Archives/derived-data-g3-groupA-20261126-01/`로 `mv -n` 이동했다. 삭제는 없다. 파일 3,141개(1,047개씩)의 SHA-256이 이동 전후 같고, 합계 1,078,644 KiB다. 복원 정보는 `…/derived-data-g3-groupA-20261126-01.meta/RESTORE.md`(덮어쓰지 않는 복원 명령과 점검), 이동 기록은 `Results/SpExportE4d-ArtifactArchive-20261126-01/`에 있다. 관리 저장공간은 18.83 → **17.81 GiB**이고, 물리 여유 공간은 693.21 GiB로 변화 없다. |
+| 옛 절대 경로 의존 | 복원 전까지 다시 실행할 수 없음: G3-01·03·04의 `build.zsh`·`sample.zsh`, G4-01·02의 `g4.zsh`. 옛 경로를 적은 기록: 각 G3의 `build.log`·`app-binary.sha256`. 스크립트는 수정하지 않았다. |
+| v3 핵심 구현(95, 소유자 승인) | DEBUG 전용 순수 계산 파일 하나다. 정준 문자열 46필드를 정본 파일에서 그대로 옮겨 Swift에서 **3,665바이트·SHA-256 `f45297f1…`·FNV-1a 64 `22521502dd4ea3e1`을 재현**했다. 그 밖에 BT.709·SMPTE-C 변환, γ 1.96, sRGB 곡선, E·G 자르기 기록, `lab.v2`, CAL-B v3(적용식, 원소별 허용성, 판정 우선순위), 모델 버전 거부, raw/managed 값 구분을 담았다. **호출하는 곳이 없으며** v1 실행 경로와 기존 parity 파일 9개는 바이트 단위로 그대로다. |
+| 95 검증 | 감시 단계, 외부 `Results/SpExportE4d-ColorV3Core-20261126-01/`. 순수 파일 type-check(strict concurrency complete, `-DDEBUG`)는 첫 실행에서 하네스 오류 4건(저장소 파일 0)이 나와 하네스를 고친 뒤 0/0이 됐다. v3 시험 A–T **88 PASS / 0 FAIL**: Python 독립 참조 1e-12, 공개 IEC sRGB 행렬, ColorSync(CoreGraphics) 최대 차이 0.000043. 기존 회귀 geometry 17/17, stale 29/29, G1/G2 52/52. 최대 RSS 254 MiB. 앱 빌드는 하지 않았다. |
+| 판단 | G4 INCONCLUSIVE, RES-C NOT RUN, G5 차단, E4-d 수락 안 됨, 공개 Spectrum Export 차단. |
+
+**남은 일(각각 별도 승인).**
+- v3 통합: CAL-B·RES-B·RES-C·C5 Preview 판정을 v3 함수로 바꾸고 동결 모델에 `colorContract`를 기록·검사하는 작업. 대상은 SelfTest·Judge·Models와 실행기 v4/gate.py이며, 판정 이름이 정해지지 않은 `execution`과 `C1/C2.frameK` 묶음의 기록부 소유도 정해야 한다.
+- G2 독립 표기 fixture(BT.709·SMPTE-C) 개정
+- G3 빌드(새 파일이 동기화 그룹으로 자동 포함된다)
+- CAL-B부터 G4, 그 뒤 G5
+
+## 2026-11-26 현행 인계 · SP-EXPORT-E4D-G0-COLOR-CONTRACT-93
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 상태를 다시 조회한다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 작업 상태 | `feature/spectrum-effects` @ `cff115c` 위의 **커밋하지 않은 변경** 8개 파일(이번에는 DECISIONS·HANDOFF만 추가 수정). |
+| 색 계약 | **현행 `parity-color-v3`, 지문 `22521502dd4ea3e1`**(3,665바이트, SHA-256 `f45297f1…`, Python·Perl 일치). `parity-color-v2` `bb41977d54f69e42`는 폐기(기록 보존). 소유자 승인 셋: C5 범위는 트랙 `FullRangeVideo` 명시만(버퍼 420v는 변환 전용), CAL-B `out = clamp01(M·capture + b)`와 원소별 제약(경계값 포함, 자르거나 다시 적합하지 않음), 판정 순서(제약 위반 INCONCLUSIVE → 검증 실패 FAIL → PASS, 검증 FAIL은 항상 기록). 임계값 v1 그대로. [결정](DECISIONS.md#2026-11-26-parity-색-계약-v3-재고정g0-개정-소유자-승인-sp-export-e4d-g0-color-contract-93) |
+| 구현 | 없음. Swift에서 정준 문자열이 재현되는지는 미검증. |
+| 판단 | G4 INCONCLUSIVE, RES-C NOT RUN, G5 차단, E4-d 수락 안 됨, 공개 Spectrum Export 차단. |
+
+**다음 승인(각각 별도).** v3 소스 구현과 순수 시험 → G2 독립 표기 fixture 개정 → 필요하면 묶음 A 보관 이동(관리 18.83 GiB, 조기 중지 19.25) → G3 빌드 → CAL-B부터 G4.
+
+## 2026-11-26 현행 인계 · SP-EXPORT-E4D-G0-COLOR-V2-FREEZE-91
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 상태를 다시 조회한다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 작업 상태 | `feature/spectrum-effects` @ `cff115c` 위의 **커밋하지 않은 변경** 8개 파일(이번에는 DECISIONS·HANDOFF만 추가 수정). |
+| G0 개정 | **확정(소유자 승인 2026-11-26):** DEBUG 진단 전용 `parity-color-v2`. 원색 709·SMPTE-C(D65), 전달 함수 `ITU_R_709_2`만, 행렬 709·601. 디코딩 → 인코딩 영역 공간 예측 → γ 1.96(가설) → 원색 행렬 → 선형 sRGB 채널별 자르기(기록, 제외 없음) → sRGB OETF → 제약 CAL-B v2(\|M−I\| ≤ 0.10, \|b\| ≤ 0.04). managed Lab `lab.v2`. v1 γ 2.4 Lab은 raw의 Export 쪽 C5에서만 쓴다. raw·managed 기록부와 C1–C7 소유를 정했다. v1 모델은 거부되고, 임계값 v1 `b2cd7ba0367c680d`는 그대로다. [결정](DECISIONS.md#2026-11-26-parity-색-계약-v2-고정g0-개정-소유자-승인-sp-export-e4d-g0-color-v2-freeze-91) |
+| 구현 | 없음. 소스·fixture·빌드·실행 없음. 초안 지문 `bb41977d54f69e42`가 구현에서 재현되는지는 미검증이다. |
+| 보관본 | 2026-11-23 ARTIFACT-CLEANUP-16 승인으로 삭제된 옛 DerivedData 보관본 둘은 설명되지 않은 누락이 아니다(아래 SP-EXPORT-E3-CHECKPOINT 기록). |
+| 판단 | G4 INCONCLUSIVE, RES-C NOT RUN, G5 차단, E4-d 수락 안 됨, 공개 Spectrum Export 차단. |
+
+**다음 승인(각각 별도).** v2 소스 구현과 순수 시험(수치 참조 포함) → G2 독립 표기 fixture(BT.709, SMPTE-C) 개정 → 필요하면 묶음 A 보관 이동(관리 18.83 GiB, 조기 중지 19.25) → G3 빌드 → CAL-B부터 G4.
+
+## 2026-11-26 현행 인계 · SP-EXPORT-E4D-G4-TONE-TRIAGE-87
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 상태를 다시 조회한다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 작업 상태 | `feature/spectrum-effects` @ `cff115c` 위의 **커밋하지 않은 변경** 8개 파일. |
+| G3-05 | PASS(컴파일·링크·서명). 앱 `2aa2e7ef…`/`84c1fd31…`. |
+| G4 세 번째 실행 | 2:1 달성(960×540, 정수 원점, 실행 증거). CAL-B·CAL-V CONTINUE. RES-B STOP: `RES-B.model` INCONCLUSIVE(area 검증 RMS 4.01·최대 8.96, 한도 2/8). RES-C NOT RUN. **G4 INCONCLUSIVE.** |
+| 색조 감사 | 공간 표본화는 거의 맞고(고정 감마 1.961 → sRGB 가정에서 RMS 0.63), 남은 오차는 아핀 CAL-B가 화면 경로의 비선형 색조를 나타내지 못하는 데서 온다는 것이 뒷받침되는 가설이다. 실제 내부 변환은 미검증. [기록](DECISIONS.md#2026-11-25-전체-preview-대-export-parity-1단계-설계제안-g0-승인-대기)의 G4 세 번째 실행 항목. |
+| 판단 | G5 차단, E4-d 수락 안 됨, 공개 Spectrum Export 차단. |
+
+**다음 승인.** CAL 색조 모델에 대한 소유자의 G0 결정(고정 변환 추가 / 모델 확장 / 현재 계약 유지). 임계값 완화는 선택지가 아니다.
+
+## 2026-11-26 현행 인계 · SP-EXPORT-E4D-G4-GEOMETRY-FIX-84
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 상태를 다시 조회한다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 작업 상태 | `feature/spectrum-effects` @ `cff115c` 위의 **커밋하지 않은 변경** 8개 파일. 이번 정정은 `FullPreviewParityLayout.swift`(순수 `TwoToOne`)와 `FullPreviewParitySelfTest.swift`(`attemptTwoToOne`). |
+| 진단(83) | 2:1 창 시도가 비례 보정과 반올림으로 871 ↔ 869를 오가 시작 크기로 끝났다(계산 재구성, 실행 미기록). 계산상 창 870이면 960×540·정수 원점. |
+| 정정(84) | DEBUG만: 측정 오차 방향의 물리 픽셀 단위 조정, 매번 다시 측정, 무반응·제약·세 번째 같은 크기·8회에서 중지, 마지막 변경 뒤 확인, 시도별 기록. 2:1은 선택 사항 그대로. 기하 시험 17/17, 기존 29/29·52/52 PASS. 앱 의존 컴파일 NOT VERIFIED. [기록](DECISIONS.md#2026-11-25-전체-preview-대-export-parity-1단계-설계제안-g0-승인-대기)의 2:1 항목. |
+| 판단 | G4-02 INCONCLUSIVE 그대로, G5 차단, E4-d 수락 안 됨, 공개 Spectrum Export 차단. |
+
+**다음 승인.** 새 G3 Debug 빌드 1회(감시), 그 뒤 새 결과 폴더에서 CAL-B부터 G4.
+
+## 2026-11-26 현행 인계 · SP-EXPORT-E4D-G4-RESB-TRIAGE-82
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 상태를 다시 조회한다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 작업 상태 | `feature/spectrum-effects` @ `cff115c` 위의 **커밋하지 않은 변경** 8개 파일(정정 소스 6개와 문서). |
+| G3-04 | PASS(컴파일·링크·서명). 앱 `e466995c…`/`529a210e…`. |
+| G4 두 번째 실행 | CAL-B CONTINUE, CAL-V CONTINUE, RES-B STOP(`RES-B.model` INCONCLUSIVE, 후보 6개 모두 검증 RMS 20–27·최대 118–134로 한도 2/8 초과), RES-C NOT RUN. **G4 INCONCLUSIVE.** 오래된 캡처 거부와 동결 CAL-B 샌드박스 읽기는 실행으로 확인됐다. |
+| RES-B 원인 | 확인됨: 기하·색 순서·압축은 원인이 아니고, Preview 비율 0.500926(2:1 미달성)에서 화면 경로의 1-px 선 응답(0–246)을 축소 때 넓혀지는 승인 후보 6개로는 나타낼 수 없다. 뒷받침되는 가설: 넓히지 않은 이중선형 표본화. 미검증: 정확한 2:1에서의 결과, 2:1 시도가 실패한 이유. [기록](DECISIONS.md#2026-11-25-전체-preview-대-export-parity-1단계-설계제안-g0-승인-대기)의 G4 두 번째 실행 항목. |
+| 판단 | G5 차단, E4-d 수락 안 됨, 공개 Spectrum Export 차단. |
+
+**다음 승인.** 2:1 창 시도 실패의 읽기 전용 조사, 그 뒤 DEBUG 시험 장치의 정확한 2:1 정정(새 빌드)과 RES 단계 2:1 필수 여부(G0 변경)에 대한 소유자 결정.
+
+## 2026-11-26 현행 인계 · SP-EXPORT-E4D-G4-STALE-CAPTURE-FIX-79
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 상태를 다시 조회한다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 작업 상태 | `feature/spectrum-effects` @ `cff115c` 위의 **커밋하지 않은 변경**: 이전 정정(Color·IO·Judge·SelfTest)과 이번 시험 장치 정정(`FullPreviewParityLayout.swift`·`FullPreviewWindowCapture.swift`·`FullPreviewParitySelfTest.swift`). |
+| G4 첫 실행 | G3-03 앱과 실행기 v3로 1회. CAL-B에서 `frame15.previewIdentity` FAIL로 중지(Preview가 frame 5). CAL-V·RES-B·RES-C NOT RUN. 이 실행의 동결 CAL-B는 쓰지 않는다. |
+| 원인 | 확인됨: 받아들인 frame 15 표본 세 개가 모두 `seek(15)` 요청 전에 그려진 프레임(캡처 대기열 밀림)이었고, 안정성 규칙이 새 표본인지 확인하지 않았다(시험 장치 결함). AVPlayerLayer 표시 시점은 미검증. |
+| 정정 | DEBUG 시험 장치만: 탐색 완료 확인 뒤 mach 틱 경계, 경계 이후 displayTime만 수락, grab 세대 분리, v1 안정성 그대로, 코드 있는 fixture는 요청한 코드일 때만 수락(다르면 기록·시간 초과 때 식별 FAIL). 순수 시험 29/29, 기존 52/52 PASS. 앱 의존 파일 컴파일 NOT VERIFIED. [기록](DECISIONS.md#2026-11-25-전체-preview-대-export-parity-1단계-설계제안-g0-승인-대기)의 G4 첫 실행 항목. |
+| 판단 | G4 미완료, 샌드박스 동결 모델 읽기 미검증, G5 차단, E4-d 수락 안 됨, 공개 Spectrum Export 차단. |
+
+**다음 승인.** 새 G3 Debug 빌드 1회(감시), 그 뒤 새 결과 폴더에서 G4를 CAL-B부터 다시 실행.
+
+## 2026-11-26 현행 인계 · SP-EXPORT-E4D-G4-GATE-FIX-72
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 상태를 다시 조회한다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 작업 상태 | `feature/spectrum-effects` @ `cff115c`(원격과 같음) 위의 **커밋하지 않은 변경**: G2 색 선언 정정(Color·IO·Judge)과 G4 의존 사유 정정(`FullPreviewParitySelfTest.swift`). |
+| G3 | PASS — 단, G4 정정 **이전** 소스 스냅숏에 대해서만. 새 SelfTest 변경은 그 바이너리에 없다. |
+| G4 정정 | 판정할 수 없는 충실도가 실제로 공급된 동결 모델과 이번 실행에서 맞춘 모델을 구분해 기록(구조 필드 `dependency.*`). 외부 실행기 v2와 `gate.py`는 단계·이름·구조 필드가 정확히 맞는 예상 의존 INCONCLUSIVE만 진행시킨다. 오프라인 34/34 PASS(인공 JSON). SelfTest 컴파일은 NOT VERIFIED. [기록](DECISIONS.md#2026-11-25-전체-preview-대-export-parity-1단계-설계제안-g0-승인-대기)의 G3/G4 항목. |
+| G4 실행 | NOT RUN. |
+| 판단 | E4-d 수락 안 됨, 실험 합성기 제품 통합 NO-GO, 공개 Spectrum Export 차단. |
+
+**다음 승인.** 새 G3 Debug 빌드 1회(감시), 그 뒤 G4 단계 묶음 실행.
+
+## 2026-11-26 현행 인계 · SP-EXPORT-E4D-G2
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 상태를 다시 조회한다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 작업 상태 | `feature/spectrum-effects` @ `cff115c`(원격과 같음) 위의 **커밋하지 않은 변경**: `FullPreviewParityColor.swift`, `FullPreviewParityIO.swift`, `FullPreviewParityJudge.swift`(색 선언 해석 정정). |
+| G2 | PASS(소유자 수락). otf-dev 빌드·fixture 8개 생성 1회, SHA-256 8/8 검사 전후 일치. 표기 fixture는 네 속성 + `FullRangeVideo` false 명시, SDU·HDU는 트랙 선언 없음(디코딩 버퍼에는 디코더 기본 첨부). fixture: `/Volumes/Data/ON-THE-FRAME-Builds/Results/SpExportE4d-G2-20261126-01/fixtures/` |
+| 정정 | 선언은 트랙에서만, 디코딩 버퍼 값은 관찰(채우지 않음, 모순은 기록), 420v 범위는 변환 속성. 순수 점검 52/52 PASS, v1 지문 `b2cd7ba0367c680d`. `FullPreviewParityIO.swift` 컴파일은 G3 전 NOT VERIFIED. [기록](DECISIONS.md#2026-11-25-전체-preview-대-export-parity-1단계-설계제안-g0-승인-대기)의 G2 항목. |
+| 판단 | E4-d 수락 안 됨, 실험 합성기 제품 통합 NO-GO, 공개 Spectrum Export 차단. |
+
+**다음 승인.** 정정의 커밋 여부, 그 뒤 G3(감시하는 앱 Debug 빌드).
+
 ## 2026-11-26 현행 인계 · SP-EXPORT-E4D-G1-CLOSURE
 
 아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 상태를 다시 조회한다. 바로 아래 G1 정정 인계에 이어진다.

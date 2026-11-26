@@ -2091,3 +2091,220 @@ v1.0 최종 수락 전에는 실제 Mac에서의 메모리 누수 점검과 긴 
 - 정적 검증: 순수 계산 파일 다섯과 점검 하네스의 단독 type-check 오류·경고 0, 결정적 순수 계산 점검 36 PASS / 0 FAIL(D-042 지문 저장·변조 감지·RES-B의 의존 기록 포함). 앱 의존 파일(캡처·IO·장면·실행기·진입점)은 G3 전, `ParityFixtures.swift`·`otf-dev`는 G2 전 컴파일 **NOT VERIFIED**.
 - 판단: G1은 소스 수준에서 마감한다(컴파일러 검증 완료가 아니다). 남은 한계: 앱 의존 코드의 컴파일과 런타임 동작, 실제 fixture·출력 트랙의 명시 범위 선언 유무(없으면 C5 INCONCLUSIVE), 보정·축소 모델의 확립 여부, 지문 정확 일치 규칙의 런타임 적합성, 컴파일러 RSS 여유. E4-d 수락 안 됨, 실험 합성기 제품 통합 NO-GO, 공개 Spectrum Export 차단.
 - 증거: `/Volumes/Data/ON-THE-FRAME-Builds/Results/SpExportE4d-G1Closure-20261126-01/`(하네스·type-check·실행 기록).
+
+**G2 fixture 생성 PASS와 색 선언 해석 정정(2026-11-26, SP-EXPORT-E4D-G2 / G2-FOLLOWUP-69).** 확정 결정은 없다(D-041·D-042 그대로). 정정은 커밋하지 않은 작업 트리 변경이다. G3는 시작하지 않았다.
+
+- G2(소유자가 PASS로 수락): `cff115c`에서 엔진 패키지만 감시 빌드(`swift build --package-path app/Engine --product otf-dev`, 모든 scratch·cache·config·security·임시 경로는 외부, `-j 1`, batch 끔, index store 끔)했다. exit 0, 26 s, 최대 RSS 437 MiB(트리 748 MiB), 컴파일 경고는 기존 `Media.swift:271` deprecation 하나. `ParityFixtures.swift`가 실제로 컴파일됐다(`ParityFixtures.o`). 저장소 안의 빌드 폴더에는 쓰지 않았다. `otf-dev parity-fixtures`를 한 번 실행(exit 0, 3 s)해 8개 파일을 만들었다.
+- fixture 실측(읽기 전용 검사): 모두 avc1, 30 fps, PTS 정확히 k/30·증가, 영상 트랙 1·소리 0. otf-CAL·RES·HD709·HDU 1920×1080 30프레임, otf-PAR 1920×1080 120프레임, otf-SDU·SD601 640×480 30프레임. 프레임 코드(소스 ID·번호)는 0·중간·끝 프레임에서 모두 맞았다. WAV는 48 kHz 2채널 5.0 s, 439.90 Hz, 최대 0.2500. SHA-256 8/8이 검사 전후 같다(`otf-CAL` df9ae5e8…, `otf-RES` 0d25fd59…, `otf-PAR` fa746b9f…, `otf-SDU` ff612264…, `otf-SD601` dd2c837a…, `otf-HD709` 9cbc7b9f…, `otf-HDU` 111459f8…, `otf-tone-5s.wav` 98755cd7…).
+- 색 선언 실측: 표기 fixture(CAL·RES·PAR·HD709 = ITU_R_709_2 원색·전달·행렬, SD601 = SMPTE_C·ITU_R_709_2·ITU_R_601_4)는 트랙에 네 속성이 모두 있고 `FullRangeVideo`가 명시적으로 false(video 범위)이며 디코딩 버퍼 첨부와 같다. 표기 없는 SDU·HDU는 트랙에 선언이 전혀 없다(의도대로). 그러나 디코딩 버퍼에는 디코더가 해상도에 따라 붙인 기본 첨부가 있었다(SDU: SMPTE_C/709/601, HDU: 709/709/709).
+- G1 결함: `DeclaredInterpretation.resolve`가 트랙에 없는 값을 버퍼 값으로 채웠다(`agreed(nil, 버퍼값) = 버퍼값`). 영향 경로 셋: C5용 완전 선언(`resolveDeclared.pick`), 변환(`agreed`), 디코딩 프레임의 대체 선언(`FullPreviewParityIO.decode`). 이번 fixture에서는 판정 결과에 영향이 없었지만(C5 대상 M2·M3는 트랙에 다 있음, 표기 없는 사례는 C6만 씀) 표기 없는 원본에 디코더 기본값의 변환이 생기고, 일부만 선언된 원본이 기본값으로 완성돼 보일 수 있었다.
+- 정정(DEBUG, `FullPreviewParityColor.swift`·`FullPreviewParityIO.swift`·`FullPreviewParityJudge.swift`): 선언은 트랙에서만 온다. 디코딩 버퍼 값은 관찰로만 남아 선언된 값을 확인하거나 모순을 드러낼 뿐 빈자리를 채우지 않는다(`bufferOnlyObservations`에 따로 기록). 트랙 값과 버퍼 관찰이 다르면 `conflicts`에 출처와 함께 기록하고 어느 쪽도 고르지 않는다(완전 선언·변환 없음 → C5 INCONCLUSIVE). 디코딩 형식(420v)의 범위는 변환 속성으로만 쓰고 원본 선언 범위와 섞지 않는다. 표기 없는 SD·HD에는 선언도 변환도 만들지 않는다. BT.601·BT.709 진단 참고값(C6)은 가설로 표시된 채 유지한다. C5 가드는 충돌이 없을 것도 요구한다. 임계값·D-041·D-042·출력 색 정책은 바꾸지 않았다. O-04는 열려 있다.
+- 검증: 순수 계산 파일 다섯과 점검 하네스의 단독 type-check 오류·경고 0(첫 실행은 하네스 변수 이름 충돌 오류 10건, 저장소 파일 오류 0), 결정적 순수 계산 점검 52 PASS / 0 FAIL(기존 36 + 새 16: 디코더 기본값 601·709, 완전 선언 601·709, 일부 선언, 모순, 명시 범위 false·true, 범위 미선언 + 420v, 진단 가설, C6 유지, 표기 없음·일부·모순·범위 없음에서 C5 PASS 불가, 완전 선언에서 C5 판정). v1 지문 `b2cd7ba0367c680d`(파일 해시 변화 없음). `FullPreviewParityIO.swift`(앱 의존)의 정정은 G3 전 컴파일 **NOT VERIFIED**.
+- 남은 것: G3(앱 의존 파일의 첫 컴파일), G4/G5 실행(출력 트랙의 범위 선언 유무 포함). E4-d 수락 안 됨, 실험 합성기 제품 통합 NO-GO, 공개 Spectrum Export 차단.
+- 증거: `/Volumes/Data/ON-THE-FRAME-Builds/Results/`의 `SpExportE4d-G2-20261126-01/`(빌드·생성 기록, `fixtures/`, SHA-256 전후, `fixture-inspection.json`), `SpExportE4d-G2Followup-20261126-01/`(하네스·type-check·실행 기록).
+
+**G3 Debug 빌드 PASS, G4 단계 의존 진단과 Option 1 정정(2026-11-26, SP-EXPORT-E4D-G3-DEBUG-BUILD-70 / G4-RUNNER-GATE-71 / G4-GATE-FIX-72).** 확정 결정은 없다(D-041·D-042 그대로, O-04 열림, 임계값 v1 `b2cd7ba0367c680d` 그대로). 정정은 커밋하지 않은 작업 트리 변경이다. G4 실행은 NOT RUN.
+
+- G3(소유자 승인 "빌드 승인, 지켜봄"): G2 정정을 포함한 작업 트리(Color `4f31638d…`, IO `3e6765a6…`, Judge `48ab7a70…`, SelfTest는 `cff115c`와 같음)를 Xcode Debug로 감시 빌드 1회. BUILD SUCCEEDED, exit 0, 163 s, 오류 0, 새 parity 파일·`OnTheFrameApp.swift` 경고 0, 컴파일러 최대 RSS 1228 MiB(트리 1883 MiB, 동시 1), 관리 저장공간 최대 17.41 GiB. 9개 파일 모두 `SwiftCompile`·`.o`가 있고, 바이너리에 `-OTFFullPreviewParity`와 G2 정정 문구가 있다. ad-hoc 서명 `--verify --deep --strict` 통과. **이 PASS는 그 소스 스냅숏에만 해당한다.** 아래 SelfTest 정정은 그 바이너리에 들어 있지 않다.
+- G4 진단(소스 추적): 프레임 판정은 실행 인수로 받은 동결 모델만 쓴다(A 동결 CAL-B, B 동결 RES-B). 같은 실행에서 맞춘 CAL-B(C)나 확립한 RES-B(D)는 다음 단계를 위해 동결될 뿐 프레임 판정에 쓰이지 않는다(C는 A가 아니고 D는 B가 아니다). 단계별 상태: CAL-B = A 없음·B 없음, CAL-V = A 있음·B 없음, RES-B = A 있음·B 없음(D 있음), RES-C = 둘 다 있음. 그래서 CAL-B·CAL-V·RES-B의 `frameK.fidelity`는 설계상 INCONCLUSIVE다. 그런데 기존 사유 문자열은 CAL-B에서 "calibration: valid (this run)", RES-B에서 "resampling: established (this run)"이라고 써서 실제로 공급된 입력과 달랐다. 또 G1 실행기는 INCONCLUSIVE를 모두 이상으로 처리하므로 첫 실행에서 멈췄을 것이다.
+- Option 1 정정(소유자 선택; DEBUG `FullPreviewParitySelfTest.swift` 하나, +23/−3): 판정·임계값·보정/축소 알고리즘·원본 판별·제품 렌더링은 바꾸지 않았고, 이번 실행에서 맞춘 모델을 판정에 넣지도 않았다. 판정할 수 없는 충실도는 INCONCLUSIVE 그대로 두고, detail에 "frozen CAL-B supplied to frame checks: yes/no; frozen RES-B supplied to frame checks: yes/no; CAL-B fitted in this run: yes/no (not used for frame checks); RES-B established in this run: yes/no (not used for frame checks)"를 쓴다. `values`에는 기계 판독 필드 `dependency.frozenCALBUsable`, `dependency.frozenRESBUsable`, `dependency.fittedCALBThisRun`, `dependency.establishedRESBThisRun`(1/0)과 `dependency.reasonCode`(1 = 둘 다 없음, 2 = RES-B만 없음, 3 = CAL-B만 없음)를 남긴다.
+- G4 실행기 v2(외부 `SpExportE4d-G4Runner-20261126-01/`; G1 실행기 `1f12c749…`는 그대로 보존): G4 판정만 `gate.py`로 바꿨다(G5는 기존 분류를 유지하고, G5 전용 gate는 별도로 준비). 예상된 의존 INCONCLUSIVE는 단계, check 이름(CAL은 `frame5`/`frame15.fidelity`, RES는 `frame5.fidelity`), 구조 필드가 모두 정확히 맞을 때만 진행용 EXPECTED_DEPENDENCY_NOT_EVALUABLE로 분류하며, 원래 verdict는 기록에 그대로 남는다. 단계별 기대 필드(frozenCALB, frozenRESB, fittedCALB, establishedRESB, 코드): CAL-B = (0,0,1,0,1), CAL-V = (1,0,0,0,2), RES-B = (1,0,0,1,2), RES-C = 예외 없음.
+- 필수 check: 공통으로 `compositor.previewInstalled`·`export.dimensions` PASS, 프레임마다 `previewStable`·`exportTiming`·`exportIdentity`·`previewIdentity` PASS와 `geometry`(PASS, 또는 전체 화면 경계 detail과 정확히 같은 NOT VERIFIED). CAL-B = `CAL-B.calibration` PASS, `CAL.sourceDeclaration` RECORDED, `calibration-frozen.json` 유효·지문 재계산 일치·v1·환경 일치. CAL-V = 동결 CAL-B 유효·지문/환경/v1 일치·실행이 같은 지문을 받아들임, `CAL-V.residual` RECORDED. RES-B = 동결 CAL-B 유효, `RES-B.calibrationDependency` RECORDED, `RES-B.model` PASS, `resampling-frozen.json` 확립·v1·CAL-B 지문과 provenance 일치. RES-C = 두 동결 모델 유효(RES-B 환경 일치 포함), `RES-C.fidelity`와 `frame5.fidelity`가 판정돼야 한다. PASS면 진행, FAIL이면 실질적인 부정 결과로 증거를 보존하고 멈추며, INCONCLUSIVE도 멈춘다. RECORDED는 단계별로 허용한 이름만 받고, EXPECTED BASELINE*은 G4에서 받지 않는다(기존의 일반 허용은 G4에서 제거). 그 밖의 FAIL·INCONCLUSIVE·NOT RUN·결과 없음·손상은 모두 멈춘다.
+- 오프라인 검증(인공 JSON만 사용, 앱 실행 없음, parity 증거 아님): 34 PASS / 0 FAIL. 요청된 A–Q 외에 geometry가 다른 사유·FAIL·누락인 경우, 환경 허용 오차 안·밖, RES-B 환경 불일치, execution NOT RUN, 결과 파일 없음을 추가했다. 처음 작성한 gate는 check 목록을 소스와 대조하지 않은 것이어서, 대조 후 geometry 일반 허용을 정확한 detail 일치로, 환경 비교를 `environmentMatches`와 같은 0.01 허용으로 고친 뒤 다시 실행했다.
+- 정적 검증: `#if DEBUG` 격리 유지, `ParityCheck.values`는 기존 스키마 필드, 기존 check 이름 그대로, `git diff --check` 깨끗, v1 파일 해시 `70496fbf…` 그대로. `FullPreviewParitySelfTest.swift`는 앱에 의존해서 단독 type-check를 하지 않았다 → **컴파일은 새 G3 빌드 전까지 NOT VERIFIED.**
+- 남은 것: 새 G3 Debug 빌드(별도 승인), 그 뒤 G4 CAL-B → CAL-V → RES-B → RES-C(단계 묶음 승인, 첫 예상 밖 이상에서 멈춤). E4-d 수락 안 됨, 실험 합성기 제품 통합 NO-GO, 공개 Spectrum Export 차단.
+- 증거: `/Volumes/Data/ON-THE-FRAME-Builds/Results/`의 `SpExportE4d-G3-20261126-01/`(빌드 기록·지문), `SpExportE4d-G4Runner-20261126-01/`(`gate.py`, `fullparity.zsh` v2, `offline/`, `sha256.txt`).
+
+**G4 첫 실행 CAL-B 중지, 오래된 캡처 수락 결함과 시험 장치 정정(2026-11-26, SP-EXPORT-E4D-G4-SANDBOX-PREFLIGHT-76 / G4-RUNTIME-77 / G4-CALB-FRAME15-TRIAGE-78 / G4-STALE-CAPTURE-FIX-79).** 확정 결정은 없다(D-041·D-042 그대로, O-04 열림, 임계값 v1 `b2cd7ba0367c680d` 그대로). 정정은 커밋하지 않은 작업 트리 변경이다. **G4는 완료되지 않았다.**
+
+- 실행기 v3(76, 외부 `SpExportE4d-G4Runner-20261126-02/`, v1·v2 보존): 앱이 샌드박스(`app-sandbox`, `files.user-selected.read-write`)이고 동결 모델을 인수 경로에서 보안 범위 없이 읽으므로, 소비 단계마다 동결 파일을 `$RUN/frozen/`에 APFS 복제(같은 장치·`clonefile` 확인 뒤 `cp -c`, SHA-256 일치, 읽기 전용)해 그 경로를 넘기고 실행 뒤 다시 확인한다. `gate.py`는 v2와 바이트 동일. 오프라인 38/38(모의 `open`)과 gate 34/34(인공 JSON).
+- G4 실행(77, 소유자 승인 "승인, 지켜봄", G3-03 Debug 앱 `099ccd62…`/`9c21eb8b…`, 실행기 v3, `SpExportE4d-G4-20261126-01/`): CAL-B에서 첫 이상으로 중지(exit 5). `frame15.previewIdentity` FAIL — Preview 판독 "id 193 frame 5"(기대 frame 15). 나머지 CAL-B check는 기대대로였고 `CAL-B.calibration`은 PASS였다(매개변수 `c366c37a…`). CAL-V·RES-B·RES-C는 NOT RUN. 앱 트리 최대 RSS 334 MiB, 관리 저장공간 18.07 GiB. 새로 확인된 실행 사실은 전달받은 실행 폴더 안의 읽기·쓰기뿐이고, 샌드박스 앱의 동결 모델 읽기는 **NOT VERIFIED**다.
+- 원인(78, 읽기 전용 감사): frame 15로 받아들인 캡처 표본 세 개(seq 24–26)의 displayTime(최대 13408.2775 s)이 frame 5의 마지막 표본 도착(13408.4294 s)보다 앞선다. `seek(15)`는 그 뒤에 호출되므로 세 표본은 모두 탐색 요청 전에 그려진 프레임이었다(ScreenCaptureKit 대기열 밀림: 도착 간격 약 0.16 s, 지연 0.001 → 0.63 s). 확인된 시험 장치 결함: 안정성 규칙은 반복된 픽셀만 확인하고 탐색 이후의 새 표본인지는 확인하지 않았다. 또 표본을 받을 때와 넣을 때 무장 상태를 따로 읽어 grab 사이에 표본이 넘어갈 수 있었고, 정착은 `player.currentTime()`만 보고 탐색 완료를 기다리지 않았다. 판독·ROI 오류는 아니다. AVPlayerLayer 표시 시점은 **확인되지 않았다**(탐색 뒤에 그려진 표본이 하나도 없었다).
+- 정정(79, DEBUG 시험 장치만; `FullPreviewParityLayout.swift`·`FullPreviewWindowCapture.swift`·`FullPreviewParitySelfTest.swift`, 제품 탐색·렌더링·합성기·내보내기 변경 없음, `queueDepth` 등 캡처 설정 그대로):
+  - 정착: 기존에 관찰할 수 있는 상태만 쓴다(추가 탐색 없음). 이 요청의 탐색 번호가 여전히 최신, 대기 탐색 목록에서 빠짐, 화면 프레임 k, 그리고 일시정지 overlay의 확인 프레임 k(플레이어가 **현재** 번호에 finished == true를 알렸을 때만 설정되고, 탐색 요청 때 동기적으로 지워진다). 여기에 항목·세대 불변, 정확히 k에서 일시정지, `isReadyForDisplay`, 덮는 정지 화면 없음, 기존 Spectrum·자막 조건. 대체됨·중단됨·항목 변경·확인 불가는 정착하지 않는다(`SeekProbe`). 정착하면 단조 경계를 잡는다(`mach_absolute_time` 틱). `SCStreamFrameInfo.displayTime`도 mach 절대 시간이라 변환 없이 틱끼리 비교한다.
+  - 새 표본 경계: complete 표본은 받는 즉시, 픽셀 처리 전에 판정한다. displayTime이 경계 이하(stale), 없음·0(missingDisplayTime), 순서가 어긋남(nonMonotonic)이면 거부하고 개수를 센다. 거부된 표본은 run을 끊는다.
+  - 세대: grab마다 새 번호를 준다. 처리한 표본은 받을 때의 번호와 같은 grab에만 넣고, 다른 grab은 거부하고 센다.
+  - 안정성: v1 규칙(3개, 50 ms, 10 s)을 그대로 새 표본에만 적용한다. 프레임 코드가 있는 fixture는 새 표본의 안정 run이 요청한 소스 ID·프레임·여유(40)와 맞을 때만 수락한다. 다르면 관찰로 기록하고 새 run을 기다린다. 시간 초과 때는 마지막 "새·안정·다른 코드" crop을 돌려줘 독립 `previewIdentity` 판정이 FAIL하게 한다(INCONCLUSIVE로 낮추지 않음). 새 표본 없음·안정 안 됨은 crop 없이 INCONCLUSIVE, 정착 실패는 기존 `frameK.previewSettled` INCONCLUSIVE(사유 포함). 코드 없는 소스에는 식별을 만들지 않는다.
+  - 진단(`captureDiagnostics`, 표본 선택 필드): 탐색 번호·요청·완료 관찰·정착 시각, 경계(틱·초), `isReadyForDisplay`, 정지 화면, 화면 프레임, overlay 확인 프레임, 플레이어 시각, grab 세대, 결과, 수락 개수, 잘못된 코드 관찰(최대 16), 처리 시간 평균·최대. check 이름과 gate 계약은 바꾸지 않았다(`gate.py` 변경 없음).
+- 검증(외부 `SpExportE4d-StaleCaptureFix-20261126-01/`, 감시 단계 1280 MiB/2.7 GiB/180 s): 순수 파일 다섯과 새 하네스의 단독 type-check 오류·경고 0(최대 RSS 239 MiB). 새 결정적 시험 29/29 PASS(요청 A–Q와 R·S: 경계 이전 표본, 세대 교차, 늦은 이전 세대, 순서 어긋남, displayTime 없음, idle, 5→15, 15→5, 같은 프레임 반복, 빠른 연속 탐색, 대기열 stale 5개, 잘못된 코드, 잘못된 뒤 올바른 코드, 시간 초과 사유, 코드 없음, v1 계약, 수락 불변, Codable 호환). 기존 G1/G2 순수 점검 52/52 PASS(첫 시도 `run-legacy`는 단계 스크립트 분기 오류로 type-check만 실행돼 `run-legacy-2`로 한 번 실행). `git diff --check` 깨끗, 세 파일 모두 `#if DEBUG` 안, 제품 파일(ContentView·ProjectStore·PausedSpectrumOverlay·OnTheFrameApp·Engine) 변경 없음. 임계값 파일 `70496fbf…` 그대로. 모두 인공 표본이며 실행 증거가 아니다. 앱 의존 파일(`FullPreviewWindowCapture.swift`·`FullPreviewParitySelfTest.swift`)의 컴파일은 새 G3 빌드 전까지 **NOT VERIFIED**.
+- 남은 것: 새 G3 Debug 빌드 1회(감시, 별도 승인). 그 뒤 새 결과 폴더에서 G4를 CAL-B부터 다시 실행(별도 승인). 실패한 실행의 동결 CAL-B(`c366c37a…`)는 쓰지 않는다(새 빌드는 provenance도 다르다). 샌드박스 동결 모델 읽기와 AVPlayerLayer 표시 시점은 미검증. G5 차단, E4-d 수락 안 됨, 실험 합성기 제품 통합 NO-GO, 공개 Spectrum Export 차단.
+- 증거: `/Volumes/Data/ON-THE-FRAME-Builds/Results/`의 `SpExportE4d-G4Runner-20261126-02/`, `SpExportE4d-G4-20261126-01/`(`sha256-evidence.txt`), `SpExportE4d-G4Triage-20261126-01/`(`sample-timeline.txt`), `SpExportE4d-StaleCaptureFix-20261126-01/`.
+
+**G3-04 빌드 PASS, G4 두 번째 실행 RES-B 중지와 원인 감사(2026-11-26, SP-EXPORT-E4D-G3-STALE-CAPTURE-REBUILD-80 / G4-RUNTIME-RERUN-81 / G4-RESB-TRIAGE-82).** 확정 결정은 없다(D-041·D-042 그대로, 임계값 v1 `b2cd7ba0367c680d`, 후보 6개·한도 RMS ≤ 2·최대 ≤ 8 그대로). 아래 원인은 감사 결과이며 승인된 설계 결정이 아니다. **G4는 완료되지 않았다.**
+
+- G3-04(80, 소유자 승인 "승인, 지켜봄"): 빌드 전 감사에서 Spectrum 없는 CAL·RES 장면에서도 overlay 확인 프레임이 현재 탐색의 finished == true에만 설정되고 탐색 요청 때 지워짐을 소스로 확인했다. G3-03과 같은 명령으로 Debug 감시 빌드 1회: BUILD SUCCEEDED, exit 0, 170 s, 오류 0, 경고 목록이 G3-03과 같음(parity 파일 0). 수정한 parity 파일 모두 컴파일됨. 앱 `e466995c…`, debug.dylib `529a210e…`, 서명 검증 통과. 컴파일러 최대 RSS 1239 MiB(한도 1280), 트리 1876 MiB, 관리 저장공간 최대 18.45 GiB. 컴파일 PASS일 뿐 실행 증거가 아니다.
+- G4 두 번째 실행(81, 소유자 승인 "승인, 지켜봄", G3-04 앱, 실행기 v3, `SpExportE4d-G4-20261126-02/`): CAL-B gate CONTINUE, CAL-V gate CONTINUE, RES-B gate STOP(`RES-B.model` INCONCLUSIVE), RES-C NOT RUN. **G4 전체 INCONCLUSIVE.**
+  - 오래된 캡처 거부(실행 증거): 모든 프레임에서 탐색이 settled(요청 때 확인 프레임 지워짐, 완료 뒤 확인 프레임 = 화면 프레임 = k, `isReadyForDisplay`). CAL-B·CAL-V의 frame 15 grab은 경계 이전 표본 4개와 이전 세대 표본 1개를 거부했고, 경계 뒤 표본 3개를 193/15로 수락했다. `frame15.previewIdentity` PASS. 경계 뒤 첫 프레임부터 올바른 코드였다(이 화면 환경, 1회).
+  - 동결 CAL-B 샌드박스 읽기(실행 증거): CAL-V가 `$RUN/frozen/`의 복제 파일(`e6628d8f…`, 0444, 실행 전후 해시 같음)을 받아들였다(`calibrationNote` "frozen CAL-B c366c37aa33ac021", `dependency.frozenCALBUsable` 1). `CAL-V.residual` RECORDED(ΔE00 평균 1.171, 최대 2.183).
+  - RES-B: 동결 CAL-B 수락, frame 5 식별 194/5 PASS, 모델 미확립("no candidate passed validation"). 검증 RMS/최대: area 20.29/118.4, bilinear 27.46/126.7, catmullRom 23.01/119.8, mitchell 25.24/133.6, lanczos2 23.20/120.8, lanczos3 24.66/119.3(한도 2/8). 위상은 [−0.5, 0.5) 전체 격자에서 찾았다.
+- RES-B 원인 감사(82, 읽기 전용, 외부 `SpExportE4d-G4ResBTriage-20261126-01/`, 순수 Python, 앱 실행·빌드 없음):
+  - 재현(확인): 기존 공식 그대로, 내보낸 프레임을 원본 대용으로 쓰면 area 20.45/117.6, bilinear 27.62/126.0이 나온다(앱 값과 약 1 % 차이). 원본 대용의 H.264 손실은 이상적 fixture 대비 RMS ≤ 3.3(checker1 최대 20)이라 원인이 아니다.
+  - 기하(확인): Preview는 비율 0.500926(영상 961.78×541 px, 원점 x 0.111, y 0)이다. 창 1792×871에서 보기 높이에 맞춰 그려져 2:1(960×540, 정수 원점)이 되지 않았다(세 단계 모두 `achievedTwoToOne` false). 측정 기하로 계산한 1-px 선의 위치는 관측과 약 0.02 px 안에서 맞는다. 좌표 대응은 원인이 아니다.
+  - 색 순서(확인): 1-px 체커보드 영역 평균이 Preview 129.6, 감마 영역 예측 127.1, 선형 광 예측 186으로, 화면 경로는 선형 광 평균이 아니다. CAL-B 행렬은 항등에 가까운 아핀(이득 0.96–0.99, 오프셋 약 −6)이다. 색 보정 순서는 원인이 아니다.
+  - 표본화 모양(확인): 1-px 세로선의 Preview 최고값이 영역을 따라 약 246에서 0까지 연속으로 변한다. 측정 비율에서 예측한 위상 이동(Preview 270 px마다 원본 1 px)과 맞는다. 1-px 가로선은 Preview 한 줄에만 들어가고, 세기가 소수 위치에 따라 정해진다(학습 201→176, 검증 55→84). 승인 후보 6개는 모두 축소 때 커널을 1/scale(약 2배)로 넓히는 평균 필터라서 1-px 선의 응답이 약 127–160을 넘지 못하고 0이 되지도 않는다. 그래서 **후보 군은 이 화면 경로의 측정 응답을 나타낼 수 없다.**
+  - 뒷받침되는 가설(적합 없이 산술만): 화면 경로가 넓히지 않은 1-원본-px 이중선형 표본화(축소 전처리 없음)로 축소한다. 측정 기하만으로 계산한 가로선 응답 204/56/173/82가 관측 201/55/176/84와 맞는다. 정확한 2:1과 정수 원점이면 이 표본화는 2-px 상자 평균(area 후보)과 같아진다. 이것이 G0가 2:1 창을 시도한 이유와 맞는다.
+  - 미검증: 정확한 2:1과 정수 원점에서 후보가 한도 안에 드는지, `attemptTwoToOne`이 창을 바꾸지 못한 이유(창 크기 제약·배치), 다른 화면 배율에서의 동작.
+- 다음에 필요한 소유자 결정(제안): (1) 2:1 창 시도 실패의 읽기 전용 원인 조사. (2) 그 결과로 DEBUG 시험 장치에서만 정확한 2:1·정수 원점을 맞추는 정정(새 빌드 필요)을 할지. (3) RES 단계에서 2:1을 필수로 할지(G0는 "시도하되 필수 아님"이므로 G0 변경). 후보 군을 다시 설계하는 일(G0 계약 변경)은 그 뒤의 별도 결정이다. 임계값은 완화하지 않는다.
+- 상태: 실패한 G4-01 동결 CAL-B는 쓰지 않는다. G4-02 동결 RES-B는 미확립이라 쓸 수 없다. G5 차단, E4-d 수락 안 됨, 실험 합성기 제품 통합 NO-GO, 공개 Spectrum Export 차단.
+- 증거: `/Volumes/Data/ON-THE-FRAME-Builds/Results/`의 `SpExportE4d-G3-20261126-04/`, `SpExportE4d-G4-20261126-02/`(`sha256-evidence.txt` 66개), `SpExportE4d-G4ResBTriage-20261126-01/`(`analysis.txt`, `analysis2.txt`, `region-means.json`, 스크립트).
+
+**2:1 창 시도 실패 진단과 DEBUG 정정(2026-11-26, SP-EXPORT-E4D-G4-GEOMETRY-TRIAGE-83 / G4-GEOMETRY-FIX-84).** 확정 결정은 없다. 정확한 2:1은 G0대로 **선택 사항**으로 남는다. D-041·D-042·임계값 v1 `b2cd7ba0367c680d`·후보 6개·RMS ≤ 2·최대 ≤ 8 그대로, O-04 열림. 정정은 커밋하지 않은 작업 트리 변경이다.
+
+- 진단(83, 읽기 전용, 외부 `SpExportE4d-G4GeometryTriage-20261126-01/two-to-one-trace.txt`): `attemptTwoToOne`은 영상 높이 오차를 창 대 보기 높이 비율(871/541 ≈ 1.61)로 키운 뒤 반올림했다. 이 타임라인(Lane.defaults)에서는 `EditorLayout.split`의 기본 비율 경로가 쓰이므로 보기 높이 = round(0.7 × (창 높이 − 53)) − 재생 막대 32가 되어, 창 869 → 539, 870 → 540, 871 → 541이다. 그래서 1 pt 오차가 2 pt 창 변경이 되어 871 → 869 → 871 → 869 → 871로 오가고(짝수 반복이라 시작 크기로 끝남), 마지막 변경 뒤 확인이 없었다. 이 순서는 소스와 기록된 최종 상태(창 871, 영상 961.78×541, x 415.111)로부터 **계산으로 재구성**한 것이고, 실행 중 기록된 것이 아니다. 계산상 창 870이면 960×540 영상이 정수 원점(416, 52)에 놓인다(실행 미검증).
+- 정정(84, 소유자 승인 "승인(파일 2개)", DEBUG만, `FullPreviewParitySelfTest.swift`·`FullPreviewParityLayout.swift`; ContentView·EditorLayout·ProjectStore·AVPlayerLayer 설정·Preview 렌더링·Engine·Export·캡처 파일 변경 없음): 순수 함수 `TwoToOne.decide`가 매번 새로 잰 값으로 다음 동작을 정한다. 일치 규칙은 G0와 같다(크기 0.25 pt, 물리 원점 정수 0.01). 보기가 16:9보다 넓으면 높이, 아니면 폭 축을 쓴다. 측정 오차 방향으로 물리 픽셀 단위(1/scale pt)만큼 움직이며, 앞 시도에서 잰 반응(0.25–1로 제한)으로 큰 오차를 나누어 내림하고 64 px를 넘지 않는다. 다음 경우에는 멈춘다: 창이 바뀌지 않음, 최소 크기나 화면 영역 밖 요청, 같은 창 크기를 세 번째로 요청(레이아웃이 바뀔 수 있어 재방문은 한 번 허용), 시도 8회. 크기만 맞고 원점이 소수면 성공으로 보지 않는다. 모든 판정이 마지막 변경 뒤의 측정에서 나온다. 창 870 같은 값은 코드에 없다. `WindowInfo`에 선택 필드 `attempts`(시도별 전 측정·축·오차·요청 크기·후 측정), `finalSample`, `finalReason`, `verifiedAfterLastResize`를 더했다. 기존 대기 300 ms 그대로이고, 2:1 미달성은 실패가 아니다.
+- 검증(외부 `SpExportE4d-GeometryFix-20261126-01/`, 감시 단계): 순수 파일과 하네스의 단독 type-check 오류·경고 0. 결정적 기하 시험 17/17 PASS. 구 공식 재현(871/869 오감), 요청한 A–N(871→870, 869→870, 이미 맞음, 860–880 시작에서 오감 없음, 마지막 변경 뒤 확인, 창 무반응, 제약, 폭 축, 소수 원점, 배율 2, 레이아웃 변화, 도달 불가, 시도 한도, 일치 규칙·임계값 불변), 기록 Codable. 첫 실행에서 K(레이아웃 변화)가 FAIL해 "재방문 금지" 규칙을 "최대 두 번 측정"으로 고친 뒤 다시 통과했다(첫 기록 보존). 기존 오래된 캡처 시험 29/29, G1/G2 순수 점검 52/52 PASS. `git diff --check` 깨끗, 두 파일 `#if DEBUG` 안. 모두 인공 레이아웃 대응이며 실제 NSWindow 동작 증거가 아니다. `FullPreviewParitySelfTest.swift` 컴파일은 새 G3 빌드 전까지 **NOT VERIFIED**.
+- 남은 것: 새 G3 Debug 빌드 1회(감시, 별도 승인), 새 결과 폴더에서 CAL-B부터 G4(별도 승인). 실제 창 870에서의 영상 크기·원점, Retina(배율 2) 창, 2:1에서의 RES-B 결과는 미검증이다. 2:1을 달성해도 RES-B 확립은 보장되지 않는다. G4-02는 INCONCLUSIVE 그대로, G5 차단, E4-d 수락 안 됨, 실험 합성기 제품 통합 NO-GO, 공개 Spectrum Export 차단.
+
+**G3-05 빌드, G4 세 번째 실행(2:1 달성)과 색조 응답 감사(2026-11-26, SP-EXPORT-E4D-G3-GEOMETRY-REBUILD-85 / G4-GEOMETRY-RUNTIME-86 / G4-TONE-TRIAGE-87).** 확정 결정은 없다. D-041·D-042·O-04 그대로, 임계값 v1 `b2cd7ba0367c680d`, 후보 6개, RMS ≤ 2·최대 ≤ 8, CAL 아핀 모델 그대로다. 아래 색조 원인은 감사 결과이며 승인된 색 정책이 아니다. **G4는 완료되지 않았다.**
+
+- G3-05(85, 소유자 승인 "승인, 지켜봄"): G3-04와 같은 명령으로 Debug 감시 빌드 1회. BUILD SUCCEEDED, exit 0, 169 s, 오류 0, 경고 목록이 G3-04와 같음(parity 파일 0). 84번 2:1 정정 파일을 포함해 parity 파일 9개가 모두 컴파일됨. 앱 `2aa2e7ef…`, debug.dylib `84c1fd31…`, 서명 검증 통과. 컴파일러 최대 RSS 1232 MiB, 트리 1878 MiB, 관리 저장공간 최대 18.79 GiB.
+- G4 세 번째 실행(86, 소유자 승인 "승인, 지켜봄", G3-05 앱, 실행기 v3, `SpExportE4d-G4-20261126-03/`):
+  - 2:1(실행 증거): 세 단계 모두 창 1792×948 → 893 → 871 → **870**(측정 오차에 따른 3회), 영상 **960×540, 정수 원점(416, 52)**, backing 1, `achievedTwoToOne` true, `verifiedAfterLastResize` true. 83번 계산이 실행으로 확인됐다.
+  - CAL-B gate CONTINUE(`CAL-B.calibration` PASS `c366c37a…`, frame 15 grab이 오래된 표본 4개·이전 세대 1개 거부, 식별 PASS). CAL-V gate CONTINUE(복제 CAL-B `9de5acf1…` 수락, `CAL-V.residual` ΔE00 평균 1.171·최대 2.183 RECORDED).
+  - RES-B gate STOP: `RES-B.model` INCONCLUSIVE("no candidate passed validation"). area 검증 RMS **4.01**·최대 **8.96**(G4-02의 20.29/118.4에서 개선, 위상 0/0, 학습 RMS 3.57/4.05). 나머지 bilinear 27.03/96.6, catmullRom 25.81/80.5, mitchell 24.01/93.3, lanczos2 25.71/80.6, lanczos3 28.54/98.9. 한도는 2/8이다. RES-C NOT RUN. **G4 INCONCLUSIVE.**
+- 색조 응답 감사(87, 읽기 전용, 외부 `SpExportE4d-G4ToneTriage-20261126-01/tone.txt`, G4-03 증거만, 적합 없음):
+  - 확인(코드): CAL-B는 패치 24개 중 학습 16개, 검증 8개(2, 5, 8, 12, 14, 17, 20, 23. 회색 중 51·127·204)다. 측정값(sRGB 캡처 R′G′B′)을 기준값(원본을 BT.709 행렬로 푼 **인코딩된** R′G′B′, 전달 함수 변환 없음)에 맞추는 최소제곱 3×3 + 오프셋이다. RES-B는 CAL-B를 적용한 Preview 휘도와 원본 휘도((Y′−16)·255/219)를 같은 인코딩 영역에서 비교한다.
+  - 확인(실행 증거): 끝점과 범위는 맞다(검정 0 → 0, 흰색 254 → 254, R=G=B). 축소 평균은 원본 인코딩 영역에서 일어난다(checker1 Preview 평균 138.37이 "평균 후 변환" 138.26과 맞고, "변환 후 평균" 127.5와 다르다). 중간 밝기는 원본보다 밝다(35 → 39, 127 → 138, 233 → 236). CAL-B 아핀 보정 뒤에도 회색 응답이 S자로 남는다(ramp 어두운 쪽 −7, 중간 +4.4, 밝은 쪽 −4.9, 흰색 254 → 246). ramp만으로 RMS 3.85·최대 8.94다.
+  - 고정 전달 함수 가설(공개 공식, 적합 없음, ramp의 보정 전 Preview 대비 RMS/최대): 항등 8.1/12.1, BT.709 역 OETF → sRGB 6.3/17.9, BT.1886(2.4) → sRGB 15.0/21.0, 감마 2.2 → sRGB 8.6/12.4, **감마 1.961 → sRGB 0.65/3.32**. 마지막 것은 macOS가 BT.709 표기 영상을 다루는 방식으로 널리 알려진 값이지만 표준이 아니며, 이 저장소에서 문서로 확인한 것은 아니다. 검증 블록 전체에서 "CAL-B 휘도 − 원본 area"는 RMS 4.04·최대 10.15, "보정 전 Preview − 감마 1.961 → sRGB(원본 area)"는 RMS 0.63·최대 5.50(|오차| > 8 없음)이다. **뒷받침되는 가설:** 남은 RES-B 오차는 대부분 공간 표본화가 아니라, 화면 경로의 비선형 색조 변환을 아핀 CAL-B가 나타낼 수 없는 데서 온다. 낮은 패치 ΔE(평균 1.2)는 검증 회색이 오차가 작은 지점(+0.8, +4.3, −1.0)에 놓이고 ΔE가 지각 지표라서 픽셀 한도(최대 8)와 함께 성립한다. AVPlayerLayer의 실제 내부 변환은 **미검증**이다.
+- 앞으로의 선택지(제안, 구현 안 함, 모두 소유자의 G0 결정 필요): (A) 진단 비교에 증명된 잘못된 변환이 있으면 정정한다. 이번 감사에서는 그런 잘못을 찾지 못했다. 기준값을 인코딩 R′G′B′로 두는 것은 설계 선택이다. (B) CAL-B에 물리적으로 정당화된 고정 변환을 명시적으로 넣는다(예: 공개 근거가 있는 전달 함수 뒤 아핀). 새 자유 매개변수는 없지만 문서화되지 않은 플랫폼 동작에 기대는 위험이 있다. (C) 회색 곡선 등 보정 모델 확장. 학습·검증·provenance를 새로 정의해야 하고, 회색 학습 패치가 8개뿐이라 과적합 위험이 있다. (D) 현재 계약을 유지하고 G4 INCONCLUSIVE를 받아들인다. 어느 경우에도 임계값은 완화하지 않는다.
+- 상태: G5 차단, E4-d 수락 안 됨, 실험 합성기 제품 통합 NO-GO, 공개 Spectrum Export 차단.
+- 증거: `/Volumes/Data/ON-THE-FRAME-Builds/Results/`의 `SpExportE4d-G3-20261126-05/`, `SpExportE4d-G4-20261126-03/`(`sha256-evidence.txt` 66개), `SpExportE4d-G4-03-ResBBreakdown-20261126-01/`, `SpExportE4d-G4ToneTriage-20261126-01/`.
+
+### 2026-11-26 Parity 색 계약 v2 고정(G0 개정, 소유자 승인, SP-EXPORT-E4D-G0-COLOR-V2-FREEZE-91)
+
+> **대체됨(2026-11-26, 93):** 이 v2 기록은 역사로 보존한다. 지문 `bb41977d54f69e42`는 폐기했고 [parity-color-v3](#2026-11-26-parity-색-계약-v3-재고정g0-개정-소유자-승인-sp-export-e4d-g0-color-contract-93)이 대체한다.
+
+**확정(소유자 승인, 2026-11-26).** 통합 `parity-color-v2` 계약 "승인(초안 그대로)", CAL-B v2 제약 "|M−I| ≤ 0.10, |b| ≤ 0.04". DEBUG parity 진단 전용의 G0 개정이다. D-041·D-042·O-04, 임계값 v1(`b2cd7ba0367c680d`, 파일 변경 없음), 후보 6개(area·bilinear·catmullRom·mitchell·lanczos2·lanczos3), RES 한도 RMS ≤ 2·최대 ≤ 8은 그대로다. 제품 합성기·공개 Export·출력 색 정책은 바꾸지 않는다. 소스 구현·fixture·빌드·G4/G5는 승인되지 않았고 시작하지 않았다. 89번 제안(고정 화면 변환 가설 + 제약 보정)과 90번 감사(BT.709·SMPTE-C 비색 통합)를 합쳤고, 89번의 오류 셋(비 BT.709 원색 INCONCLUSIVE 규칙, 표기 없는 M4–M6를 독립 자료로 본 것, managed 선형화 미지정)을 정정했다. 승인 원문·정의 문자열·초안 지문: 외부 `SpExportE4d-G0ColorV2-Freeze-20261126-01/`(`contract-v2-draft.md`, `canonical.txt`, `owner-approval.txt`).
+
+- 지위: γ 1.96은 진단 **가설**이다(Apple 문서의 "approximately 1.96", 87번 G4-03 증거로 고른 값이라 독립 확인이 아님). AVPlayerLayer의 보편 동작으로 확정하지 않는다. 원색·전달 함수·Y′CbCr 행렬은 서로 다른 축이며, BT.601 행렬에서 BT.601 전달 함수를 추론하지 않는다.
+- 지원 선언(트랙 선언만, G2 정정 그대로): 원색 `ITU_R_709_2` 또는 `SMPTE_C`(D65), 전달 함수 `ITU_R_709_2`만, 행렬 `ITU_R_709_2` 또는 `ITU_R_601_4`, 범위는 명시 또는 디코딩 버퍼 판별(추정 금지). 그 밖의 값, 표기 없음·일부·모순은 managed 색 판정 INCONCLUSIVE이고, 표기 없는 원본은 C6 가설 기록만 남는다.
+- 예측 사슬(순서 고정): 선언 행렬·범위로 디코딩 → 인코딩 자르기(E-clip, 기록) → 인코딩 영역 공간 예측(후보 6개) → 채널별 max(0, V)^1.96 → 공개 색도로 계산한 선언 원색 → XYZ(D65) → 선형 sRGB(색 순응 없음. 709는 항등, SMPTE-C는 거의 항등인 행렬, 행 합 1) → 선형 자르기(G-clip) → sRGB OETF(IEC 61966-2-1) → 예측 캡처값 P → CAL-B v2. 캡처에 역변환을 적용하는 방식은 쓰지 않는다. 인코딩 영역 공간 예측은 G4 checker1 근거이며 601 자료에서는 미검증이다.
+- 범위 밖 색: E-clip은 디코딩 R′G′B′를 [0, 1]로, G-clip은 선형 sRGB 채널을 각각 [0, 1]로 자른다. 표본마다 자르기 전 값, 자른 채널 수, 최대 |Δ|를 남기고, G-clip은 자르기 전후 ΔE00(gamut loss)도 기록한다. 판정은 자른 뒤 P로 하며 자른 표본을 빼지 않는다(detail에 수와 최대 gamut loss). 알려진 예: fixture 패치 11·12·16은 SMPTE-C에서 선형 최소 −0.0034다.
+- managed Lab(`lab.v2`): 기대값은 원본 → γ 1.96 → 선언 원색 → G-clip 뒤 XYZ, 관찰값은 CAL-B v2로 보정한 캡처 → sRGB EOTF → sRGB 원색 XYZ다. D65 기준 백색(0.95047, 1, 1.08883), CIE 1976 Lab, ΔE00, 문턱값 v1은 그대로다. v1의 BT.1886 γ 2.4 선형화(`lab.v1`)는 raw 기록부에서만 쓰며, Export 쪽 C5 수락 계약(Export 대 원본)은 변경 없이 유지한다. managed 판정에 `lab.v1`을 쓰지 않는다.
+- 두 기록부: RAW(원시 Preview 화소, 디코딩 Export 화소, 선언, 캡처 표현, 프레임 신원·시간·기하, 원시 차이 RECORDED, provenance)와 MANAGED(P, 동결 CAL-B v2, 잔여 색 차이, `managed(parity-color-v2)`가 붙은 한정 판정). managed 일치를 원시 화소 일치라고 쓰지 않는다.
+- 기준 소유:
+  - raw: `compositor.*`·`export.*`, 안정·캡처 진단, 신원·시간, 기하·마스크·가장자리(보정 crop 밝기를 쓰면 `representation=managed-calibrated` 기록), `gapBlackExport`, `planActiveLayers`, `anchorMean`, `CAL.sourceDeclaration`, `previewVsExportPreCalibration`(RECORDED), `outputConversion`·C7, `C5.sourceInterpretation`·`C5.exportFollowsDeclaration`(`lab.v1`), C6(RECORDED), C1/C2 `exportPixels`·`patchDE`, C3, C4(RECORDED), `baseline.builtinLaneDependence`.
+  - managed: `gapBlackPreview`, `CAL.reference`·`CAL.patches`(기준 P), `CAL-B.calibration`, `CAL-V.residual`, `RES-B.*`, `RES-C.*`, `frameK.fidelity`, `previewVsExportColour`, `C5.previewFollowsDeclaration`(`lab.v2`), C1/C2 `previewPixels`.
+  - 합성: `C5.M2`·`C5.M3`(raw Export ∧ managed Preview. M2도 평가 가능하다), `C5.declaredInterpretation`, `C1.realMultiLayerInvariance`, `C2.emptyLaneInvariance`, `D041.conformance` = C1 ∧ C3 ∧ C5. managed 요소가 있으므로 PASS여도 "D-041 PASS(managed parity-color-v2, 이 Mac·이 화면)"까지만 주장한다. gate.py 단계 판정은 필수 check별로 이 소유를 따른다.
+- CAL-B v2: v1과 같은 3×3 + 오프셋(매개변수 12개). 학습 16·검증 8(2, 5, 8, 12, 14, 17, 20, 23), 회색 단조 조건 그대로. 계약 상수(데이터를 보기 전에 고정)는 행렬 원소 |M−I| ≤ 0.10, 오프셋 |b| ≤ 0.04(0…1)다. 넘으면 정규화하거나 잘라 맞추지 않고 `CAL-B.calibration` INCONCLUSIVE("residual outside parity-color-v2")로 두며, RES-B·RES-C로 가지 않는다(D-042). 항등과의 거리를 동결 모델에 기록한다. 이 상수는 색 계약 지문에 들어가고 임계값 v1과는 별개다.
+- 화면 조건: provenance에 화면 프로필, backing scale, 캡처 색 공간을 남긴다. 캡처가 sRGB가 아니거나 CAL-B와 조건이 다르면 기존 규칙대로 거부하거나 INCONCLUSIVE로 둔다.
+- 독립 검증:
+  - 정의 문자열·지문·구현 소스 해시를 고정한 뒤에만 새 데이터를 만든다. 고정 뒤 γ·순서·행렬·자르기·제약을 바꾸면 v3이다.
+  - 회귀 증거(독립 아님): G4 CAL·RES 재실행, M3(CAL과 같은 패치 값·같은 709 표기).
+  - M2는 SMPTE-C 원색의 독립 증거이지만 패치 값 집합이 같아 완전 독립은 아니다.
+  - 표기 없는 M1·M4·M5·M6은 색 관리 변환의 증거가 아니다.
+  - 필요한 독립 자료: 새 표기 BT.709 fixture와 새 표기 SMPTE-C/601 fixture. 다른 회색 단계·채도·경계 색, 전달 함수 `ITU_R_709_2` 명시, 검증 전용, G2 개정으로 별도 승인.
+  - CAL·RES 학습·검증 분리를 유지한다.
+  - 실패하면 보존하고 γ·문턱값을 다시 맞추지 않으며 새 소유자 설계 결정을 요구한다.
+  - 구현 단계에서 SMPTE-C → sRGB 행렬과 사슬을 지원 API(ColorSync 또는 CGColorConversion)의 수치 참조와 비교한다. 그 전까지 행렬은 "공개 색도로 계산, 독립 확인 전"이다.
+- 버전: `colorContract = {"id": "parity-color-v2", "fingerprint": FNV-1a 64(정의 문자열)}`(임계값 지문과 같은 방식, 별개). 결과·동결 CAL-B·동결 RES-B·provenance·앱 load*·실행기/gate.py 검증에 기록한다. v2 실행에서 colorContract가 없거나 다른 동결 모델은 앱과 gate.py가 모두 거부한다(G4-01·02·03 v1 모델 자동 거부). D-042 순서(CAL-B v2 → RES-B v2 → RES-C) 그대로다. 외부 정의 문자열의 초안 지문은 `bb41977d54f69e42`이며, 구현의 정준 문자열이 이를 재현하는지는 구현 단계에서 확인한다(미검증).
+- 보관본 기록 정정: `ON-THE-FRAME-Archives/derived-data-archive-20261122T134449Z`와 `…-20261123T064711Z`는 2026-11-23 소유자 승인 ARTIFACT-CLEANUP-16에 따라 삭제됐다(`Results/Cleanup-Plan-20261123-01/deletion-log.txt`·`final-deletion-manifest.txt`, HANDOFF의 SP-EXPORT-E3-CHECKPOINT 절에 있는 정확한 28경로 삭제 기록). 설명되지 않은 누락 파일이 아니다. 89번 결정 자료의 "설명되지 않은 부재" 서술은 틀렸다.
+- 상태: 구현 안 함. G4 INCONCLUSIVE(G4-03 그대로), RES-C NOT RUN, G5 차단, **E4-d 수락 안 됨**, 실험 합성기 제품 통합 NO-GO, 공개 Spectrum Export 차단. 다음은 각각 별도 승인이다: v2 소스 구현과 순수 시험, G2 독립 fixture 개정, 묶음 A 보관 이동, G3 빌드, G4(CAL-B부터 새로).
+
+### 2026-11-26 Parity 색 계약 v3 재고정(G0 개정, 소유자 승인, SP-EXPORT-E4D-G0-COLOR-CONTRACT-93)
+
+**확정(소유자 승인, 2026-11-26).** 92번 일관성 감사가 v2에서 모호한 점 셋을 찾았고, 소유자가 다음 셋을 승인했다.
+1. 범위 출처: "승인: 트랙 명시만"
+2. CAL-B 의미와 판정 우선순위: "승인"
+3. 계약 버전: "v3 발행, v2 폐기"
+
+고정 후 변경 규칙에 따라 `parity-color-v2`(지문 `bb41977d54f69e42`)를 폐기하고 **`parity-color-v3`**를 발행한다. v2 기록은 위에 역사로 보존한다. 아래에 적지 않은 v2 정의(지원 선언, 예측 사슬, 자르기, `lab.v2`, 기록부 소유, 독립 검증, 화면 조건)는 v3 정준 문자열에 그대로 들어 있다. D-041·D-042·O-04와 임계값 v1(`b2cd7ba0367c680d`, 파일 해시 `70496fbf…` 변경 없음), 후보 6개는 바꾸지 않았다. 소스 구현·fixture·빌드·G4/G5는 하지 않았다.
+
+- **C5 원본 범위 출처(선택지 B, G1 결정 4·G2 정정 유지):**
+  - C5의 원본 범위 선언은 트랙의 `FullRangeVideo` 명시 값만 인정한다. 이 값이 없으면 범위는 "선언 없음"이다.
+  - 디코딩 버퍼의 범위(420v = video)는 디코딩과 화소 계산(`conversion`)에만 쓰며 원본 선언이 아니다.
+  - 버퍼 첨부는 관찰로만 남는다. 선언된 값을 뒷받침하거나 모순을 드러낼 뿐 빈 선언을 채우지 않는다.
+  - 트랙과 버퍼가 모순하면 두 값을 모두 기록하고 C5는 INCONCLUSIVE다. 조용히 PASS하지 않는다.
+  - 표기 fixture(M2 `otf-SD601`, M3 `otf-HD709`)는 트랙에 `FullRangeVideo`가 명시적으로 false이고 버퍼와 일치하므로(G2 실측) C5 적격성이 유지된다.
+- **CAL-B v3 수치 의미:**
+  - 적용식: `out = clamp01(M·capture + b)`
+  - capture: 정규화된 sRGB 인코딩 RGB(0…1)
+  - M과 b: 저장된 행 우선 3×4 행렬에서 각 행의 0~2열이 M, 3열이 b
+  - 적합: 학습 패치 16개만으로 목표 P에 대한 최소제곱
+  - 목표 P: 양자화하지 않은 managed 예측값(0…1 실수)
+  - 출력: 마지막 출력 경계까지 부동소수로 유지
+  - 허용 제약(원소별, 경계값 포함): |M[i][j] − I[i][j]| ≤ 0.10, |b[i]| ≤ 0.04(정규화 0…1)
+  - 제약에 맞추려고 매개변수를 자르거나 다시 적합하지 않는다.
+- **CAL-B 판정과 기록:**
+  - 따로 기록하는 세 항목: (A) 제약 충족 여부, (B) 검증셋 8개의 ΔE00(`lab.v2`, 임계값 v1의 평균·최대), (C) v1 회색 단조 조건.
+  - 우선순위:
+    - 제약 위반 → INCONCLUSIVE
+    - 제약 충족이지만 B 또는 C 실패 → FAIL
+    - 모두 충족 → PASS
+  - PASS가 아니면 RES-B·RES-C로 가지 않는다(D-042).
+  - 전체 판정이 INCONCLUSIVE여도 검증 실패가 있었다면 그것을 FAIL로 명시해 남긴다. 부정적 증거를 감추지 않는다.
+- **정준 직렬화:**
+  - 고정 필드 순서, `key=value`, 필드는 `;`로 연결
+  - 키와 값에는 `;`와 `=`가 들어가지 않는다. 값 안에서는 `/`가 구절, `:`가 이름표, `,`가 목록을 나누고, `-le-`는 ≤를 뜻한다.
+  - ASCII만 쓰는 UTF-8, 끝 줄바꿈 없음
+  - 숫자는 계약에 적힌 십진 문자열 그대로 쓴다. 부동소수 값을 출력하거나 지역 설정에 따라 포맷하지 않는다. 예: `0.10`은 `0.1`이 되면 안 된다.
+  - FNV-1a 64(초깃값 `0xcbf29ce484222325`, 곱수 `0x100000001b3`, 바이트마다, mod 2^64), 소문자 16자리 hex. `Fingerprint.fnv`와 같은 공식이다.
+- **정본 문자열:** 외부 `SpExportE4d-G0ColorV3-Freeze-20261126-01/canonical-v3.txt`
+  - 필드 46개, **3,665바이트**
+  - SHA-256 `f45297f1af24971e69dac992157ccb64448d858fb76a99a3065b2e90438a38bb`
+  - **FNV-1a 64 `22521502dd4ea3e1`**: Python과 Perl(bigint), 서로 독립인 두 구현이 일치
+  - 생성 스크립트는 `make-canonical.py`
+  - 구현은 이 바이트를 그대로 재현해야 한다. Swift에서 재현됐는지는 구현 단계에서 확인한다(미검증).
+- **계약 이력:**
+  - v2 `bb41977d54f69e42`: 2026-11-26 승인, 같은 날 폐기(모호함 셋)
+  - v3 `22521502dd4ea3e1`: 현행
+  - v2 지문을 재사용하지 않는다.
+  - v3 실행에서는 `colorContract`가 없거나 다른 동결 CAL-B·RES-B 모델(v1 모델과 v2 모델 모두)을 앱과 gate.py가 거부한다.
+- **수락 경로 유지:**
+  - 표기 BT.709(M3)와 SMPTE-C(M2)는 적격이다. C5.M2와 C5.M3는 raw Export ∧ managed Preview다.
+  - `D041.conformance` = C1 ∧ C3 ∧ C5. managed 요소가 있으므로 "이 Mac·이 화면" 한정을 붙인다.
+  - raw와 managed 기록부 분리, 동결 CAL-B → RES-B → RES-C 순서, 후보 6개, 임계값 v1, 독립 검증 요건(새 표기 BT.709·SMPTE-C fixture, G2 개정으로 별도 승인)을 모두 유지한다.
+  - 제품 Preview·Export는 바꾸지 않는다.
+- **남은 일(각각 별도 승인):**
+  - v3 소스 구현과 순수 시험: Swift 정준 문자열 재현, ColorSync 또는 CGColorConversion 수치 참조, 판정 우선순위, 모델 거부
+  - G2 독립 fixture 개정
+  - 필요하면 묶음 A 보관 이동
+  - G3 빌드
+  - CAL-B부터 새 G4
+- **상태:** G4 INCONCLUSIVE, RES-C NOT RUN, G5 차단, **E4-d 수락 안 됨(NO-GO)**, 실험 합성기 제품 통합 NO-GO, 공개 Spectrum Export 차단.
+
+**구현 상태(2026-11-26, SP-EXPORT-E4D-COLOR-V3-CORE-95, 소유자 승인 "승인").** 확정 결정의 변경은 없다(v3 계약·지문·임계값 v1 그대로).
+- 새 DEBUG 순수 파일 `FullPreviewParityColorV3.swift`에 v3 계산 핵심만 구현했다.
+  - Swift 정준 바이트가 `canonical-v3.txt`와 같다(3,665바이트, 46필드, SHA-256 일치, FNV-1a 64 `22521502dd4ea3e1`, 기존 `Fingerprint.fnv`와도 일치).
+  - 허용 제약은 저장된 이진 값으로 비교하며 허용 오차가 없다(보고된 관찰). 예: 대각 1.10은 이진 편차가 0.10000000000000009이므로 거부되고, 비대각 ±0.10과 오프셋 ±0.04는 허용된다. 소수 경계 처리를 따로 정할지는 소유자의 열린 질문이다.
+- 실행 경로에는 연결하지 않았다. 기존 v1 판정은 바뀌지 않았다.
+- 시험(외부 `SpExportE4d-ColorV3Core-20261126-01/`): v3 A–T 88/0, 기존 순수 회귀 17/17·29/29·52/52, type-check 오류·경고 0.
+- 남은 일: 통합, G2 독립 fixture, G3, G4/G5(각각 별도 승인). E4-d 수락 안 됨.
+
+**구현 정정과 판정 분류(2026-11-26, SP-EXPORT-E4D-COLOR-V3-CLOSURE-96, 소유자 승인 둘 "승인 (권장)").** v3 계약 문자열·지문(`22521502dd4ea3e1`)·수치 제약·임계값 v1은 바꾸지 않았고 새 버전도 아니다.
+- **CAL-B 경계:** |M−I| ≤ 0.10과 |b| ≤ 0.04를 경계 포함 직접 구간 비교로 구현한다: 대각 [0.90, 1.10], 비대각 [−0.10, 0.10], 오프셋 [−0.04, 0.04], 유한값만. 각 소수 경계를 가장 가까운 Double 상수와 직접 비교하며 엡실론은 두지 않는다. 95번의 뺄셈 비교가 저장된 1.10을 거부한 구현 결함을 정정한 것이다.
+- **판정 분류(Judge·SelfTest 변경 없음, G0·D-041 기준 변경 없음):**
+  - `execution`은 실행 메타데이터다(raw도 managed도 아님).
+  - `C1`·`C2`·`C1.frameK`·`C2.frameK`는 합성 기록부에 속한 C1/C2 전제 조건 표식(INCONCLUSIVE/NOT RUN)이다. 하위 판정의 raw·managed 소유는 93번 표 그대로다.
+- 시험: v3 131/0, 회귀 17/17·29/29·52/52.
+
+**구현 상태(2026-11-26, SP-EXPORT-E4D-COLOR-V3-G4-INTEGRATION-97, 소유자 승인 "승인").** 새 G0 정책은 없다(v3 계약·지문·임계값 v1·후보 6개 그대로).
+- 범위와 파일: DEBUG G4 경로(CAL-B·CAL-V·RES-B·RES-C·frameK.fidelity·동결 모델 수락)를 v3 핵심 함수로 연결했다. 새 순수 파일 `FullPreviewParityG4V3.swift`를 추가하고, `FullPreviewParityModels.swift`에는 선택 필드(v3 식별자·판정·결합 지문)와 선택 출력 변환(없으면 v1 동작 그대로)을 더했으며, `FullPreviewParitySelfTest.swift`에서 연결했다.
+- 모델 처리: v1·v2·변경된 모델은 거부하고 이전 파일은 이전하지 않는다. M 장면의 v1 Preview 색 판정에는 v3 CAL-B를 넘기지 않는다(C1–C7 통합 전까지 INCONCLUSIVE).
+- 시험(외부 `SpExportE4d-ColorV3G4Integration-20261126-01/`): G4 순수 시험 59/0(첫 실행 하네스 오류 1건 기록), 회귀 131/17/29/52 모두 통과.
+- 미검증: SelfTest 컴파일(NOT VERIFIED)과 런타임은 확인하지 않았다.
+- 결과 형식: 바뀌었으므로 runner v4가 필요하다(요구 사항 외부 기록). 그 전까지 G4 실행은 막힌다.
+- E4-d 수락 안 됨.
+
+**구현 상태(2026-11-26, SP-EXPORT-E4D-COLOR-V3-G5-INTEGRATION-98, 소유자 승인 "승인").** 새 G0 정책은 없다(계약 v3·임계값 v1·D-041·D-042 그대로).
+- 감사: C1–C7 실제 경로를 93·96 원장 표와 비교했으며 충돌은 없었다.
+- 변경 범위: DEBUG G5 판정을 v3로 연결했다. 새 순수 파일은 `FullPreviewParityG5V3.swift`이고, 그 밖에 Judge(선택 매개변수와 managed 계산)와 SelfTest(연결)를 바꿨다.
+  - managed 색: previewVsExportColour·C5.previewFollowsDeclaration를 lab.v2로 판정한다.
+  - raw 기하: 마스크·previewEdge·geometry는 raw 기하로 유지하고, 같은 표현 검출과 표현 값만 기록한다.
+  - gapBlackPreview를 managed로 옮겼다.
+  - C1/C2 previewPixels는 같은 v3 CAL-B로 보정된 장면끼리만 비교한다.
+  - C5.M2/M3는 판정한 프레임마다 Export와 Preview 판정이 모두 있어야 한다.
+- 시험: G5 54/0(첫 실행 하네스 기대값 오류 2건 기록), 회귀 59/131/17/29/52 모두 통과.
+- 미검증: SelfTest 컴파일(NOT VERIFIED)과 런타임은 확인하지 않았다.
+- runner v4 요구 사항은 외부에 기록했다. E4-d 수락 안 됨.
+
+**구현·검증 상태(2026-11-26, SP-EXPORT-E4D-RUNNER-V4-99 / G3-COLOR-V3-BUILD-100 / G4-COLOR-V3-RUNTIME-101).** 새 G0 정책은 없다(G0·D-041·D-042·parity-color-v3·임계값 v1 그대로).
+- **runner v4(외부, 오프라인 준비 완료):** gate 103/103·runner 33/33(합성). 시험 중 발견한 gate STOP 전달 결함을 고쳤다.
+- **G3-06 Debug 빌드 PASS:** v3 파일 셋과 수정한 Models·Judge·SelfTest가 처음 컴파일됐다. parity 파일 경고 0, 컴파일러 최대 RSS 1242 MiB.
+- **G4-04 실제 실행 PASS:** 내장 XDR 화면, backing scale 2, 960×540 px.
+  - CAL-B PASS(허용성 통과, 검증셋 ΔE00 평균 0.180·최대 0.333)
+  - CAL-V RECORDED
+  - RES-B area(검증 RMS 0.333·최대 2.992)
+  - RES-C PASS(RMS 0.674·최대 2.992)
+- **범위:** 이 화면에 한정한 managed 판정이다. 다른 화면에서는 재현을 확인하지 않았다.
+- **남은 것:** G5 NOT RUN, 독립 표기 검증 대기, E4-d 수락 안 됨, 공개 Spectrum Export 차단.

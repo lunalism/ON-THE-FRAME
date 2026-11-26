@@ -13,6 +13,11 @@ import ScreenCaptureKit
 /// - pixels stay in memory; only while a grab is armed is the video rectangle copied, and only the stable crop is returned
 /// Differences from the F1 capture: the stream asks for sRGB (`colorSpaceName`); a grab ends when the pixel fingerprint of the
 /// Preview ROI is stable (`PreviewStability`). Stability never checks the source frame: identity is a separate judgment.
+/// SP-EXPORT-E4D-G4-STALE-CAPTURE-FIX-79: a grab is armed with a freshness fence (mach ticks, taken after the current seek is
+/// confirmed complete) and a generation. Complete samples displayed at or before the fence, with no display time, or out of order
+/// are refused at receipt before any pixel work; a processed sample is committed only into the grab whose generation it was
+/// received under. For frame-coded fixtures a stable fresh run is accepted only if its frame code is the requested one; a fresh
+/// stable run with another code is recorded and, at the timeout, returned so the separate identity judgment can FAIL it.
 final class FullPreviewWindowCapture: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     struct Geometry: Codable, Sendable {
         let windowID: UInt32
@@ -22,7 +27,7 @@ final class FullPreviewWindowCapture: NSObject, SCStreamOutput, SCStreamDelegate
         let displayProfile: String
     }
     struct Readiness: Codable, Sendable { let ready: Bool; let reason: String; let completeSamples: Int; let otherSamples: Int }
-    struct GrabResult: Sendable { let crop: PreviewCrop?; let note: String; let samples: [StabilitySample] }
+    struct GrabResult: Sendable { let crop: PreviewCrop?; let note: String; let samples: [StabilitySample]; let diagnostics: GrabDiagnostics? }
     enum CaptureError: Error, CustomStringConvertible {
         case geometry(String), windowNotOffered(String)
         var description: String { switch self { case .geometry(let s): "geometry: \(s)"; case .windowNotOffered(let s): "window not offered: \(s)" } }
@@ -34,14 +39,16 @@ final class FullPreviewWindowCapture: NSObject, SCStreamOutput, SCStreamDelegate
     private let lock = NSLock()
     // Guarded by `lock`:
     private var firstComplete: Double?, terminal: String?, streamError: String?
-    private var completeCount = 0, otherCount = 0, seq = 0
+    private var completeCount = 0, otherCount = 0, seq = 0, generations = 0
     private var armed: Armed?
     // Main actor only:
     private var stream: SCStream?
 
     private struct Armed {
-        var stability = PreviewStability()
-        var crop: PreviewCrop?          // crop of the latest sample of the current identical run
+        var grab: FreshGrab
+        let expect: ExpectedPreviewCode?
+        var acceptedCrop: PreviewCrop?   // crop of the sample that completed the accepted fresh stable run
+        var lastWrongCrop: PreviewCrop?  // crop of the latest fresh stable run with another frame code
     }
 
     private init(geometry: Geometry, selected: String) { self.geometry = geometry; self.selectedWindow = selected }
@@ -108,24 +115,50 @@ final class FullPreviewWindowCapture: NSObject, SCStreamOutput, SCStreamDelegate
         }
     }
 
-    /// Arms a grab and waits (bounded by the v1 timeout of 10 s) until the Preview ROI fingerprint is stable. Returns the crop of
-    /// the last sample of the stable run and the logged samples (timestamps, statuses, ROI, fingerprints). No crop on timeout,
-    /// error or a terminal status. The caller judges source identity separately on the returned crop.
-    @MainActor func grab() async -> GrabResult {
-        lock.withLock { armed = Armed() }
+    /// Arms a grab of a new generation with the freshness fence `fenceTicks` (mach absolute time) and waits, bounded by the v1 timeout
+    /// of 10 s, until a fresh stable run is accepted (v1 rule over fresh samples only; with `expect`, also the requested frame code).
+    /// At the timeout, the latest fresh stable run with a wrong code is returned (identity is judged, and fails, separately);
+    /// otherwise no crop. Error, terminal status or a stopped stream: no crop. Returns the logged samples and diagnostics.
+    @MainActor func grab(fenceTicks: UInt64, expect: ExpectedPreviewCode?) async -> GrabResult {
+        lock.withLock {
+            generations += 1
+            armed = Armed(grab: FreshGrab(generation: generations, fenceTicks: fenceTicks, identityRequired: expect != nil), expect: expect)
+        }
         let t0 = CACurrentMediaTime()
-        var note = "timeout after \(ParityThresholdsV1.stableTimeoutSeconds) s without a stable fingerprint"
+        var stopNote: String?, stopOutcome = ""
         var crop: PreviewCrop?
         while CACurrentMediaTime() - t0 < ParityThresholdsV1.stableTimeoutSeconds {
-            let (a, err, term) = lock.withLock { (armed, streamError, terminal) }
-            if let err { note = "capture error: \(err)"; break }
-            if let term { note = "terminal status: \(term)"; break }
-            if stream == nil { note = "stream stopped"; break }
-            if let a, a.stability.stable, let c = a.crop { crop = c; note = "stable: \(a.stability.run.count) identical samples"; break }
+            let (accepted, err, term) = lock.withLock { (armed?.acceptedCrop, streamError, terminal) }
+            if let err { stopNote = "capture error: \(err)"; stopOutcome = "captureError"; break }
+            if let term { stopNote = "terminal status: \(term)"; stopOutcome = "terminal"; break }
+            if stream == nil { stopNote = "stream stopped"; stopOutcome = "streamStopped"; break }
+            if let accepted { crop = accepted; break }
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
-        let log = lock.withLock { () -> [StabilitySample] in let l = armed?.stability.log ?? []; armed = nil; return l }
-        return GrabResult(crop: crop, note: note, samples: log)
+        let final = lock.withLock { () -> Armed? in let a = armed; armed = nil; return a }
+        guard let a = final else { return GrabResult(crop: nil, note: "grab state missing", samples: [], diagnostics: nil) }
+        let g = a.grab, fresh = "fresh samples displayed after the boundary"
+        let counts = g.counts.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")
+        let identityText = a.expect == nil ? "identity not required (uncoded)" : "frame code matched"
+        if let crop {
+            return GrabResult(crop: crop, note: "stable: \(g.stability.run.count) identical \(fresh); \(identityText); generation \(g.generation) [\(counts)]",
+                              samples: g.log, diagnostics: g.diagnostics(outcome: "accepted"))
+        }
+        if let stopNote {
+            return GrabResult(crop: nil, note: stopNote, samples: g.log, diagnostics: g.diagnostics(outcome: stopOutcome))
+        }
+        let outcome = g.timeoutOutcome, timeout = "timeout after \(ParityThresholdsV1.stableTimeoutSeconds) s"
+        switch outcome {
+        case "wrongIdentityAtTimeout":
+            return GrabResult(crop: a.lastWrongCrop, note: "\(timeout): fresh stable capture with a different frame code (\(g.wrongIdentityCount) stable runs); returned for the identity judgment; generation \(g.generation) [\(counts)]",
+                              samples: g.log, diagnostics: g.diagnostics(outcome: outcome))
+        case "noFreshCapture":
+            return GrabResult(crop: nil, note: "\(timeout) without a fresh capture (no complete sample displayed after the boundary); generation \(g.generation) [\(counts)]",
+                              samples: g.log, diagnostics: g.diagnostics(outcome: outcome))
+        default:
+            return GrabResult(crop: nil, note: "\(timeout) without a stable fingerprint over \(fresh); generation \(g.generation) [\(counts)]",
+                              samples: g.log, diagnostics: g.diagnostics(outcome: outcome))
+        }
     }
 
     /// Stops and detaches the stream (idempotent); releases any armed grab state.
@@ -150,40 +183,72 @@ final class FullPreviewWindowCapture: NSObject, SCStreamOutput, SCStreamDelegate
         let arrival = CACurrentMediaTime()
         let info = (CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]])?.first ?? [:]
         let status = (info[.status] as? Int).flatMap(SCFrameStatus.init(rawValue:))
-        let display = (info[.displayTime] as? UInt64).map(Self.seconds(machTicks:))
-        let (n, isArmed) = lock.withLock { () -> (Int, Bool) in
+        let ticks = info[.displayTime] as? UInt64
+        let display = ticks.map(Self.seconds(machTicks:))
+        // Receipt: counters, the generation of the grab armed NOW, and (complete samples) freshness admission before pixel work.
+        // A refused or non-complete sample is committed immediately, under the same lock, into that same grab.
+        enum Receipt { case notArmed, done, process(generation: Int, expect: ExpectedPreviewCode?) }
+        let (n, receipt) = lock.withLock { () -> (Int, Receipt) in
             seq += 1
             if status == .complete { completeCount += 1; if firstComplete == nil { firstComplete = arrival } } else { otherCount += 1 }
             if status == .stopped { terminal = terminal ?? "stopped" }
             if status == .suspended, firstComplete != nil { terminal = terminal ?? "suspended" }
-            return (seq, armed != nil)
-        }
-        guard isArmed else { return }
-        func feed(_ statusText: String, roi: [Int]? = nil, fingerprint: String? = nil, crop: PreviewCrop? = nil) {
-            let sample = StabilitySample(seq: n, arrival: arrival, displayTime: display, status: statusText, roi: roi, fingerprint: fingerprint)
-            lock.withLock {
-                guard var a = armed else { return }
-                a.stability.feed(sample)
-                if let crop, a.stability.run.last?.seq == n { a.crop = crop }   // keep the crop of the run's latest sample only
-                armed = a
+            guard var a = armed else { return (seq, .notArmed) }
+            let g = a.grab.generation
+            func record(_ text: String) -> (Int, Receipt) {
+                let sample = StabilitySample(seq: seq, arrival: arrival, displayTime: display, status: text, roi: nil, fingerprint: nil, generation: g, displayTicks: ticks)
+                _ = a.grab.commit(sample, receiptGeneration: g, identityMatches: nil); armed = a
+                return (seq, .done)
             }
+            switch status {
+            case .complete: break
+            case .idle: return record("idle")
+            case .blank: return record("blank")
+            case .suspended: return record("suspended")
+            case .stopped: return record("stopped")
+            default: return record("other")
+            }
+            let admission = a.grab.admit(displayTicks: ticks)
+            armed = a
+            guard admission == .fresh else { return record(admission.rawValue) }
+            return (seq, .process(generation: g, expect: a.expect))
         }
-        switch status {
-        case .complete: break
-        case .idle: feed("idle"); return
-        case .blank: feed("blank"); return
-        case .suspended: feed("suspended"); return
-        case .stopped: feed("stopped"); return
-        default: feed("other"); return
+        guard case .process(let generation, let expect) = receipt else { return }
+        // Pixel work outside the lock; the sample buffer is only read inside this callback (copied into the crop).
+        var sample = StabilitySample(seq: n, arrival: arrival, displayTime: display, status: "complete", roi: nil, fingerprint: nil, generation: generation, displayTicks: ticks)
+        var crop: PreviewCrop?, matches: Bool?
+        if let pb = CMSampleBufferGetImageBuffer(sampleBuffer), CVPixelBufferGetPixelFormatType(pb) == kCVPixelFormatType_32BGRA {
+            let rect = (info[.contentRect] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0 as CFDictionary) }
+            let sf = (info[.scaleFactor] as? NSNumber)?.doubleValue, cs = (info[.contentScale] as? NSNumber)?.doubleValue
+            switch videoRectInBuffer(width: CVPixelBufferGetWidth(pb), height: CVPixelBufferGetHeight(pb), contentRect: rect, contentScale: cs, scaleFactor: sf) {
+            case .failure:
+                sample = StabilitySample(seq: n, arrival: arrival, displayTime: display, status: "unreadable-geometry", roi: nil, fingerprint: nil, generation: generation, displayTicks: ticks)
+            case .success(let v):
+                if let copied = copyCrop(pb, video: v) {
+                    crop = copied.crop
+                    sample = StabilitySample(seq: n, arrival: arrival, displayTime: display, status: "complete", roi: copied.roi, fingerprint: copied.fingerprint, generation: generation, displayTicks: ticks)
+                    if let expect {
+                        let r = ParityCode.read(placed: expect.placed, luma: ParityCode.cropSampler(copied.crop))
+                        sample.identity = ExpectedPreviewCode.describe(r); matches = expect.matches(r)
+                    }
+                } else {
+                    sample = StabilitySample(seq: n, arrival: arrival, displayTime: display, status: "unusable-buffer", roi: nil, fingerprint: nil, generation: generation, displayTicks: ticks)
+                }
+            }
+        } else {
+            sample = StabilitySample(seq: n, arrival: arrival, displayTime: display, status: "unusable-buffer", roi: nil, fingerprint: nil, generation: generation, displayTicks: ticks)
         }
-        guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer), CVPixelBufferGetPixelFormatType(pb) == kCVPixelFormatType_32BGRA else { feed("unusable-buffer"); return }
-        let rect = (info[.contentRect] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0 as CFDictionary) }
-        let sf = (info[.scaleFactor] as? NSNumber)?.doubleValue, cs = (info[.contentScale] as? NSNumber)?.doubleValue
-        switch videoRectInBuffer(width: CVPixelBufferGetWidth(pb), height: CVPixelBufferGetHeight(pb), contentRect: rect, contentScale: cs, scaleFactor: sf) {
-        case .failure: feed("unreadable-geometry")
-        case .success(let v):
-            guard let copied = copyCrop(pb, video: v) else { feed("unusable-buffer"); return }
-            feed("complete", roi: copied.roi, fingerprint: copied.fingerprint, crop: copied.crop)
+        sample.processingMs = (CACurrentMediaTime() - arrival) * 1000
+        // Commit: only into the grab of the receipt generation (a later grab rejects and counts it; no grab → dropped).
+        lock.withLock {
+            guard var a = armed else { return }
+            let step = a.grab.commit(sample, receiptGeneration: generation, identityMatches: matches)
+            switch step {
+            case .accepted where a.grab.acceptedSeq == n: a.acceptedCrop = crop
+            case .wrongIdentityStable: a.lastWrongCrop = crop
+            default: break
+            }
+            armed = a
         }
     }
 

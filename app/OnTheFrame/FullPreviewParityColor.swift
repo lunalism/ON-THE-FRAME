@@ -39,12 +39,18 @@ struct ColorDeclaration: Codable, Sendable, Equatable {
     }
 }
 
-/// The declared interpretation of one file, kept as four separate properties.
-/// - `resolved`: the complete declaration (primaries, transfer, matrix and explicit range all declared, track and decoded buffer
-///   agreeing). Required for C5. Any property missing in both or contradictory → nil and `problem` (C5 INCONCLUSIVE).
-/// - `conversion`: what is needed to turn the decoded samples into colour: the agreed primaries/transfer/matrix plus the range of the
-///   decoded buffer, which is defined by its pixel format (the reader is asked for 420v = video range). It says nothing about the
-///   source's own range declaration and is nil when primaries/transfer/matrix are not all declared and agreeing.
+/// The colour interpretation of one file, with each source of information kept apart (G2 follow-up correction):
+/// A. `track` — explicit declarations of the source track (format-description extensions). The ONLY source of declarations.
+/// B. `buffer` — attributes observed on decoded buffers. Observations only: decoders attach default tags to untagged media
+///    (G2: untagged SD → SMPTE_C/709/601, untagged HD → 709/709/709), so a buffer value never fills a missing declaration.
+///    It may only corroborate a declared value or reveal a conflict.
+/// C. `decodedPixelFormat` + the decoded range given to `resolve` — the format the reader produced ('420v' = video range by
+///    definition). A conversion property of the samples, never the source's declared range.
+/// D. Diagnostic hypotheses (BT.601 / BT.709) live in `ParityJudge` and are labelled as hypotheses, never stored here.
+/// E. `resolved` — the complete declared interpretation required by C5: primaries, transfer, matrix and explicit range all
+///    declared in the track, with no conflicting buffer observation. Otherwise nil and `problem` (C5 INCONCLUSIVE).
+/// `conversion` turns decoded samples into colour: the track's declared primaries/transfer/matrix (no conflict) plus the decoded
+/// range (C). nil when any of the three is not declared in the track or conflicts — untagged media stays untagged.
 struct DeclaredInterpretation: Codable, Sendable {
     let track: ColorDeclaration
     let buffer: ColorDeclaration
@@ -52,37 +58,48 @@ struct DeclaredInterpretation: Codable, Sendable {
     let problem: String?
     var conversion: ColorDeclaration?
     var decodedPixelFormat: String?
+    /// Properties declared in the track whose buffer observation differs (with both values).
+    var conflicts: [String] = []
+    /// Buffer observations for properties the track does not declare (kept for inspection, never promoted).
+    var bufferOnlyObservations: [String] = []
 
     static func resolve(track: ColorDeclaration, buffer: ColorDeclaration, decodedFullRange: Bool? = nil, decodedPixelFormat: String? = nil) -> DeclaredInterpretation {
-        var out = resolveDeclared(track: track, buffer: buffer)
+        var conflicts: [String] = [], missing: [String] = [], observedOnly: [String] = []
+        func examine<T: Equatable>(_ name: String, _ declared: T?, _ observed: T?) {
+            if let d = declared {
+                if let o = observed, o != d { conflicts.append("\(name): track \(d), decoded buffer \(o)") }
+            } else {
+                missing.append(name)
+                if let o = observed { observedOnly.append("\(name)=\(o) (decoded buffer only, not a declaration)") }
+            }
+        }
+        examine("primaries", track.primaries, buffer.primaries)
+        examine("transfer", track.transfer, buffer.transfer)
+        examine("matrix", track.matrix, buffer.matrix)
+        examine("range", track.fullRange, buffer.fullRange)
+        var resolved: ColorDeclaration?
+        var problem: String?
+        if missing.isEmpty && conflicts.isEmpty {
+            let d = ColorDeclaration(primaries: track.primaries, transfer: track.transfer, matrix: track.matrix, fullRange: track.fullRange, origin: "track declaration")
+            resolved = d
+            problem = d.isSupported ? nil : "declaration outside phase 1 (HDR/wide gamut or unknown)"
+        } else {
+            var parts: [String] = []
+            if !conflicts.isEmpty { parts.append("conflict: " + conflicts.joined(separator: "; ")) }
+            if !missing.isEmpty { parts.append("not declared in the track: " + missing.joined(separator: ", ")) }
+            problem = parts.joined(separator: " | ")
+        }
+        var out = DeclaredInterpretation(track: track, buffer: buffer, resolved: resolved, problem: problem)
+        out.conflicts = conflicts
+        out.bufferOnlyObservations = observedOnly
         out.decodedPixelFormat = decodedPixelFormat
-        if let range = decodedFullRange, let p = agreed(track.primaries, buffer.primaries), let t = agreed(track.transfer, buffer.transfer),
-           let m = agreed(track.matrix, buffer.matrix) {
-            let c = ColorDeclaration(primaries: p, transfer: t, matrix: m, fullRange: range, origin: "conversion (declared primaries/transfer/matrix, decoded \(decodedPixelFormat ?? "buffer") range)")
+        let colourConflict = conflicts.contains { $0.hasPrefix("primaries") || $0.hasPrefix("transfer") || $0.hasPrefix("matrix") }
+        if let range = decodedFullRange, let p = track.primaries, let t = track.transfer, let m = track.matrix, !colourConflict {
+            let c = ColorDeclaration(primaries: p, transfer: t, matrix: m, fullRange: range,
+                                     origin: "conversion (track-declared primaries/transfer/matrix, decoded \(decodedPixelFormat ?? "buffer") range)")
             out.conversion = c.isSupported ? c : nil
         }
         return out
-    }
-    /// The single agreed value (one side declared, or both equal); nil if missing in both or contradictory.
-    static func agreed<T: Equatable>(_ a: T?, _ b: T?) -> T? {
-        switch (a, b) { case let (x?, y?): return x == y ? x : nil; case let (x?, nil): return x; case let (nil, y?): return y; default: return nil }
-    }
-
-    static func resolveDeclared(track: ColorDeclaration, buffer: ColorDeclaration) -> DeclaredInterpretation {
-        func pick<T: Equatable>(_ a: T?, _ b: T?, _ name: String) -> (T?, String?) {
-            switch (a, b) {
-            case let (x?, y?): return x == y ? (x, nil) : (nil, "\(name) contradicts (track \(x), buffer \(y))")
-            case let (x?, nil): return (x, nil)
-            case let (nil, y?): return (y, nil)
-            default: return (nil, "\(name) not declared")
-            }
-        }
-        let p = pick(track.primaries, buffer.primaries, "primaries"), t = pick(track.transfer, buffer.transfer, "transfer")
-        let m = pick(track.matrix, buffer.matrix, "matrix"), r = pick(track.fullRange, buffer.fullRange, "range")
-        let problems = [p.1, t.1, m.1, r.1].compactMap { $0 }
-        guard problems.isEmpty else { return DeclaredInterpretation(track: track, buffer: buffer, resolved: nil, problem: problems.joined(separator: "; ")) }
-        let d = ColorDeclaration(primaries: p.0, transfer: t.0, matrix: m.0, fullRange: r.0, origin: "resolved")
-        return DeclaredInterpretation(track: track, buffer: buffer, resolved: d, problem: d.isSupported ? nil : "declaration outside phase 1 (HDR/wide gamut or unknown)")
     }
 }
 

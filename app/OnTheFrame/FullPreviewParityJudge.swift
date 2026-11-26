@@ -41,8 +41,10 @@ enum ParityJudge {
 
     /// Layer mask of one frame. `layout` lists the expected overlay boxes in output pixels (empty: no overlay expected;
     /// nil: layout unknown → INCONCLUSIVE). `preview` is the calibrated crop or nil (calibration invalid).
+    /// `referencePrediction` (parity-color-v3, task 98): when the Preview crop is CAL-B-calibrated, each reference cell mean is
+    /// brought into the same representation before differencing. Detection only — the mask verdicts stay geometric (raw).
     static func masks(frame: NativeFrame, reference: NativeFrame, layout: [[Double]]?, preview: PreviewCrop?, prefix: String,
-                      calibrationNote: String) -> ([ParityCheck], MaskResult) {
+                      calibrationNote: String, referencePrediction: (@Sendable (Double, Double, Double) -> [Double])? = nil) -> ([ParityCheck], MaskResult) {
         var out: [ParityCheck] = [], r = MaskResult()
         guard frame.width == reference.width, frame.height == reference.height else {
             return ([ParityCheck(name: "\(prefix).mask", verdict: .inconclusive, detail: "frame and reference sizes differ")], r)
@@ -111,7 +113,13 @@ enum ParityJudge {
             let rgb = (ColorMath.clamp(Double(preview.r.data[k]) / 255), ColorMath.clamp(Double(preview.g.data[k]) / 255), ColorMath.clamp(Double(preview.b.data[k]) / 255))
             guard let ycc = ColorMath.ycbcr(rgb, matrix: "ITU_R_709_2") else { continue }
             let n = Double(all[k])
-            let dy = abs(ycc.y - refY[k] / n), dc = max(abs(ycc.cb - refCb[k] / n), abs(ycc.cr - refCr[k] / n))
+            var ry = refY[k] / n, rcb = refCb[k] / n, rcr = refCr[k] / n
+            if let predict = referencePrediction {
+                let q = predict(ry, rcb, rcr)
+                guard let r = ColorMath.ycbcr((ColorMath.clamp(q[0]), ColorMath.clamp(q[1]), ColorMath.clamp(q[2])), matrix: "ITU_R_709_2") else { continue }
+                ry = r.y; rcb = r.cb; rcr = r.cr
+            }
+            let dy = abs(ycc.y - ry), dc = max(abs(ycc.cb - rcb), abs(ycc.cr - rcr))
             if dy > Double(T.maskDeltaY) || dc > Double(T.maskDeltaC) {
                 pmask[k] = true; r.previewMask += 1
                 px0 = min(px0, k % cw); py0 = min(py0, k / cw); px1 = max(px1, k % cw); py1 = max(py1, k / cw)
@@ -229,11 +237,14 @@ enum ParityJudge {
     /// - C5 (tagged sources) requires the complete source declaration — primaries, transfer, matrix and explicit range — from the
     ///   track and decoded buffer; missing or contradictory → INCONCLUSIVE. The expected colour uses the source conversion.
     /// - Untagged sources: BT.601/BT.709 references recorded only (C6); no source range is assumed.
+    /// Managed comparisons (previewVsExportColour, C5.previewFollowsDeclaration) use parity-color-v3 (task 98): the calibrated capture
+    /// against the v3 prediction of the export / declared source in lab.v2. `managedCalibration` = a frozen v3 CAL-B calibrated the
+    /// capture. Raw (previewVsExportPreCalibration) and Export-side C5 (lab.v1) are unchanged.
     static func patchColour(_ patches: [PatchMeasure], source: DeclaredInterpretation, output: DeclaredInterpretation, tagged: Bool,
-                            calibrationReference: ColorDeclaration?, prefix: String) -> [ParityCheck] {
+                            managedCalibration: Bool, prefix: String) -> [ParityCheck] {
         var out: [ParityCheck] = []
         out.append(ParityCheck(name: "\(prefix).C7.outputDeclaration", verdict: .recorded,
-                               detail: "output track \(describe(output.track)); decoded buffer \(describe(output.buffer)); declared complete: \(output.resolved != nil) (\(output.problem ?? "ok"))"))
+                               detail: "output track declaration \(describe(output.track)); decoded buffer observation \(describe(output.buffer)); declared complete: \(output.resolved != nil) (\(output.problem ?? "ok")); buffer-only observations \(output.bufferOnlyObservations); conflicts \(output.conflicts)"))
         guard let outDecl = output.conversion else {
             out.append(ParityCheck(name: "\(prefix).outputConversion", verdict: .inconclusive, detail: "output primaries/transfer/matrix not all declared and agreeing"))
             return out
@@ -244,41 +255,48 @@ enum ParityJudge {
             return ColorMath.lab((v[0], v[1], v[2]), primaries: p, transfer: t)
         }
         let srgb = ColorDeclaration(primaries: "IEC_sRGB", transfer: "IEC_sRGB", matrix: nil, fullRange: true, origin: "capture sRGB")
-        var preCal: [Double] = [], postCal: [Double] = []
+        var preCal: [Double] = []
         for p in patches {
             if let e = lab(p.export, outDecl), let raw = labRGB(p.previewRaw, srgb) { preCal.append(ColorMath.deltaE2000(e, raw)) }
-            if let e = lab(p.export, outDecl), let c = labRGB(p.previewCalibrated, calibrationReference) { postCal.append(ColorMath.deltaE2000(e, c)) }
         }
+        let tag = ParityG5V3.tag
+        func managedNote(_ m: ParityG5V3.PatchDE) -> String { "clipped patches \(m.clipped), max gamut loss ΔE00 \(String(format: "%.4f", m.maxGamutLoss)), pairs \(m.pairs); none excluded" }
         let pre = Distribution(preCal)
         out.append(ParityCheck(name: "\(prefix).previewVsExportPreCalibration", verdict: .recorded,
                                detail: String(format: "raw capture (sRGB) vs export: ΔE00 mean %.3f p95 %.3f max %.3f (n %d) — recorded only", pre.mean, pre.p95, pre.max, pre.count),
                                values: ["mean": pre.mean, "p95": pre.p95, "max": pre.max]))
-        if calibrationReference == nil {
-            out.append(ParityCheck(name: "\(prefix).previewVsExportColour", verdict: .inconclusive, detail: "calibration not usable"))
+        if !managedCalibration {
+            out.append(ParityCheck(name: "\(prefix).previewVsExportColour", verdict: .inconclusive, detail: "\(tag): no frozen parity-color-v3 CAL-B (calibration not usable)"))
+        } else if let od = ParityG5V3.managedDeclaration(output),
+                  let m = ParityG5V3.managedPatchDE(expectedYCbCr: patches.map(\.export), observed: patches.map(\.previewCalibrated), declaration: od) {
+            out.append(distributionCheck("\(prefix).previewVsExportColour", Distribution(m.des), mean: T.previewVersusExportMeanDE, p95: nil,
+                                         max: T.previewVersusExportMaxDE, detail: "\(tag): calibrated preview vs v3 prediction of the export (lab.v2; \(managedNote(m)))"))
         } else {
-            out.append(distributionCheck("\(prefix).previewVsExportColour", Distribution(postCal), mean: T.previewVersusExportMeanDE, p95: nil,
-                                         max: T.previewVersusExportMaxDE, detail: "calibrated preview vs export"))
+            out.append(ParityCheck(name: "\(prefix).previewVsExportColour", verdict: .inconclusive, detail: "\(tag): output declaration outside parity-color-v3"))
         }
         if tagged {
-            guard source.resolved != nil, source.problem == nil, let srcDecl = source.conversion else {
+            // C5 needs E (complete track declaration, no conflict); decoded-buffer observations never complete it.
+            guard source.resolved != nil, source.problem == nil, source.conflicts.isEmpty, let srcDecl = source.conversion else {
                 out.append(ParityCheck(name: "\(prefix).C5.sourceInterpretation", verdict: .inconclusive,
                                        detail: "declared source interpretation unusable (primaries, transfer, matrix and range are all required): \(source.problem ?? "unresolved")"))
                 return out
             }
-            var ex: [Double] = [], pv: [Double] = []
+            var ex: [Double] = []
             for p in patches {
                 guard let s = lab(p.source, srcDecl) else { continue }
                 if let e = lab(p.export, outDecl) { ex.append(ColorMath.deltaE2000(s, e)) }
-                if let c = labRGB(p.previewCalibrated, calibrationReference) { pv.append(ColorMath.deltaE2000(s, c)) }
             }
             let declaredRange = source.resolved?.fullRange == true ? "full" : "video"
             out.append(distributionCheck("\(prefix).C5.exportFollowsDeclaration", Distribution(ex), mean: T.sourceInterpretationMeanDE, p95: T.sourceInterpretationP95DE,
                                          max: T.sourceInterpretationMaxDE, detail: "export vs declared source (\(srcDecl.primaries!)/\(srcDecl.transfer!)/\(srcDecl.matrix!), declared range \(declaredRange))"))
-            if calibrationReference == nil {
-                out.append(ParityCheck(name: "\(prefix).C5.previewFollowsDeclaration", verdict: .inconclusive, detail: "calibration not usable"))
+            if !managedCalibration {
+                out.append(ParityCheck(name: "\(prefix).C5.previewFollowsDeclaration", verdict: .inconclusive, detail: "\(tag): no frozen parity-color-v3 CAL-B (calibration not usable)"))
+            } else if let sm = ParityG5V3.managedDeclaration(source),
+                      let m = ParityG5V3.managedPatchDE(expectedYCbCr: patches.map(\.source), observed: patches.map(\.previewCalibrated), declaration: sm) {
+                out.append(distributionCheck("\(prefix).C5.previewFollowsDeclaration", Distribution(m.des), mean: T.sourceInterpretationMeanDE, p95: T.sourceInterpretationP95DE,
+                                             max: T.sourceInterpretationMaxDE, detail: "\(tag): calibrated preview vs v3 prediction of the declared source \(sm.primaries!)/\(sm.matrix!) (lab.v2; \(managedNote(m)))"))
             } else {
-                out.append(distributionCheck("\(prefix).C5.previewFollowsDeclaration", Distribution(pv), mean: T.sourceInterpretationMeanDE, p95: T.sourceInterpretationP95DE,
-                                             max: T.sourceInterpretationMaxDE, detail: "calibrated preview vs declared source"))
+                out.append(ParityCheck(name: "\(prefix).C5.previewFollowsDeclaration", verdict: .inconclusive, detail: "\(tag): declared source outside parity-color-v3"))
             }
         } else {
             for (name, hyp) in [("601", hypothesis601), ("709", hypothesis709)] {
@@ -360,7 +378,10 @@ enum ParityJudge {
 
     /// Preview last column under two hypotheses (full coverage vs a black 1-px source column) predicted with the frozen model.
     /// If the hypotheses differ by less than 3 × capture noise, the result is NOT VERIFIED.
-    static func previewEdge(preview: PreviewCrop, model: Resampling.Frozen, placed: PlacedSource, level: Double, noise: Double, builtin: Bool, prefix: String) -> ParityCheck {
+    /// `output` (parity-color-v3, task 98): applied once to both hypotheses after the encoded-domain resample so they are in the
+    /// calibrated capture's representation. The verdict stays an edge-geometry decision (which hypothesis is closer).
+    static func previewEdge(preview: PreviewCrop, model: Resampling.Frozen, placed: PlacedSource, level: Double, noise: Double, builtin: Bool, prefix: String,
+                            output: Resampling.Output? = nil) -> ParityCheck {
         guard model.established, let c = model.candidate, let px = model.phaseX else {
             return ParityCheck(name: "\(prefix).previewEdge", verdict: .notVerified, detail: "resampling model not established")
         }
@@ -373,8 +394,9 @@ enum ParityJudge {
         defect[Int(placed.w.rounded()) - 1] = 0
         let count = lastX + 2
         let phase = map.originX + placed.x * map.scaleX + px
-        let a = Resampling.resample1D(full, count: count, scale: map.scaleX, phase: phase, c)
-        let b = Resampling.resample1D(defect, count: count, scale: map.scaleX, phase: phase, c)
+        let a0 = Resampling.resample1D(full, count: count, scale: map.scaleX, phase: phase, c)
+        let b0 = Resampling.resample1D(defect, count: count, scale: map.scaleX, phase: phase, c)
+        let a = output.map { f in a0.map(f) } ?? a0, b = output.map { f in b0.map(f) } ?? b0
         let separation = abs(a[lastX] - b[lastX]), floorNoise = max(1, noise)
         guard separation >= T.previewEdgeNoiseFactor * floorNoise else {
             return ParityCheck(name: "\(prefix).previewEdge", verdict: .notVerified,
@@ -435,12 +457,17 @@ struct ScenarioSummary: Codable, Sendable {
     let outputTrackDeclaration: ColorDeclaration?     // the export track's own declaration, range only if explicit (C7)
     let anchorMean: [Double]?             // plate-red segment mean Y'CbCr (scenario G only)
     let c5Verdicts: [String: ParityVerdict]
+    /// parity-color-v3 (task 98): contract and frozen CAL-B fingerprint the scenario's calibrated Preview was produced with.
+    var colorContract: ColorContractIdentity? = nil
+    var calibrationParameters: String? = nil
 }
 
 enum Conformance {
     typealias T = ParityThresholdsV1
 
-    static func roiInvariance(_ name: String, a: ROIPixels, b: ROIPixels, patchesA: [[Double]], patchesB: [[Double]], output: ColorDeclaration?) -> [ParityCheck] {
+    /// `previewIncomparable` (task 98): reason the two calibrated Preview ROIs are not comparable under parity-color-v3 (nil = comparable).
+    static func roiInvariance(_ name: String, a: ROIPixels, b: ROIPixels, patchesA: [[Double]], patchesB: [[Double]], output: ColorDeclaration?,
+                              previewIncomparable: String? = nil) -> [ParityCheck] {
         var out: [ParityCheck] = []
         if a.width == b.width, a.height == b.height, a.exportYCbCr.count == b.exportYCbCr.count, !a.exportYCbCr.isEmpty {
             var within = 0
@@ -455,13 +482,15 @@ enum Conformance {
         } else {
             out.append(ParityCheck(name: "\(name).exportPixels", verdict: .inconclusive, detail: "ROI sizes differ or empty"))
         }
-        if let pa = a.previewRGB, let pb = b.previewRGB, pa.count == pb.count, !pa.isEmpty {
+        if let why = previewIncomparable {
+            out.append(ParityCheck(name: "\(name).previewPixels", verdict: .inconclusive, detail: why))
+        } else if let pa = a.previewRGB, let pb = b.previewRGB, pa.count == pb.count, !pa.isEmpty {
             let n = pa.count / 3
             var within = 0
             for i in 0..<n where (0..<3).allSatisfy({ abs(Int(pa[$0 * n + i]) - Int(pb[$0 * n + i])) <= T.laneInvarianceChannel }) { within += 1 }
             let f = Double(within) / Double(n)
             out.append(ParityCheck(name: "\(name).previewPixels", verdict: f >= T.laneInvarianceFraction ? .pass : .fail,
-                                   detail: String(format: "calibrated preview ROI pixels within ±%d: %.5f", T.laneInvarianceChannel, f), values: ["fraction": f]))
+                                   detail: String(format: "%@: calibrated preview ROI pixels within ±%d: %.5f", ParityG5V3.tag, T.laneInvarianceChannel, f), values: ["fraction": f]))
         } else {
             out.append(ParityCheck(name: "\(name).previewPixels", verdict: .inconclusive, detail: "calibrated preview ROI unavailable or sizes differ"))
         }
@@ -494,7 +523,8 @@ enum Conformance {
                 guard let ra = roi(a.scenario, a.compositor, k), let rb = roi(b.scenario, b.compositor, k) else {
                     checks.append(ParityCheck(name: "\(label).frame\(k)", verdict: .inconclusive, detail: "ROI pixels missing")); continue
                 }
-                checks += roiInvariance("\(label).frame\(k)", a: ra, b: rb, patchesA: a.exportPatches[k] ?? [], patchesB: b.exportPatches[k] ?? [], output: a.outputDeclaration)
+                checks += roiInvariance("\(label).frame\(k)", a: ra, b: rb, patchesA: a.exportPatches[k] ?? [], patchesB: b.exportPatches[k] ?? [], output: a.outputDeclaration,
+                                        previewIncomparable: ParityG5V3.previewComparability(a, b))
             }
             if checks.isEmpty { checks.append(ParityCheck(name: label, verdict: .inconclusive, detail: "no common frames")) }
             return checks
@@ -534,9 +564,8 @@ enum Conformance {
         var c5: [ParityCheck] = []
         for sc in ["M2", "M3"] {
             guard let r = find(sc, "corrected") else { c5.append(ParityCheck(name: "C5.\(sc)", verdict: .notRun, detail: "record missing")); continue }
-            let vs = r.c5Verdicts.values
-            let v: ParityVerdict = vs.isEmpty ? .inconclusive : (vs.contains(.fail) ? .fail : (vs.allSatisfy { $0 == .pass } ? .pass : .inconclusive))
-            c5.append(ParityCheck(name: "C5.\(sc)", verdict: v, detail: "explicit declaration followed by export and preview (\(r.c5Verdicts.count) frame judgments)"))
+            let v = ParityG5V3.c5ScenarioVerdict(r.c5Verdicts)
+            c5.append(ParityCheck(name: "C5.\(sc)", verdict: v.verdict, detail: "explicit declaration followed by export and preview (\(r.c5Verdicts.count) frame judgments): \(v.detail)"))
         }
         out += c5; out.append(roll("C5.declaredInterpretation", c5, detail: "M2 (BT.601) and M3 (BT.709): complete declared interpretation"))
         out.append(ParityCheck(name: "C6.untaggedHypotheses", verdict: .recorded, detail: "BT.601 / BT.709 hypotheses recorded per untagged scenario; no correct-colour claim"))
