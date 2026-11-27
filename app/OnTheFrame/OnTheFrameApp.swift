@@ -395,6 +395,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await FullPreviewParitySelfTest.run(folder: folder, args: args) }
             return
         }
+        if let i = args.firstIndex(of: "-OTFPreviewL1"), i + 1 < args.count, let folder = urls.first(where: { $0.hasDirectoryPath }) {   // SP-EXPORT-E4D-SEMANTIC-ORACLE-113: L1 Preview 항목 영상 출력 대 Export(Debug 전용, 명시적 인수로만)
+            Task { await PreviewOutputParityL1.run(folder: folder, args: args) }
+            return
+        }
         if let i = args.firstIndex(of: "-OTFCompositorPilot"), i + 1 < args.count, let folder = urls.first(where: { $0.hasDirectoryPath }) {   // SP-EXPORT-E4D-INTEGRATION-PILOT-45: 실험 합성기 통합 시범(Debug 전용, 명시적 인수로만)
             Task { await CompositorPilotSelfTest.run(folder: folder, mode: args[i + 1]) }
             return
