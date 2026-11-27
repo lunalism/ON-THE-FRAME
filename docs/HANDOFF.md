@@ -1,5 +1,33 @@
 # 인계 요약 — ON THE FRAME
 
+## 2026-11-27 현행 인계 · SP-EXPORT-E4D-DISPLAY-INDEPENDENCE-107 (문서 전용) / 103–106 기록
+
+아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 상태를 다시 조회한다.
+
+| 대상 | 확인한 상태 |
+| --- | --- |
+| 기준 | `feature/spectrum-effects` @ `d15bdf4`(원격 추적과 같음). 이번 작업은 문서만 바꿨고 커밋하지 않았다. 소스 91개 해시, G3-06 앱(`10ab8a22…`/`1b297e96…`, 서명 OK), G4-04 동결 모델 2개, runner v4 22/22, G5 fixture 팩 12/12, G5-01 증거 38/38, 106 증거 10/10을 다시 확인했고 모두 일치했다. |
+| 103·104(외부 기록) | gray.mov 정본은 C1 `7cfa7790…`(세 후보는 한 fixture의 다른 세대). G5 fixture 팩은 `Results/SpExportE4d-G5FixturePack-20261126-01/`(12개, 읽기 전용 clone). |
+| **105 G5-01** | **INCOMPLETE(1/22).** `C builtin`에서 gate가 "frozen CAL-B environment … differs"로 STOP했다(runner exit 5). 측정값은 backing scale 1, videoRect [237, 52, 960, 540]이고, G4-04 모델은 scale 2, [780, 104, 960, 540]이다. 앱이 모델을 스스로 거부해 보정 의존 판정 12개가 INCONCLUSIVE였다(거짓 PASS 없음). raw 관찰은 38 PASS, geometry NOT VERIFIED 6. 재시도와 aggregate는 하지 않았다. parity FAIL도 PASS도 아니다. |
+| **106 scale 1 사전 점검** | **STOP BEFORE APP LAUNCH.** 내장 화면 하나, backingScaleFactor **1**, 2048×1330 pt @120 Hz(비 HiDPI). G5-01 사전 점검이 놓친 이유: system_profiler의 "3024 x 1964 Retina"는 현재 모드가 아니라 패널 원래 해상도였다. 외부 guard 합성 시험 14/14. 화면 설정은 바꾸지 않았다. |
+| **G4-04** | scale 2 PASS는 **그 환경(내장 XDR, scale 2)에 한해 계속 유효하다.** 모델과 증거는 바꾸지 않았다. scale 1에서는 유효하지 않다. |
+| **제품 요구사항(소유자 승인)** | [R-50 화면 독립성](PRODUCT.md#51-소유자-승인-추가-요구사항)과 [D-043](DECISIONS.md#2026-11-27-화면-독립성-제품-요구사항소유자-승인-sp-export-e4d-display-independence-107). 특정 모니터·해상도·HiDPI·scale·ICC 선택을 요구하지 않는다. 세부 A–I는 [DISPLAY-INDEPENDENCE.md](DISPLAY-INDEPENDENCE.md)에 있다. |
+| **제품 대 진단** | 제품은 화면과 무관한 편집 의미와 내보내기다. 진단은 환경별 동결 CAL-B·RES-B다. 환경 불일치는 진단 전제 조건 실패이며 제품 비호환의 증거가 아니다. 출처·지문·G0 임계값·D-042 순서·첫 이상 정지는 그대로다. |
+| 코드 감사(소스 읽기, 런타임 아님) | 제품 경로에서 scale 2 가정, 고정 해상도, 고정 Preview 크기, 화면 화소를 쓰는 내보내기, 모니터에 묶인 프로젝트 좌표를 **찾지 못했다**. 내보내기 입력은 스냅샷과 고정 `RenderSettings.m1`이다. 잠재 위험: 화면·배율 변경 처리 없음, 최소 창 크기를 한 번만 정함, 디스플레이 링크 빈도(60/120 Hz), 색 관리를 시스템에 맡김, scale 1의 0.5 pt 선. [§3](DISPLAY-INDEPENDENCE.md#3-제품-코드-감사-2026-11-27-소스-읽기) |
+| scale 1 G4 준비(제안) | 소스·runner v4·gate·fixture에 막는 요인이 없다. 빌드도 필요 없다. 절차 공백은 새 G4용 실행 전 관찰이다(106 guard는 동결 모델이 있어야 동작하는 G5 전용). 순서: 환경 확인 → CAL-B → CAL-V → RES-B → RES-C(새 폴더, G4-04 보존) → PASS일 때만 그 모델로 G5. [§4](DISPLAY-INDEPENDENCE.md#4-진단-보정의-한계와-scale-1-g4-전략) |
+| 다중 화면 행렬(제안) | A 내장 scale 1, B 내장 scale 2, C 외장 scale 1, D 외장 HiDPI, E 화면 사이 창 이동, F 편집 중 연결·분리, G 세션 사이 모드 변경. 첫 버전 필수: A·B·G, 그리고 소유자가 가진 외장 화면으로 C·E·F. 시험하지 않은 구성은 미검증. [§6](DISPLAY-INDEPENDENCE.md#6-다중-화면-검증-행렬-제안) |
+| 열린 위험 | 화면 간 내보내기 동등성 런타임 증거 없음. 진단 지문은 프로필 이름만 비교함(ICC 바이트 아님). scale 1에서 videoRect가 실행 사이에 재현되는지 미검증. RES-B가 scale 1에서 INCONCLUSIVE일 가능성. 104의 G5 위험(previewEdge 허용 목록 등). |
+| 자원 | 관리 저장공간 **18.36 GiB**(README 범위 재측정, 조기 중지 19.25), 보관본 19.26 GiB(따로 셈), 여유 692.63 GiB. |
+| 판단 | G4: scale 2 PASS 유효, scale 1 미실행. G5: INCOMPLETE. E4-d **NO-GO**, 공개 Spectrum Export 차단. |
+
+**다음 승인(각각 별도).**
+- 새 G4용 실행 전 관찰 방식
+- scale 1 G4-05 감독 실행
+- 그 뒤 G5(scale 1 모델)
+- 행렬 A 소유자 수동 점검
+- 내보내기 비교기
+- 외장 화면 진단
+
 ## 2026-11-26 현행 인계 · SP-EXPORT-E4D-RUNNER-V4-99 / G3-COLOR-V3-BUILD-100 / G4-COLOR-V3-RUNTIME-101
 
 아래는 이 문서를 작성한 시점의 기록이다. 다음 작업에서는 [Git 사전 확인](AGENT-WORKFLOW.md#git-사전-확인)으로 실제 상태를 다시 조회한다.

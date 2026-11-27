@@ -128,6 +128,14 @@ v1.0에서 저장된 양수 Softness는 보이지 않게 보존되며, 이후 So
 | R-41 | 프로젝트를 저장하고 다시 열 수 있다. 파일 포맷은 D-023(`.ontheframe` JSON, Q-06 해결). | Project save/reopen |
 | R-42 | 원본 미디어가 누락되면 재연결(relink)할 수 있다. | source-media relinking |
 
+### 5.1 소유자 승인 추가 요구사항
+
+원 brief 뒤에 소유자가 명시적으로 승인한 요구사항이다. 원 brief에 있던 것으로 소급하지 않는다.
+
+| ID | 요구사항 | 근거 |
+| --- | --- | --- |
+| R-50 | **화면 독립성(필수).** 지원하는 macOS 화면 환경(내장·외장, HiDPI·비 HiDPI, backing scale 1·2)에서 올바르게 동작하며, 사용자에게 특정 모니터·해상도·HiDPI 모드·backing scale·ICC 프로필을 고르게 하지 않는다. 편집 의미, Preview 기하(논리 좌표·물리 화소), 창 이동·화면 연결/분리 시 상태와 데이터 보존, 화면과 무관한 내보내기, 색 관리되는 Preview를 포함한다. 화면마다 같은 물리 휘도나 raw 화면 RGB를 요구하지 않는다. 내보내기 일관성은 파일 해시가 아니라 내용·시각·기하·색 메타데이터·허용 오차로 판단한다. 세부 항목 A–I와 검증 계획은 [DISPLAY-INDEPENDENCE.md](DISPLAY-INDEPENDENCE.md) | 소유자 승인 2026-11-27(SP-EXPORT-E4D-DISPLAY-INDEPENDENCE-107), [D-043](DECISIONS.md#2026-11-27-화면-독립성-제품-요구사항소유자-승인-sp-export-e4d-display-independence-107). 구현·검증 상태는 미검증(코드 감사만) |
+
 ## 6. 파생 요구사항 (소유자 미승인)
 
 명시 요구사항을 충족하려면 필요하다고 Claude Code가 판단한 항목이다. **소유자가 별도로 승인한 요구사항이 아니다.** 검토 후 채택·수정·삭제할 수 있다.
